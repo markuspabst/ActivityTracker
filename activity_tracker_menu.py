@@ -91,6 +91,9 @@ class AppConfig(BaseModel):
         le=168 * 3600  # At most 168 hours/week (full week)
     )
     data_dir: Optional[str] = None
+    # None = follow the system locale (auto-detect); otherwise a locale code
+    # like "en" / "de" matching a file in locales/.
+    locale: Optional[str] = None
 
 
 def ensure_dir(path):
@@ -821,6 +824,32 @@ def find_dashboard_script():
 
 
 # ------------------------------------------------------------
+# Locale display names
+# ------------------------------------------------------------
+
+# Fallback names for locale codes; the native macOS API is preferred when
+# available so new locale files get a sensible autonym for free.
+_LOCALE_FALLBACK_NAMES = {
+    "en": "English",
+    "de": "Deutsch",
+}
+
+
+def locale_display_name(code):
+    """Human-readable, self-localized name for a locale code (e.g. 'Deutsch')."""
+    try:
+        from Foundation import NSLocale, NSLocaleIdentifier
+        loc = NSLocale.alloc().initWithLocaleIdentifier_(code)
+        name = loc.displayNameForKey_value_(NSLocaleIdentifier, code)
+        if name:
+            return name[:1].upper() + name[1:]
+    except Exception:
+        pass
+
+    return _LOCALE_FALLBACK_NAMES.get(code, code.upper())
+
+
+# ------------------------------------------------------------
 # Menubar App
 # ------------------------------------------------------------
 
@@ -876,15 +905,19 @@ class ActivityTrackerApp(rumps.App):
         # Settings menu
         self.settings_menu = rumps.MenuItem(i18n.t("SETTINGS"))
 
-        self.settings_menu.add(
-            rumps.MenuItem(i18n.t("SELECT_DATA_FOLDER"), callback=self.select_data_folder)
+        self.select_data_folder_item = rumps.MenuItem(
+            i18n.t("SELECT_DATA_FOLDER"), callback=self.select_data_folder
         )
-        self.settings_menu.add(
-            rumps.MenuItem(i18n.t("OPEN_DATA_FOLDER"), callback=self.open_data_folder)
+        self.open_data_folder_item = rumps.MenuItem(
+            i18n.t("OPEN_DATA_FOLDER"), callback=self.open_data_folder
         )
-        self.settings_menu.add(
-            rumps.MenuItem(i18n.t("RESET_DATA_FOLDER"), callback=self.reset_data_folder)
+        self.reset_data_folder_item = rumps.MenuItem(
+            i18n.t("RESET_DATA_FOLDER"), callback=self.reset_data_folder
         )
+
+        self.settings_menu.add(self.select_data_folder_item)
+        self.settings_menu.add(self.open_data_folder_item)
+        self.settings_menu.add(self.reset_data_folder_item)
 
         self.settings_menu.add(None)
 
@@ -923,6 +956,14 @@ class ActivityTrackerApp(rumps.App):
         self.weekly_target_menu.add(self.weekly_slider)
 
         self.settings_menu.add(self.weekly_target_menu)
+
+        self.settings_menu.add(None)
+
+        # Language
+        self.language_menu = rumps.MenuItem(i18n.t("LANGUAGE"))
+        self.language_items = {}
+        self.build_language_menu()
+        self.settings_menu.add(self.language_menu)
 
         self.settings_menu.add(None)
 
@@ -1261,6 +1302,90 @@ class ActivityTrackerApp(rumps.App):
     def update_version_ui(self):
         self.version_item.title = i18n.t("VERSION", value=get_bundle_version())
         self.build_date_item.title = i18n.t("BUILD", value=get_bundle_build_date())
+
+    # --------------------------------------------------------
+    # Language
+    # --------------------------------------------------------
+
+    def build_language_menu(self):
+        """Populate the Language submenu: System Default + one item per locale."""
+        self.language_items = {}
+
+        # "System Default" clears the override and follows the OS locale.
+        system_item = rumps.MenuItem(
+            i18n.t("LANGUAGE_SYSTEM_DEFAULT"),
+            callback=self.make_language_callback(None)
+        )
+        self.language_items[None] = system_item
+        self.language_menu.add(system_item)
+        self.language_menu.add(None)
+
+        for code in sorted(i18n.available_locales()):
+            item = rumps.MenuItem(
+                locale_display_name(code),
+                callback=self.make_language_callback(code)
+            )
+            self.language_items[code] = item
+            self.language_menu.add(item)
+
+        self.update_language_menu()
+
+    def make_language_callback(self, code):
+        def callback(_):
+            self.set_language(code)
+        return callback
+
+    def update_language_menu(self):
+        """Check the currently active locale (or System Default if unset)."""
+        active = get_config_value("locale")
+        for code, item in self.language_items.items():
+            item.state = 1 if code == active else 0
+
+    def set_language(self, code):
+        set_config_value("locale", code)
+        i18n.set_locale(code)
+        self.relabel_menus()
+        self.update_language_menu()
+
+        rumps.notification(
+            "ActivityTracker",
+            i18n.t("NOTIFICATION_LANGUAGE_CHANGED"),
+            locale_display_name(code) if code else i18n.t("LANGUAGE_SYSTEM_DEFAULT")
+        )
+
+    def relabel_menus(self):
+        """Re-apply all static (non-tick) menu titles after a language change.
+
+        The dynamic metric rows are refreshed by update(); this covers the
+        labels that are otherwise only set once in __init__.
+        """
+        self.settings_menu.title = i18n.t("SETTINGS")
+        self.select_data_folder_item.title = i18n.t("SELECT_DATA_FOLDER")
+        self.open_data_folder_item.title = i18n.t("OPEN_DATA_FOLDER")
+        self.reset_data_folder_item.title = i18n.t("RESET_DATA_FOLDER")
+
+        self.target_menu.title = i18n.t("DAILY_TARGET")
+        self.target_slider.title = i18n.t("SET_DAILY_TARGET_SLIDER")
+        self.weekly_target_menu.title = i18n.t("WEEKLY_TARGET")
+        self.weekly_slider.title = i18n.t("SET_WEEKLY_TARGET_SLIDER")
+
+        self.language_menu.title = i18n.t("LANGUAGE")
+        self.language_items[None].title = i18n.t("LANGUAGE_SYSTEM_DEFAULT")
+
+        self.open_autostart_file_item.title = i18n.t("OPEN_AUTOSTART_FILE")
+        self.menu_dashboard.title = i18n.t("ENTERPRISE_DASHBOARD")
+        self.force_save_item.title = i18n.t("FORCE_SAVE")
+        self.quit_item.title = i18n.t("QUIT")
+
+        # Items whose titles embed live state: refresh via their own updaters.
+        self.update_autostart_ui()
+        self.update_version_ui()
+        self.update_target_menu()
+        self.update_weekly_target_menu()
+
+        # Refresh the dynamic metric rows immediately so the whole menu is
+        # consistent without waiting for the next timer tick.
+        self.update(None)
 
     # --------------------------------------------------------
     # Dashboard

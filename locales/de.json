@@ -54,5 +54,8 @@
   "AUTOSTART_LAUNCHAGENT_REMOVED": "LaunchAgent entfernt",
   "AUTOSTART_LAUNCHAGENT_INSTALLED": "LaunchAgent installiert",
   "FORCE_SAVE": "Speichern erzwingen",
-  "QUIT": "Beenden"
+  "QUIT": "Beenden",
+  "LANGUAGE": "Sprache",
+  "LANGUAGE_SYSTEM_DEFAULT": "Systemstandard",
+  "NOTIFICATION_LANGUAGE_CHANGED": "Sprache geändert"
 }
