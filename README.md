@@ -17,10 +17,11 @@ to a CSV you own. It is designed for:
 - persistent daily logging (CSV is the source of truth)
 - crash-safe recovery from an unclean shutdown (JSON state file)
 - configurable daily and weekly targets
+- configurable idle threshold
 - configurable storage location
 - autostart on login (macOS LaunchAgent)
 - an HTML productivity dashboard
-- English and German localization (auto-detected from the system locale)
+- English and German localization (selectable in-app or auto-detected)
 
 ---
 
@@ -29,9 +30,9 @@ to a CSV you own. It is designed for:
 | Component | Responsibility | Where |
 |-----------|----------------|-------|
 | Menu UI | Displays metrics, targets, and settings | `activity_tracker_menu.py` (`ActivityTrackerApp`) |
-| Idle detection | Reads macOS `HIDIdleTime` via `ioreg` | `get_idle_time()` |
+| Idle detection | Native Quartz idle API (falls back to `ioreg`) | `get_idle_time()` |
 | Runtime engine | Computes active/idle/total session metrics every 5 s | `calculate_current_session()`, `update()` |
-| CSV storage | Long-term daily persistence (pandas read/write) | `read_csv_data()` / `write_csv_data()` |
+| CSV storage | Long-term daily persistence (stdlib `csv`) | `read_csv_data()` / `write_csv_data()` |
 | State file | Crash-safe recovery of unsaved time | `read_state()` / `recover_previous_session_if_needed()` |
 | Config | User preferences, validated with pydantic | `AppConfig`, `load_config()` / `save_config()` |
 | LaunchAgent | Autostart via `launchctl` | `install_autostart()` / `uninstall_autostart()` |
@@ -42,11 +43,11 @@ to a CSV you own. It is designed for:
 
 | Constant | Value | Meaning |
 |----------|-------|---------|
-| `IDLE_THRESHOLD` | 300 s | Considered idle after 5 minutes of no input |
 | `UPDATE_INTERVAL` | 5 s | UI + state refresh interval |
 | `WRITE_INTERVAL` | 3600 s | CSV auto-save interval (also saved on quit / force-save / folder change) |
-| `DEFAULT_TARGET_SECONDS` | 8 h | Default daily target |
-| `DEFAULT_WEEKLY_TARGET_SECONDS` | 40 h | Default weekly target |
+| `DEFAULT_TARGET_SECONDS` | 8 h | Default daily target (user-configurable) |
+| `DEFAULT_WEEKLY_TARGET_SECONDS` | 40 h | Default weekly target (user-configurable) |
+| `DEFAULT_IDLE_THRESHOLD` | 300 s | Default idle threshold — idle after 5 min of no input (user-configurable) |
 
 ---
 
@@ -55,7 +56,7 @@ to a CSV you own. It is designed for:
 ### 3.1 Tracking
 - Active, idle, and total time for the current day
 - Live menu bar title with a status icon (🟢 target met · 🟡 below target · 🔴 idle)
-- Daily and weekly overtime/undertime vs. target
+- Daily and weekly overtime (or time remaining) vs. target
 
 ### 3.2 Persistence
 - **CSV** — source of truth, one row per day (`activity_tracker_log.csv`)
@@ -76,9 +77,13 @@ On launch, if the previous session ended uncleanly (state marked `dirty`), the a
 - **Data folder** — select / open / reset to default
 - **Daily target** — 6 h / 8 h / 10 h presets or a custom slider (4–12 h)
 - **Weekly target** — 30 h / 40 h / 50 h presets or a custom slider (20–60 h)
+- **Idle threshold** — 2 / 5 / 10 / 15 min presets or a custom slider (1–30 min)
+- **Language** — System Default plus one entry per available locale; applied live
 - **Autostart** — enable/disable login autostart; open the LaunchAgent file
 - **Version / build date**
 - **Force save** and **Quit**
+
+All of these persist to the config file and take effect immediately (no restart).
 
 ### 3.5 Dashboard
 The *Enterprise Dashboard* menu item generates an HTML report
@@ -90,7 +95,7 @@ data every 10 seconds.
 
 ## 4. Requirements
 
-- **macOS** (uses `rumps`, AppKit, `ioreg`, and `launchctl`)
+- **macOS** (uses `rumps`, AppKit, Quartz, and `launchctl`)
 - **Python 3.14**
 
 Install dependencies:
@@ -101,9 +106,10 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Key libraries: `rumps` + `pyobjc` (menu bar / native dialogs), `platformdirs`
-(storage paths), `pandas` (CSV handling), `pydantic` (config validation),
-`tenacity` (launchctl retry), `typer` (dashboard CLI), `py2app` (packaging).
+Key libraries: `rumps` + `pyobjc` (menu bar, native dialogs, Quartz idle API),
+`platformdirs` (storage paths), `pydantic` (config validation), `tenacity`
+(launchctl retry), `py2app` (packaging). CSV handling and the dashboard CLI use
+only the Python standard library.
 
 ---
 
@@ -150,8 +156,11 @@ executable), so build and run the `.app` before enabling it.
 ## 7. Localization
 
 UI strings live in `locales/*.json` (`en`, `de`). The active locale is taken from
-`config.locale` if set, otherwise auto-detected from the system locale. To add a
-language, copy `locales/en.json` to `locales/<lang>.json` and translate the values.
+`config.locale` if set (chosen via **Settings → Language**), otherwise
+auto-detected from the system locale. Selecting a language re-labels the menu
+live. To add a language, copy `locales/en.json` to `locales/<lang>.json` and
+translate the values — it appears in the Language menu automatically with a
+localized name, no code change needed.
 
 ---
 

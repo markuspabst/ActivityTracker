@@ -10,8 +10,5 @@ platformdirs>=4.0.0
 # Configuration Validation
 pydantic>=2.0.0
 
-# CLI Improvements
-typer[all]>=0.9.0
-
 # Retry Logic & Resilience
 tenacity>=8.2.0
