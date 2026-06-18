@@ -3,6 +3,7 @@ import subprocess
 import time
 from datetime import datetime, timedelta
 import os
+import csv
 import json
 import sys
 import plistlib
@@ -446,7 +447,16 @@ def ask_target_with_slider(current_hours, title="Set Target", min_hours=4.0, max
 # macOS Idle Time
 # ------------------------------------------------------------
 
-def get_idle_time():
+try:
+    import Quartz
+    _CG_STATE = Quartz.kCGEventSourceStateHIDSystemState
+    _CG_ANY_EVENT = Quartz.kCGAnyInputEventType
+except Exception:
+    Quartz = None
+
+
+def _get_idle_time_ioreg():
+    """Fallback: parse HIDIdleTime from ioreg (spawns a subprocess)."""
     try:
         output = subprocess.check_output(
             ["ioreg", "-c", "IOHIDSystem"],
@@ -462,6 +472,24 @@ def get_idle_time():
         return 0
 
     return 0
+
+
+def get_idle_time():
+    """Seconds since the last HID input event.
+
+    Uses the native Quartz API (CGEventSourceSecondsSinceLastEventType), which
+    is ~5 orders of magnitude cheaper than spawning ioreg and runs every tick.
+    Falls back to ioreg if Quartz is unavailable.
+    """
+    if Quartz is not None:
+        try:
+            return Quartz.CGEventSourceSecondsSinceLastEventType(
+                _CG_STATE, _CG_ANY_EVENT
+            )
+        except Exception:
+            pass
+
+    return _get_idle_time_ioreg()
 
 
 # ------------------------------------------------------------
@@ -536,66 +564,28 @@ CSV_FIELDS = [
     "last_updated"
 ]
 
-CSV_STR_FIELDS = ["date", "start_time", "end_time", "last_updated"]
-CSV_NUM_FIELDS = [
-    "total_seconds",
-    "active_seconds",
-    "idle_seconds",
-    "total_hours",
-    "active_hours",
-    "idle_hours"
-]
-
-
-def _pd():
-    """Lazy-import pandas to keep it off the latency-sensitive module-load path."""
-    import pandas as pd
-    return pd
-
-
 def read_csv_data():
-    """Read the daily CSV into a ``dict[date_str -> row_dict]`` via pandas."""
-    if not os.path.isfile(CSV_FILE):
-        return {}
+    """Read the daily CSV into a ``dict[date_str -> row_dict]`` via stdlib csv.
 
-    pd = _pd()
+    Returns raw string values (callers like get_day_from_csv coerce to float);
+    this keeps the layer cheap and dependency-free.
+    """
+    data = {}
+
+    if not os.path.isfile(CSV_FILE):
+        return data
 
     try:
-        df = pd.read_csv(
-            CSV_FILE,
-            dtype={col: "string" for col in CSV_STR_FIELDS}
-        )
-    except Exception as e:
+        with open(CSV_FILE, "r", newline="") as f:
+            reader = csv.DictReader(f)
+
+            for row in reader:
+                date = row.get("date")
+                if date:
+                    data[date] = row
+    except (csv.Error, UnicodeDecodeError, IOError) as e:
         print(f"Warning: CSV reading error: {e}. Using empty data.")
         return {}
-
-    # Empty strings, not NaN: a NaN start_time reads back truthy and would
-    # corrupt add_delta_to_csv's "preserve existing start_time" check.
-    for col in CSV_STR_FIELDS:
-        if col in df.columns:
-            df[col] = df[col].fillna("")
-
-    # Mirror the old float(x or 0) coercion for numeric columns.
-    for col in CSV_NUM_FIELDS:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
-
-    if "date" in df.columns:
-        df = df[df["date"] != ""]
-
-    data = {}
-    for record in df.to_dict("records"):
-        # Coerce to native float/str so numpy scalar types never leak into
-        # downstream round()/strftime()/JSON state.
-        row = {}
-        for field in CSV_FIELDS:
-            if field not in record:
-                continue
-            if field in CSV_NUM_FIELDS:
-                row[field] = float(record[field])
-            else:
-                row[field] = str(record[field])
-        data[row["date"]] = row
 
     return data
 
@@ -604,24 +594,17 @@ def write_csv_data(data):
     """Write the ``dict[date_str -> row_dict]`` back to CSV, sorted by date."""
     ensure_dir(DATA_DIR)
 
-    pd = _pd()
+    with open(CSV_FILE, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
+        writer.writeheader()
 
-    df = pd.DataFrame(list(data.values()))
-    # Guarantee the exact 10 columns in order even when data is empty.
-    df = df.reindex(columns=CSV_FIELDS)
-
-    for col in CSV_STR_FIELDS:
-        df[col] = df[col].fillna("")
-
-    if not df.empty:
-        # ISO date strings sort chronologically; stable to match sorted(keys).
-        df = df.sort_values("date", kind="stable").reset_index(drop=True)
-
-    df.to_csv(CSV_FILE, index=False)
+        for date_key in sorted(data.keys()):
+            writer.writerow(data[date_key])
 
 
-def get_day_from_csv(date_str):
-    data = read_csv_data()
+def get_day_from_csv(date_str, data=None):
+    if data is None:
+        data = read_csv_data()
 
     if date_str not in data:
         return {
@@ -658,7 +641,7 @@ def add_delta_to_csv(date_str, start_time, end_time, delta_total, delta_active, 
         return
 
     data = read_csv_data()
-    existing = get_day_from_csv(date_str)
+    existing = get_day_from_csv(date_str, data)
 
     existing_total = existing["total_seconds"]
     existing_active = existing["active_seconds"]
@@ -699,8 +682,9 @@ def get_current_week_dates():
     ]
 
 
-def get_weekly_seconds_from_csv():
-    data = read_csv_data()
+def get_weekly_seconds_from_csv(data=None):
+    if data is None:
+        data = read_csv_data()
     total = 0.0
 
     for day in get_current_week_dates():
@@ -1037,10 +1021,11 @@ class ActivityTrackerApp(rumps.App):
         now,
         total_session,
         active_session,
-        idle_session
+        idle_session,
+        data=None
     ):
         date_str = now.date().isoformat()
-        csv_day = get_day_from_csv(date_str)
+        csv_day = get_day_from_csv(date_str, data)
 
         delta_total, delta_active, delta_idle = self.calculate_unsaved_delta(
             total_session,
@@ -1318,11 +1303,16 @@ class ActivityTrackerApp(rumps.App):
 
         self.save_state(dirty=True)
 
+        # Read the CSV once and share it across today's report and the weekly
+        # total (previously two separate reads per 5s tick).
+        csv_data = read_csv_data()
+
         report = self.get_today_report_from_csv_plus_current_delta(
             now,
             total_session,
             active_session,
-            idle_session
+            idle_session,
+            data=csv_data
         )
 
         active_today = report["active_seconds"]
@@ -1331,7 +1321,7 @@ class ActivityTrackerApp(rumps.App):
 
         daily_overtime = active_today - TARGET_WORK_SECONDS
 
-        weekly_from_csv = get_weekly_seconds_from_csv()
+        weekly_from_csv = get_weekly_seconds_from_csv(data=csv_data)
         _, delta_active, _ = self.calculate_unsaved_delta(
             total_session,
             active_session,

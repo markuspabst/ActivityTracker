@@ -7,9 +7,6 @@ setuptools
 # Path & Platform Support
 platformdirs>=4.0.0
 
-# CSV & Data Handling
-pandas>=2.2.0
-
 # Configuration Validation
 pydantic>=2.0.0
 

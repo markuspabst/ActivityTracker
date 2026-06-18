@@ -1,3 +1,4 @@
+import csv
 import json
 import os
 import subprocess
@@ -6,7 +7,6 @@ import webbrowser
 from datetime import datetime, timedelta
 from pathlib import Path
 import platformdirs
-import pandas as pd
 import typer
 
 app = typer.Typer()
@@ -31,14 +31,14 @@ WEEKLY_TARGET = 40 * 3600
 # ------------------------------------------------------------
 
 def read_data():
-    """Read CSV data using pandas for better performance and error handling."""
+    """Read CSV data into a list of row dicts using stdlib csv."""
     if not CSV_FILE.exists():
         return []
 
     try:
-        df = pd.read_csv(CSV_FILE)
-        return df.to_dict('records')
-    except Exception as e:
+        with open(CSV_FILE, "r", newline="") as f:
+            return list(csv.DictReader(f))
+    except (csv.Error, UnicodeDecodeError, IOError) as e:
         print(f"Warning: Could not read CSV: {e}")
         return []
 

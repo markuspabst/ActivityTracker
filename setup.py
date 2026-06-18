@@ -41,13 +41,13 @@ OPTIONS = {
     "includes": [
         "AppKit",
         "Foundation",
+        "Quartz",
         "objc",
         "i18n",
         "version_generated",
         "platformdirs",
         "pydantic",
-        "tenacity",
-        "pandas"
+        "tenacity"
     ]
 }
 
