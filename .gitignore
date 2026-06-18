@@ -19,13 +19,30 @@ version_generated.py
 
 # macOS
 .DS_Store
+._*
+.AppleDouble
+.LSOverride
+.Spotlight-V100
+.Trashes
 
-# VS Code local settings
+# Editor / IDE
 .vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Runtime data
 activity_tracker_log.csv
 activity_tracker_state.json
+
+# Dashboard output (generated in the user's home dir; ignored if run from repo)
+ActivityTracker_Dashboard.html
+ActivityTracker_Dashboard_Data.js
 
 # Logs
 *.log
