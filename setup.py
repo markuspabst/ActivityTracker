@@ -37,7 +37,10 @@ OPTIONS = {
 
         "LSUIElement": True
     },
-    "packages": ["rumps"],
+    # platformdirs is imported by both the main app and the dashboard
+    # subprocess; bundle it as a whole package so the subprocess can import it
+    # inside the .app (py2app's analysis of the main app alone may prune it).
+    "packages": ["rumps", "platformdirs"],
     "includes": [
         "AppKit",
         "Foundation",

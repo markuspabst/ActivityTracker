@@ -1,3 +1,4 @@
+import argparse
 import csv
 import json
 import os
@@ -7,9 +8,6 @@ import webbrowser
 from datetime import datetime, timedelta
 from pathlib import Path
 import platformdirs
-import typer
-
-app = typer.Typer()
 
 # -------- PATHS --------
 
@@ -225,14 +223,7 @@ setInterval(refresh, 10000);
 # MAIN
 # ------------------------------------------------------------
 
-@app.command()
-def main(
-    data_only: bool = typer.Option(
-        False,
-        "--data-only",
-        help="Generate data only, don't open browser"
-    )
-):
+def main(data_only=False):
     """Generate ActivityTracker dashboard."""
     rows = read_data()
 
@@ -253,4 +244,11 @@ def main(
 
 
 if __name__ == "__main__":
-    app()
+    parser = argparse.ArgumentParser(description="Generate ActivityTracker dashboard.")
+    parser.add_argument(
+        "--data-only",
+        action="store_true",
+        help="Generate data only, don't open browser"
+    )
+    args = parser.parse_args()
+    main(data_only=args.data_only)

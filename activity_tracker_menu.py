@@ -873,6 +873,39 @@ def find_dashboard_script():
     return local_path
 
 
+def dashboard_python_command():
+    """Return (executable, env) for running the dashboard script as a subprocess.
+
+    Inside the packaged .app, sys.executable is the app launcher
+    (Contents/MacOS/ActivityTracker), NOT a Python interpreter — running the
+    dashboard with it would just relaunch the app. py2app ships a usable
+    interpreter as Contents/MacOS/python, but when invoked directly that binary
+    resolves its prefix to the *system* framework Python and cannot see the
+    app's bundled packages (platformdirs, etc.). So we also point PYTHONHOME /
+    PYTHONPATH at the bundle's Resources so those imports resolve.
+
+    In development, sys.executable is the real venv Python with the packages
+    already importable, so it is returned as-is with the inherited environment.
+    """
+    app_path = get_app_bundle_path()
+
+    if app_path:
+        bundled_python = Path(app_path) / "Contents" / "MacOS" / "python"
+        resources = Path(app_path) / "Contents" / "Resources"
+        lib_dir = resources / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}"
+
+        if bundled_python.exists() and lib_dir.exists():
+            env = os.environ.copy()
+            env["PYTHONHOME"] = str(resources)
+            env["PYTHONPATH"] = os.pathsep.join([
+                str(lib_dir),
+                str(lib_dir / "lib-dynload"),
+            ])
+            return str(bundled_python), env
+
+    return sys.executable, None
+
+
 # ------------------------------------------------------------
 # Locale display names
 # ------------------------------------------------------------
@@ -1526,8 +1559,9 @@ class ActivityTrackerApp(rumps.App):
             )
             return
 
-        subprocess.Popen([sys.executable, str(script_path)])
-        
+        python_exe, env = dashboard_python_command()
+        subprocess.Popen([python_exe, str(script_path)], env=env)
+
         if self.dashboard_thread is None or not self.dashboard_thread.is_alive():
             self.dashboard_refresh_event.clear()
             self.dashboard_thread = threading.Thread(
@@ -1538,12 +1572,14 @@ class ActivityTrackerApp(rumps.App):
             self.dashboard_thread.start()
 
     def _dashboard_refresh_loop(self, script_path):
+        python_exe, env = dashboard_python_command()
         while not self.dashboard_refresh_event.is_set():
             time.sleep(10)
             subprocess.run(
-                [sys.executable, str(script_path), "--data-only"],
+                [python_exe, str(script_path), "--data-only"],
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
+                env=env
             )
 
     # --------------------------------------------------------
