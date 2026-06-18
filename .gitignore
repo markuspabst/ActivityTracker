@@ -44,5 +44,8 @@ activity_tracker_state.json
 ActivityTracker_Dashboard.html
 ActivityTracker_Dashboard_Data.js
 
+# Claude Code local settings
+.claude/
+
 # Logs
 *.log
