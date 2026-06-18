@@ -415,90 +415,88 @@ def is_autostart_loaded():
 # Native macOS Dialogs
 # ------------------------------------------------------------
 
-def choose_data_folder():
-    panel = NSOpenPanel.openPanel()
-    panel.setCanChooseFiles_(False)
-    panel.setCanChooseDirectories_(True)
-    panel.setAllowsMultipleSelection_(False)
-    panel.setCanCreateDirectories_(True)
-    panel.setTitle_("Select ActivityTracker Data Folder")
-    panel.setPrompt_("Use Folder")
+    def choose_data_folder(self):
+        panel = NSOpenPanel.openPanel()
+        panel.setCanChooseFiles_(False)
+        panel.setCanChooseDirectories_(True)
+        panel.setAllowsMultipleSelection_(False)
+        panel.setCanCreateDirectories_(True)
+        panel.setTitle_("Select ActivityTracker Data Folder")
+        panel.setPrompt_("Use Folder")
 
-    result = panel.runModal()
+        result = panel.runModal()
 
-    if result == NSModalResponseOK:
-        url = panel.URLs()[0]
-        return url.path()
+        if result == NSModalResponseOK:
+            url = panel.URLs()[0]
+            return url.path()
 
-    return None
+        return None
 
+    def ask_target_with_slider(self, current_hours, title="Set Target", min_hours=4.0, max_hours=12.0):
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_(title)
+        alert.setInformativeText_("Adjust working hours.")
+        alert.addButtonWithTitle_("OK")
+        alert.addButtonWithTitle_("Cancel")
 
-def ask_target_with_slider(current_hours, title="Set Target", min_hours=4.0, max_hours=12.0):
-    alert = NSAlert.alloc().init()
-    alert.setMessageText_(title)
-    alert.setInformativeText_("Adjust working hours.")
-    alert.addButtonWithTitle_("OK")
-    alert.addButtonWithTitle_("Cancel")
+        container = NSView.alloc().initWithFrame_(((0, 0), (280, 70)))
 
-    container = NSView.alloc().initWithFrame_(((0, 0), (280, 70)))
+        slider = NSSlider.alloc().initWithFrame_(((0, 30), (280, 24)))
+        slider.setMinValue_(min_hours)
+        slider.setMaxValue_(max_hours)
+        slider.setFloatValue_(float(current_hours))
 
-    slider = NSSlider.alloc().initWithFrame_(((0, 30), (280, 24)))
-    slider.setMinValue_(min_hours)
-    slider.setMaxValue_(max_hours)
-    slider.setFloatValue_(float(current_hours))
+        label = NSTextField.alloc().initWithFrame_(((0, 0), (280, 24)))
+        label.setBezeled_(False)
+        label.setDrawsBackground_(False)
+        label.setEditable_(False)
+        label.setSelectable_(False)
+        label.setStringValue_(f"{float(current_hours):.2f} hours")
 
-    label = NSTextField.alloc().initWithFrame_(((0, 0), (280, 24)))
-    label.setBezeled_(False)
-    label.setDrawsBackground_(False)
-    label.setEditable_(False)
-    label.setSelectable_(False)
-    label.setStringValue_(f"{float(current_hours):.2f} hours")
+        container.addSubview_(slider)
+        container.addSubview_(label)
 
-    container.addSubview_(slider)
-    container.addSubview_(label)
+        alert.setAccessoryView_(container)
+        response = alert.runModal()
 
-    alert.setAccessoryView_(container)
-    response = alert.runModal()
+        if response == NSAlertFirstButtonReturn:
+            return float(slider.floatValue())
 
-    if response == NSAlertFirstButtonReturn:
-        return float(slider.floatValue())
+        return None
 
-    return None
+    def ask_minutes_with_slider(self, current_minutes, title="Set Value", min_minutes=1, max_minutes=30):
+        """Slider dialog returning a whole number of minutes (or None if cancelled)."""
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_(title)
+        alert.addButtonWithTitle_("OK")
+        alert.addButtonWithTitle_("Cancel")
 
+        container = NSView.alloc().initWithFrame_(((0, 0), (280, 70)))
 
-def ask_minutes_with_slider(current_minutes, title="Set Value", min_minutes=1, max_minutes=30):
-    """Slider dialog returning a whole number of minutes (or None if cancelled)."""
-    alert = NSAlert.alloc().init()
-    alert.setMessageText_(title)
-    alert.addButtonWithTitle_("OK")
-    alert.addButtonWithTitle_("Cancel")
+        slider = NSSlider.alloc().initWithFrame_(((0, 30), (280, 24)))
+        slider.setMinValue_(min_minutes)
+        slider.setMaxValue_(max_minutes)
+        slider.setNumberOfTickMarks_(max_minutes - min_minutes + 1)
+        slider.setAllowsTickMarkValuesOnly_(True)
+        slider.setIntValue_(int(current_minutes))
 
-    container = NSView.alloc().initWithFrame_(((0, 0), (280, 70)))
+        label = NSTextField.alloc().initWithFrame_(((0, 0), (280, 24)))
+        label.setBezeled_(False)
+        label.setDrawsBackground_(False)
+        label.setEditable_(False)
+        label.setSelectable_(False)
+        label.setStringValue_(i18n.t("UNIT_MINUTES", value=int(current_minutes)))
 
-    slider = NSSlider.alloc().initWithFrame_(((0, 30), (280, 24)))
-    slider.setMinValue_(min_minutes)
-    slider.setMaxValue_(max_minutes)
-    slider.setNumberOfTickMarks_(max_minutes - min_minutes + 1)
-    slider.setAllowsTickMarkValuesOnly_(True)
-    slider.setIntValue_(int(current_minutes))
+        container.addSubview_(slider)
+        container.addSubview_(label)
 
-    label = NSTextField.alloc().initWithFrame_(((0, 0), (280, 24)))
-    label.setBezeled_(False)
-    label.setDrawsBackground_(False)
-    label.setEditable_(False)
-    label.setSelectable_(False)
-    label.setStringValue_(i18n.t("UNIT_MINUTES", value=int(current_minutes)))
+        alert.setAccessoryView_(container)
+        response = alert.runModal()
 
-    container.addSubview_(slider)
-    container.addSubview_(label)
+        if response == NSAlertFirstButtonReturn:
+            return int(round(slider.doubleValue()))
 
-    alert.setAccessoryView_(container)
-    response = alert.runModal()
-
-    if response == NSAlertFirstButtonReturn:
-        return int(round(slider.doubleValue()))
-
-    return None
+        return None
 
 
 # ------------------------------------------------------------
@@ -1280,7 +1278,7 @@ class ActivityTrackerApp(rumps.App):
 
     def set_target_slider(self, _):
         current_hours = TARGET_WORK_SECONDS / 3600
-        value = ask_target_with_slider(
+        value = self.ask_target_with_slider(
             current_hours,
             title=i18n.t("ASK_DAILY_TARGET_TITLE"),
             min_hours=4.0,
@@ -1326,7 +1324,7 @@ class ActivityTrackerApp(rumps.App):
 
     def set_weekly_slider(self, _):
         current_hours = WEEKLY_TARGET_SECONDS / 3600
-        value = ask_target_with_slider(
+        value = self.ask_target_with_slider(
             current_hours,
             title=i18n.t("ASK_WEEKLY_TARGET_TITLE"),
             min_hours=20.0,
@@ -1379,7 +1377,7 @@ class ActivityTrackerApp(rumps.App):
 
     def set_idle_slider(self, _):
         current_minutes = IDLE_THRESHOLD / 60
-        value = ask_minutes_with_slider(
+        value = self.ask_minutes_with_slider(
             current_minutes,
             title=i18n.t("ASK_IDLE_THRESHOLD_TITLE"),
             min_minutes=1,
@@ -1689,7 +1687,7 @@ class ActivityTrackerApp(rumps.App):
     # --------------------------------------------------------
 
     def select_data_folder(self, _):
-        folder = choose_data_folder()
+        folder = self.choose_data_folder()
 
         if not folder:
             return
