@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+
+# py2app
+build/
+dist/
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# VS Code local settings
+.vscode/settings.json
+
+# Runtime data
+activity_tracker_log.csv
+activity_tracker_state.json
+
+# Logs
+*.log

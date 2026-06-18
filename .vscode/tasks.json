@@ -1,0 +1,91 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Bump Version",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "args": [
+        "scripts/bump_version.py"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Clean",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-c",
+        "rm -rf build dist"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Build App",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "args": [
+        "setup.py",
+        "py2app"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Open App",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-c",
+        "open dist/ActivityTracker.app"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Dashboard Script",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "args": [
+        "scripts/generate_dashboard.py"
+      ],
+      "problemMatcher": []
+    },
+
+    {
+      "label": "Build Only",
+      "dependsOn": [
+        "Bump Version",
+        "Clean",
+        "Build App"
+      ],
+      "dependsOrder": "sequence",
+      "group": "build"
+    },
+
+    {
+      "label": "Build and Run App",
+      "dependsOn": [
+        "Bump Version",
+        "Clean",
+        "Build App",
+        "Open App"
+      ],
+      "dependsOrder": "sequence",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+
+    {
+      "label": "Build + Run + Dashboard",
+      "dependsOn": [
+        "Bump Version",
+        "Clean",
+        "Build App",
+        "Open App",
+        "Run Dashboard Script"
+      ],
+      "dependsOrder": "sequence"
+    }
+  ]
+}

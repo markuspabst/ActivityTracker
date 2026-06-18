@@ -1,0 +1,256 @@
+import json
+import os
+import subprocess
+import sys
+import webbrowser
+from datetime import datetime, timedelta
+from pathlib import Path
+import appdirs
+import pandas as pd
+import typer
+
+app = typer.Typer()
+
+# -------- PATHS --------
+
+APP_NAME = "ActivityTracker"
+DATA_DIR = Path(appdirs.user_data_dir(APP_NAME))
+CSV_FILE = DATA_DIR / "activity_tracker_log.csv"
+
+OUTPUT_HTML = Path.home() / "ActivityTracker_Dashboard.html"
+OUTPUT_JS = Path.home() / "ActivityTracker_Dashboard_Data.js"
+
+# -------- TARGETS --------
+
+DAILY_TARGET = 8 * 3600
+WEEKLY_TARGET = 40 * 3600
+
+
+# ------------------------------------------------------------
+# DATA LOAD
+# ------------------------------------------------------------
+
+def read_data():
+    """Read CSV data using pandas for better performance and error handling."""
+    if not CSV_FILE.exists():
+        return []
+
+    try:
+        df = pd.read_csv(CSV_FILE)
+        return df.to_dict('records')
+    except Exception as e:
+        print(f"Warning: Could not read CSV: {e}")
+        return []
+
+
+def last_n_days(rows, n):
+    """Get last n days of data, filling missing dates with zeros."""
+    if not rows:
+        return []
+    
+    today = datetime.now().date()
+    result = []
+
+    for i in range(n):
+        d = (today - timedelta(days=i)).isoformat()
+        row = next((r for r in rows if r.get("date") == d), None)
+
+        if row:
+            result.append({
+                "date": row.get("date", d),
+                "active": float(row.get("active_seconds", 0) or 0),
+                "idle": float(row.get("idle_seconds", 0) or 0)
+            })
+        else:
+            result.append({"date": d, "active": 0, "idle": 0})
+
+    return list(reversed(result))
+
+
+# ------------------------------------------------------------
+# PRODUCTIVITY SCORE
+# ------------------------------------------------------------
+
+def compute_score(rows):
+    last7 = last_n_days(rows, 7)
+
+    today = last7[-1]
+    active = today["active"]
+    idle = today["idle"]
+
+    # Target
+    target_ratio = min(active / DAILY_TARGET, 1.2) if DAILY_TARGET else 0
+    target_score = min(target_ratio * 100, 100)
+
+    # Consistency
+    met_days = sum(1 for r in last7 if r["active"] >= DAILY_TARGET)
+    consistency = (met_days / 7) * 100
+
+    # Focus
+    total = active + idle
+    focus = (active / total * 100) if total else 0
+
+    score = (
+        0.5 * target_score +
+        0.25 * consistency +
+        0.25 * focus
+    )
+
+    return {
+        "score": round(score, 1),
+        "target": round(target_score, 1),
+        "consistency": round(consistency, 1),
+        "focus": round(focus, 1),
+        "met_days": met_days
+    }
+
+
+# ------------------------------------------------------------
+# BUILD DATA
+# ------------------------------------------------------------
+
+def build_data(rows):
+    last7 = last_n_days(rows, 7)
+    score = compute_score(rows)
+
+    return {
+        "generated": datetime.now().strftime("%H:%M:%S"),
+        "last7": [
+            {"date": r["date"], "hours": round(r["active"] / 3600, 2)}
+            for r in last7
+        ],
+        "target": DAILY_TARGET / 3600,
+        "score": score
+    }
+
+
+def write_data(data):
+    with open(OUTPUT_JS, "w") as f:
+        f.write("window.DATA = " + json.dumps(data))
+
+
+# ------------------------------------------------------------
+# HTML
+# ------------------------------------------------------------
+
+def build_html():
+    return f"""
+<html>
+<head>
+<title>Dashboard</title>
+<style>
+body {{
+  background:#111;
+  color:#fff;
+  font-family:sans-serif;
+}}
+
+.card {{
+  background:#222;
+  padding:20px;
+  margin:20px;
+  border-radius:10px;
+}}
+
+.progress {{
+  height:20px;
+  background:#333;
+}}
+
+.fill {{
+  height:100%;
+  background:linear-gradient(90deg, red, orange, yellow, green);
+}}
+
+</style>
+</head>
+
+<body>
+
+<h1>ActivityTracker Dashboard</h1>
+
+<div class="card">
+<h2>Productivity Score</h2>
+<div id="score"></div>
+
+<div class="progress">
+<div id="bar" class="fill"></div>
+</div>
+
+<p id="details"></p>
+</div>
+
+<script>
+
+// Load data dynamically WITHOUT reload
+function loadData() {{
+  return new Promise((res, rej) => {{
+    const s = document.createElement("script");
+    s.src = "ActivityTracker_Dashboard_Data.js?_=" + Date.now();
+    s.onload = () => res(window.DATA);
+    s.onerror = rej;
+    document.body.appendChild(s);
+  }});
+}}
+
+function updateUI(d) {{
+  const s = d.score;
+
+  document.getElementById("score").innerText = s.score + "%";
+
+  document.getElementById("bar").style.width = s.score + "%";
+
+  document.getElementById("details").innerHTML =
+    "Target: " + s.target + "%<br>" +
+    "Consistency: " + s.consistency + "%<br>" +
+    "Focus: " + s.focus + "%";
+}}
+
+async function refresh() {{
+  const d = await loadData();
+  updateUI(d);
+}}
+
+refresh();
+setInterval(refresh, 10000);
+
+</script>
+
+</body>
+</html>
+"""
+
+
+# ------------------------------------------------------------
+# MAIN
+# ------------------------------------------------------------
+
+@app.command()
+def main(
+    data_only: bool = typer.Option(
+        False,
+        "--data-only",
+        help="Generate data only, don't open browser"
+    )
+):
+    """Generate ActivityTracker dashboard."""
+    rows = read_data()
+
+    data = build_data(rows)
+    write_data(data)
+
+    if data_only:
+        return
+
+    with open(OUTPUT_HTML, "w") as f:
+        f.write(build_html())
+
+    # Prefer the cross-platform webbrowser API; fall back to macOS `open` if needed
+    try:
+        webbrowser.open(f"file://{OUTPUT_HTML}")
+    except Exception:
+        subprocess.run(["open", str(OUTPUT_HTML)])
+
+
+if __name__ == "__main__":
+    app()
