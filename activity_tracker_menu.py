@@ -6,6 +6,7 @@ import os
 import csv
 import json
 import sys
+import functools
 import plistlib
 import threading
 from pathlib import Path
@@ -235,6 +236,9 @@ def get_bundle_info_plist():
         return None
 
 
+# Version/build date are immutable for the process lifetime; cache them so the
+# per-tick tooltip doesn't re-read and parse the bundle Info.plist from disk.
+@functools.lru_cache(maxsize=1)
 def get_bundle_version():
     plist = get_bundle_info_plist()
 
@@ -250,6 +254,7 @@ def get_bundle_version():
     return APP_FULL_VERSION
 
 
+@functools.lru_cache(maxsize=1)
 def get_bundle_build_date():
     plist = get_bundle_info_plist()
 
