@@ -18,6 +18,7 @@ from typing import Optional
 from AppKit import (
     NSOpenPanel,
     NSModalResponseOK,
+    NSAlertFirstButtonReturn,
     NSAlert,
     NSSlider,
     NSTextField,
@@ -109,7 +110,7 @@ def load_config():
         # Validate and return the config
         validated_config = AppConfig(**config_data)
         return validated_config.model_dump()
-    except (ValidationError, Exception) as e:
+    except Exception as e:
         print(f"Warning: Invalid config, using defaults: {e}")
         return AppConfig().model_dump()
 
@@ -378,7 +379,6 @@ def is_autostart_installed():
     return os.path.isfile(LAUNCH_AGENT_FILE)
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=4))
 def is_autostart_loaded():
     result = subprocess.run(
         ["launchctl", "print", f"{launchctl_domain()}/{LAUNCH_AGENT_LABEL}"],
@@ -438,7 +438,7 @@ def ask_target_with_slider(current_hours, title="Set Target", min_hours=4.0, max
     alert.setAccessoryView_(container)
     response = alert.runModal()
 
-    if response == 1000:
+    if response == NSAlertFirstButtonReturn:
         return float(slider.floatValue())
 
     return None
@@ -752,6 +752,12 @@ def recover_previous_session_if_needed():
 # ------------------------------------------------------------
 
 def find_dashboard_script():
+    """Locate generate_dashboard.py in the source tree or the py2app bundle.
+
+    Returns the first existing path. If neither exists, falls back to the
+    local source path (which may not exist) so the caller can surface a
+    "script not found" error against a meaningful location.
+    """
     local_path = Path(__file__).resolve().parent / "scripts" / "generate_dashboard.py"
 
     if local_path.exists():
@@ -771,6 +777,8 @@ def find_dashboard_script():
         if bundle_path.exists():
             return bundle_path
 
+    # Neither location exists; return the local path as a fallback so the
+    # caller's .exists() check fails against a sensible path.
     return local_path
 
 
@@ -1325,10 +1333,9 @@ class ActivityTrackerApp(rumps.App):
         self.menu_csv.title = i18n.t("MENU_CSV", path=CSV_FILE or "-")
         self.menu_state.title = i18n.t("MENU_STATE", path=STATE_FILE or "-")
 
-        self.update_autostart_ui()
-        self.update_version_ui()
-        self.update_target_menu()
-        self.update_weekly_target_menu()
+        # Autostart / version / target-menu states only change on user action,
+        # so they are refreshed in __init__ and their setters — not every tick.
+        # (is_autostart_loaded() spawns a launchctl subprocess; avoid it here.)
 
         remaining = max(TARGET_WORK_SECONDS - active_today, 0)
 

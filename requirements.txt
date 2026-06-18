@@ -1,6 +1,8 @@
 rumps
 pyobjc
 py2app
+modulegraph
+setuptools
 
 # Path & Platform Support
 appdirs>=1.4.4

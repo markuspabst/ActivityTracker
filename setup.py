@@ -37,13 +37,18 @@ OPTIONS = {
 
         "LSUIElement": True
     },
-    "packages": ["rumps"],
+    "packages": ["rumps", "dateutil"],
     "includes": [
+        "AppKit",
+        "Foundation",
+        "objc",
+        "i18n",
         "version_generated",
         "appdirs",
         "pydantic",
         "tenacity",
         "dateutil",
+        "dateutil.parser",
         "pandas"
     ]
 }

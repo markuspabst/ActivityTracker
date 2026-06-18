@@ -11,7 +11,11 @@ env/
 # py2app
 build/
 dist/
+.eggs/
 *.egg-info/
+
+# Build-time generated version stamp
+version_generated.py
 
 # macOS
 .DS_Store
