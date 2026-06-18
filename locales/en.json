@@ -21,6 +21,7 @@
   "RESET_DATA_FOLDER": "Reset Data Folder",
   "DAILY_TARGET": "Daily Target",
   "WEEKLY_TARGET": "Weekly Target",
+  "IDLE_THRESHOLD": "Idle Threshold",
   "AUTOSTART_ENABLED": "Autostart: Enabled ✅",
   "AUTOSTART_INSTALLED": "Autostart: Installed ⚠️",
   "AUTOSTART_DISABLED": "Autostart: Disabled ❌",
@@ -31,6 +32,7 @@
   "LAST_SAVE_NONE": "never",
   "SET_DAILY_TARGET_SLIDER": "Set Custom Daily Target…",
   "SET_WEEKLY_TARGET_SLIDER": "Set Custom Weekly Target…",
+  "SET_IDLE_THRESHOLD_SLIDER": "Set Custom Threshold…",
   "MENU_RECOVERY_ADDED": "Recovery: {value} restored",
   "TOOLTIP_ACTIVE": "Active today: {value}",
   "TOOLTIP_IDLE": "Idle today: {value}",
@@ -42,6 +44,7 @@
   "TOOLTIP_DATA_FOLDER": "Data folder: {path}",
   "NOTIFICATION_DAILY_TARGET_UPDATED": "Daily target updated",
   "NOTIFICATION_WEEKLY_TARGET_UPDATED": "Weekly target updated",
+  "NOTIFICATION_IDLE_THRESHOLD_UPDATED": "Idle threshold updated",
   "NOTIFICATION_DATA_FOLDER_CHANGED": "Data folder changed",
   "NOTIFICATION_DATA_FOLDER_RESET": "Data folder reset",
   "NOTIFICATION_AUTOSTART_DISABLED": "Autostart disabled",
@@ -49,6 +52,7 @@
   "NOTIFICATION_CSV_SAVED": "Times saved",
   "ASK_DAILY_TARGET_TITLE": "Set Daily Target",
   "ASK_WEEKLY_TARGET_TITLE": "Set Weekly Target",
+  "ASK_IDLE_THRESHOLD_TITLE": "Set Idle Threshold",
   "DASHBOARD_ERROR_TITLE": "Dashboard Error",
   "DASHBOARD_SCRIPT_NOT_FOUND": "Dashboard script not found:\n{path}",
   "AUTOSTART_LAUNCHAGENT_REMOVED": "LaunchAgent removed",
@@ -57,5 +61,6 @@
   "QUIT": "Quit",
   "LANGUAGE": "Language",
   "LANGUAGE_SYSTEM_DEFAULT": "System Default",
-  "NOTIFICATION_LANGUAGE_CHANGED": "Language changed"
+  "NOTIFICATION_LANGUAGE_CHANGED": "Language changed",
+  "UNIT_MINUTES": "{value} min"
 }

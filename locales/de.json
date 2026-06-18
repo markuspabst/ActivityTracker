@@ -21,6 +21,7 @@
   "RESET_DATA_FOLDER": "Datenordner zurücksetzen",
   "DAILY_TARGET": "Tagesziel",
   "WEEKLY_TARGET": "Wochenziel",
+  "IDLE_THRESHOLD": "Inaktivitätsschwelle",
   "AUTOSTART_ENABLED": "Autostart: Aktiviert ✅",
   "AUTOSTART_INSTALLED": "Autostart: Installiert ⚠️",
   "AUTOSTART_DISABLED": "Autostart: Deaktiviert ❌",
@@ -31,6 +32,7 @@
   "LAST_SAVE_NONE": "noch nie",
   "SET_DAILY_TARGET_SLIDER": "Eigenes Tagesziel festlegen…",
   "SET_WEEKLY_TARGET_SLIDER": "Eigenes Wochenziel festlegen…",
+  "SET_IDLE_THRESHOLD_SLIDER": "Eigene Schwelle festlegen…",
   "MENU_RECOVERY_ADDED": "Wiederherstellung: {value} nachgetragen",
   "TOOLTIP_ACTIVE": "Aktiv heute: {value}",
   "TOOLTIP_IDLE": "Inaktiv heute: {value}",
@@ -42,6 +44,7 @@
   "TOOLTIP_DATA_FOLDER": "Datenordner: {path}",
   "NOTIFICATION_DAILY_TARGET_UPDATED": "Tagesziel aktualisiert",
   "NOTIFICATION_WEEKLY_TARGET_UPDATED": "Wochenziel aktualisiert",
+  "NOTIFICATION_IDLE_THRESHOLD_UPDATED": "Inaktivitätsschwelle aktualisiert",
   "NOTIFICATION_DATA_FOLDER_CHANGED": "Datenordner geändert",
   "NOTIFICATION_DATA_FOLDER_RESET": "Datenordner zurückgesetzt",
   "NOTIFICATION_AUTOSTART_DISABLED": "Autostart deaktiviert",
@@ -49,6 +52,7 @@
   "NOTIFICATION_CSV_SAVED": "Zeiten gespeichert",
   "ASK_DAILY_TARGET_TITLE": "Tagesziel festlegen",
   "ASK_WEEKLY_TARGET_TITLE": "Wochenziel festlegen",
+  "ASK_IDLE_THRESHOLD_TITLE": "Inaktivitätsschwelle festlegen",
   "DASHBOARD_ERROR_TITLE": "Dashboard-Fehler",
   "DASHBOARD_SCRIPT_NOT_FOUND": "Dashboard-Skript nicht gefunden:\n{path}",
   "AUTOSTART_LAUNCHAGENT_REMOVED": "LaunchAgent entfernt",
@@ -57,5 +61,6 @@
   "QUIT": "Beenden",
   "LANGUAGE": "Sprache",
   "LANGUAGE_SYSTEM_DEFAULT": "Systemstandard",
-  "NOTIFICATION_LANGUAGE_CHANGED": "Sprache geändert"
+  "NOTIFICATION_LANGUAGE_CHANGED": "Sprache geändert",
+  "UNIT_MINUTES": "{value} Min."
 }

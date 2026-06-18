@@ -45,15 +45,16 @@ except Exception:
 
 APP_NAME = "ActivityTracker"
 
-IDLE_THRESHOLD = 300        # idle after 5 minutes
 UPDATE_INTERVAL = 5         # UI + state update every 5 seconds
 WRITE_INTERVAL = 3600       # CSV auto-save every 60 minutes
 
 DEFAULT_TARGET_SECONDS = 8 * 3600
 DEFAULT_WEEKLY_TARGET_SECONDS = 40 * 3600
+DEFAULT_IDLE_THRESHOLD = 300  # idle after 5 minutes of no input
 
 TARGET_WORK_SECONDS = DEFAULT_TARGET_SECONDS
 WEEKLY_TARGET_SECONDS = DEFAULT_WEEKLY_TARGET_SECONDS
+IDLE_THRESHOLD = DEFAULT_IDLE_THRESHOLD
 
 
 # ------------------------------------------------------------
@@ -89,6 +90,11 @@ class AppConfig(BaseModel):
         default=DEFAULT_WEEKLY_TARGET_SECONDS,
         ge=10 * 3600,  # At least 10 hours/week
         le=168 * 3600  # At most 168 hours/week (full week)
+    )
+    idle_threshold_seconds: int = Field(
+        default=DEFAULT_IDLE_THRESHOLD,
+        ge=60,    # At least 1 minute
+        le=1800   # At most 30 minutes
     )
     data_dir: Optional[str] = None
     # None = follow the system locale (auto-detect); otherwise a locale code
@@ -200,10 +206,19 @@ def persist_weekly_target(seconds):
     set_config_value("weekly_target_seconds", int(seconds))
 
 
+def load_idle_threshold():
+    return int(get_config_value("idle_threshold_seconds", DEFAULT_IDLE_THRESHOLD))
+
+
+def persist_idle_threshold(seconds):
+    set_config_value("idle_threshold_seconds", int(seconds))
+
+
 # Initial settings
 set_data_dir(get_configured_data_dir())
 TARGET_WORK_SECONDS = load_target()
 WEEKLY_TARGET_SECONDS = load_weekly_target()
+IDLE_THRESHOLD = load_idle_threshold()
 
 
 # ------------------------------------------------------------
@@ -447,6 +462,41 @@ def ask_target_with_slider(current_hours, title="Set Target", min_hours=4.0, max
 
     if response == NSAlertFirstButtonReturn:
         return float(slider.floatValue())
+
+    return None
+
+
+def ask_minutes_with_slider(current_minutes, title="Set Value", min_minutes=1, max_minutes=30):
+    """Slider dialog returning a whole number of minutes (or None if cancelled)."""
+    alert = NSAlert.alloc().init()
+    alert.setMessageText_(title)
+    alert.addButtonWithTitle_("OK")
+    alert.addButtonWithTitle_("Cancel")
+
+    container = NSView.alloc().initWithFrame_(((0, 0), (280, 70)))
+
+    slider = NSSlider.alloc().initWithFrame_(((0, 30), (280, 24)))
+    slider.setMinValue_(min_minutes)
+    slider.setMaxValue_(max_minutes)
+    slider.setNumberOfTickMarks_(max_minutes - min_minutes + 1)
+    slider.setAllowsTickMarkValuesOnly_(True)
+    slider.setIntValue_(int(current_minutes))
+
+    label = NSTextField.alloc().initWithFrame_(((0, 0), (280, 24)))
+    label.setBezeled_(False)
+    label.setDrawsBackground_(False)
+    label.setEditable_(False)
+    label.setSelectable_(False)
+    label.setStringValue_(i18n.t("UNIT_MINUTES", value=int(current_minutes)))
+
+    container.addSubview_(slider)
+    container.addSubview_(label)
+
+    alert.setAccessoryView_(container)
+    response = alert.runModal()
+
+    if response == NSAlertFirstButtonReturn:
+        return int(round(slider.doubleValue()))
 
     return None
 
@@ -957,6 +1007,26 @@ class ActivityTrackerApp(rumps.App):
 
         self.settings_menu.add(self.weekly_target_menu)
 
+        # Idle threshold menu
+        self.idle_menu = rumps.MenuItem(i18n.t("IDLE_THRESHOLD"))
+        self.idle_2m = rumps.MenuItem("2 min", callback=self.set_idle_2m)
+        self.idle_5m = rumps.MenuItem("5 min", callback=self.set_idle_5m)
+        self.idle_10m = rumps.MenuItem("10 min", callback=self.set_idle_10m)
+        self.idle_15m = rumps.MenuItem("15 min", callback=self.set_idle_15m)
+        self.idle_slider = rumps.MenuItem(
+            i18n.t("SET_IDLE_THRESHOLD_SLIDER"),
+            callback=self.set_idle_slider
+        )
+
+        self.idle_menu.add(self.idle_2m)
+        self.idle_menu.add(self.idle_5m)
+        self.idle_menu.add(self.idle_10m)
+        self.idle_menu.add(self.idle_15m)
+        self.idle_menu.add(None)
+        self.idle_menu.add(self.idle_slider)
+
+        self.settings_menu.add(self.idle_menu)
+
         self.settings_menu.add(None)
 
         # Language
@@ -1024,6 +1094,7 @@ class ActivityTrackerApp(rumps.App):
         self.update_version_ui()
         self.update_target_menu()
         self.update_weekly_target_menu()
+        self.update_idle_menu()
 
         self.timer = rumps.Timer(self.update, UPDATE_INTERVAL)
         self.timer.start()
@@ -1245,6 +1316,56 @@ class ActivityTrackerApp(rumps.App):
             self.weekly_50h.title += " ✅"
 
     # --------------------------------------------------------
+    # Idle threshold settings
+    # --------------------------------------------------------
+
+    def set_idle_threshold(self, seconds):
+        global IDLE_THRESHOLD
+
+        IDLE_THRESHOLD = int(seconds)
+        persist_idle_threshold(seconds)
+        self.update_idle_menu()
+
+        rumps.notification(
+            "ActivityTracker",
+            i18n.t("NOTIFICATION_IDLE_THRESHOLD_UPDATED"),
+            i18n.t("UNIT_MINUTES", value=int(seconds // 60))
+        )
+
+    def set_idle_2m(self, _):
+        self.set_idle_threshold(2 * 60)
+
+    def set_idle_5m(self, _):
+        self.set_idle_threshold(5 * 60)
+
+    def set_idle_10m(self, _):
+        self.set_idle_threshold(10 * 60)
+
+    def set_idle_15m(self, _):
+        self.set_idle_threshold(15 * 60)
+
+    def set_idle_slider(self, _):
+        current_minutes = IDLE_THRESHOLD / 60
+        value = ask_minutes_with_slider(
+            current_minutes,
+            title=i18n.t("ASK_IDLE_THRESHOLD_TITLE"),
+            min_minutes=1,
+            max_minutes=30
+        )
+
+        if value is not None and value > 0:
+            self.set_idle_threshold(int(value * 60))
+
+    def update_idle_menu(self):
+        presets = {2: self.idle_2m, 5: self.idle_5m, 10: self.idle_10m, 15: self.idle_15m}
+        active_minutes = IDLE_THRESHOLD // 60
+
+        for minutes, item in presets.items():
+            item.title = f"{minutes} min"
+            if minutes == active_minutes:
+                item.title += " ✅"
+
+    # --------------------------------------------------------
     # Autostart
     # --------------------------------------------------------
 
@@ -1369,6 +1490,9 @@ class ActivityTrackerApp(rumps.App):
         self.weekly_target_menu.title = i18n.t("WEEKLY_TARGET")
         self.weekly_slider.title = i18n.t("SET_WEEKLY_TARGET_SLIDER")
 
+        self.idle_menu.title = i18n.t("IDLE_THRESHOLD")
+        self.idle_slider.title = i18n.t("SET_IDLE_THRESHOLD_SLIDER")
+
         self.language_menu.title = i18n.t("LANGUAGE")
         self.language_items[None].title = i18n.t("LANGUAGE_SYSTEM_DEFAULT")
 
@@ -1382,6 +1506,7 @@ class ActivityTrackerApp(rumps.App):
         self.update_version_ui()
         self.update_target_menu()
         self.update_weekly_target_menu()
+        self.update_idle_menu()
 
         # Refresh the dynamic metric rows immediately so the whole menu is
         # consistent without waiting for the next timer tick.
