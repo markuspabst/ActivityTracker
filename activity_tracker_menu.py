@@ -2,15 +2,13 @@ import rumps
 import subprocess
 import time
 from datetime import datetime, timedelta
-from dateutil.parser import isoparse
 import os
-import csv
 import json
 import sys
 import plistlib
 import threading
 from pathlib import Path
-import appdirs
+import platformdirs
 from tenacity import retry, stop_after_attempt, wait_exponential
 from pydantic import BaseModel, Field, ValidationError, ConfigDict
 from typing import Optional
@@ -58,12 +56,12 @@ WEEKLY_TARGET_SECONDS = DEFAULT_WEEKLY_TARGET_SECONDS
 
 # ------------------------------------------------------------
 # Persistent Storage / Settings
-# Using appdirs for cross-platform support
+# Using platformdirs for cross-platform support
 # ------------------------------------------------------------
 
-DEFAULT_BASE_DIR = appdirs.user_data_dir(APP_NAME)
+DEFAULT_BASE_DIR = platformdirs.user_data_dir(APP_NAME)
 
-CONFIG_DIR = appdirs.user_config_dir(APP_NAME)
+CONFIG_DIR = platformdirs.user_config_dir(APP_NAME)
 
 CONFIG_FILE = os.path.join(CONFIG_DIR, "activity_tracker_config.json")
 
@@ -504,11 +502,11 @@ def format_delta_decimal(seconds):
     return f"{sign}{value:.2f} h {icon}"
 
 def parse_datetime(value):
-    """Parse ISO format datetime strings with better error handling via dateutil."""
+    """Parse ISO format datetime strings via stdlib datetime.fromisoformat."""
     if not value:
         return None
     try:
-        return isoparse(value)
+        return datetime.fromisoformat(value)
     except (ValueError, TypeError):
         return None
 
@@ -538,37 +536,88 @@ CSV_FIELDS = [
     "last_updated"
 ]
 
+CSV_STR_FIELDS = ["date", "start_time", "end_time", "last_updated"]
+CSV_NUM_FIELDS = [
+    "total_seconds",
+    "active_seconds",
+    "idle_seconds",
+    "total_hours",
+    "active_hours",
+    "idle_hours"
+]
+
+
+def _pd():
+    """Lazy-import pandas to keep it off the latency-sensitive module-load path."""
+    import pandas as pd
+    return pd
+
 
 def read_csv_data():
-    data = {}
-
+    """Read the daily CSV into a ``dict[date_str -> row_dict]`` via pandas."""
     if not os.path.isfile(CSV_FILE):
-        return data
+        return {}
+
+    pd = _pd()
 
     try:
-        with open(CSV_FILE, "r", newline="") as f:
-            reader = csv.DictReader(f)
-
-            for row in reader:
-                date = row.get("date")
-                if date:
-                    data[date] = row
-    except (csv.Error, UnicodeDecodeError, IOError) as e:
+        df = pd.read_csv(
+            CSV_FILE,
+            dtype={col: "string" for col in CSV_STR_FIELDS}
+        )
+    except Exception as e:
         print(f"Warning: CSV reading error: {e}. Using empty data.")
         return {}
+
+    # Empty strings, not NaN: a NaN start_time reads back truthy and would
+    # corrupt add_delta_to_csv's "preserve existing start_time" check.
+    for col in CSV_STR_FIELDS:
+        if col in df.columns:
+            df[col] = df[col].fillna("")
+
+    # Mirror the old float(x or 0) coercion for numeric columns.
+    for col in CSV_NUM_FIELDS:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+
+    if "date" in df.columns:
+        df = df[df["date"] != ""]
+
+    data = {}
+    for record in df.to_dict("records"):
+        # Coerce to native float/str so numpy scalar types never leak into
+        # downstream round()/strftime()/JSON state.
+        row = {}
+        for field in CSV_FIELDS:
+            if field not in record:
+                continue
+            if field in CSV_NUM_FIELDS:
+                row[field] = float(record[field])
+            else:
+                row[field] = str(record[field])
+        data[row["date"]] = row
 
     return data
 
 
 def write_csv_data(data):
+    """Write the ``dict[date_str -> row_dict]`` back to CSV, sorted by date."""
     ensure_dir(DATA_DIR)
 
-    with open(CSV_FILE, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
-        writer.writeheader()
+    pd = _pd()
 
-        for date_key in sorted(data.keys()):
-            writer.writerow(data[date_key])
+    df = pd.DataFrame(list(data.values()))
+    # Guarantee the exact 10 columns in order even when data is empty.
+    df = df.reindex(columns=CSV_FIELDS)
+
+    for col in CSV_STR_FIELDS:
+        df[col] = df[col].fillna("")
+
+    if not df.empty:
+        # ISO date strings sort chronologically; stable to match sorted(keys).
+        df = df.sort_values("date", kind="stable").reset_index(drop=True)
+
+    df.to_csv(CSV_FILE, index=False)
 
 
 def get_day_from_csv(date_str):

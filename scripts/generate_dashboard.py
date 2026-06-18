@@ -5,7 +5,7 @@ import sys
 import webbrowser
 from datetime import datetime, timedelta
 from pathlib import Path
-import appdirs
+import platformdirs
 import pandas as pd
 import typer
 
@@ -14,7 +14,7 @@ app = typer.Typer()
 # -------- PATHS --------
 
 APP_NAME = "ActivityTracker"
-DATA_DIR = Path(appdirs.user_data_dir(APP_NAME))
+DATA_DIR = Path(platformdirs.user_data_dir(APP_NAME))
 CSV_FILE = DATA_DIR / "activity_tracker_log.csv"
 
 OUTPUT_HTML = Path.home() / "ActivityTracker_Dashboard.html"
