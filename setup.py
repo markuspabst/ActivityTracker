@@ -26,7 +26,7 @@ APP_VERSION, APP_BUILD, APP_BUILD_DATE = read_version()
 
 OPTIONS = {
         "argv_emulation": True,
-    "iconfile": "AppIcon.icns",
+    "iconfile": "app-icon.icns",
     "plist": {
         "CFBundleName": "ActivityTracker",
         "CFBundleDisplayName": "ActivityTracker",

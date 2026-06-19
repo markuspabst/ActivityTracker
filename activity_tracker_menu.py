@@ -935,7 +935,7 @@ class ActivityTrackerTrayApp:
         self.icon.update_menu()
 
     def run(self):
-        image = Image.open("AppIcon.icns")
+        image = Image.open("app-icon.icns")
         self.icon = Icon("ActivityTracker", image, "ActivityTracker", Menu(self.generate_menu))
         self.timer = threading.Timer(UPDATE_INTERVAL, self.update_and_reschedule)
         self.timer.start()

@@ -1,0 +1,66 @@
+Here’s a **simple monochrome SVG icon** for a Mac app, containing a **clock** and a **heartbeat line**.
+
+Save as `app-icon-monochrome.svg`.
+
+```svg
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- App icon rounded square -->
+  <rect
+    x="112"
+    y="112"
+    width="800"
+    height="800"
+    rx="180"
+    stroke="black"
+    stroke-width="48"
+  />
+
+  <!-- Clock circle -->
+  <circle
+    cx="512"
+    cy="472"
+    r="250"
+    stroke="black"
+    stroke-width="48"
+  />
+
+  <!-- Clock hands -->
+  <line
+    x1="512"
+    y1="472"
+    x2="512"
+    y2="330"
+    stroke="black"
+    stroke-width="44"
+    stroke-linecap="round"
+  />
+
+  <line
+    x1="512"
+    y1="472"
+    x2="625"
+    y2="535"
+    stroke="black"
+    stroke-width="44"
+    stroke-linecap="round"
+  />
+
+  <!-- Center dot -->
+  <circle cx="512" cy="472" r="28" fill="black" />
+
+  <!-- Heartbeat line -->
+  <path
+    d="M252 690
+       H378
+       L430 610
+       L492 780
+       L560 555
+       L628 690
+       H772"
+    stroke="black"
+    stroke-width="48"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>
+```
