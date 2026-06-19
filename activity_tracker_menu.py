@@ -1,4 +1,4 @@
-import pystray
+
 from PIL import Image
 import subprocess
 import time
@@ -15,7 +15,7 @@ import platformdirs
 from tenacity import retry, stop_after_attempt, wait_exponential
 from pydantic import BaseModel, Field, ValidationError, ConfigDict
 from typing import Optional
-
+from pystray import Icon, Menu, MenuItem
 
 import i18n
 
@@ -72,7 +72,7 @@ STATE_FILE = None
 class AppConfig(BaseModel):
     """Configuration model with validation."""
     model_config = ConfigDict(validate_assignment=True)
-    
+
     target_seconds: int = Field(
         default=DEFAULT_TARGET_SECONDS,
         ge=3600,  # At least 1 hour
@@ -119,7 +119,7 @@ def load_config():
 def save_config(config):
     """Save configuration with pydantic validation."""
     ensure_dir(CONFIG_DIR)
-    
+
     try:
         # Validate before saving
         validated_config = AppConfig(**config)
@@ -408,7 +408,6 @@ def is_autostart_loaded():
 # ------------------------------------------------------------
 
 
-
 # ------------------------------------------------------------
 # macOS Idle Time
 # ------------------------------------------------------------
@@ -438,7 +437,6 @@ def _get_idle_time_ioreg():
         return 0
 
     return 0
-
 
 def get_idle_time():
     """Seconds since the last HID input event.
@@ -485,7 +483,6 @@ def get_idle_time():
             except (FileNotFoundError, ValueError):
                 return 0
     return 0
-
 
 # ------------------------------------------------------------
 # Formatting
@@ -756,6 +753,7 @@ def recover_previous_session_if_needed():
 
         if start_time and last_seen and delta_total > 0:
             add_delta_to_csv(
+                None, # app instance
                 date_str,
                 start_time,
                 last_seen,
@@ -877,7 +875,6 @@ def locale_display_name(code):
 # ------------------------------------------------------------
 # Menubar App
 # ------------------------------------------------------------
-
 class ActivityTrackerTrayApp:
 
     def __init__(self):
@@ -909,15 +906,20 @@ class ActivityTrackerTrayApp:
 
     def update(self):
         now, total_session, active_session, idle_session, is_idle = self.calculate_current_session()
+
         if now.date() > self.last_tick_date:
             self.first_activity_this_day = None
+
         if self.first_activity_this_day is None and not is_idle:
             self.first_activity_this_day = now
+
         self.last_tick_date = now.date()
+
         if time.time() - self.last_write_time >= WRITE_INTERVAL:
             self.save_delta(self)
 
         self.save_state(dirty=True)
+
         csv_data = read_csv_data()
         report = self.get_today_report_from_csv_plus_current_delta(
             now,
@@ -926,6 +928,7 @@ class ActivityTrackerTrayApp:
             idle_session,
             data=csv_data
         )
+
         active_today = report["active_seconds"]
         status_icon = get_status_icon(is_idle, active_today)
         self.icon.title = f"{status_icon} {format_hours(active_today)}"
@@ -933,7 +936,7 @@ class ActivityTrackerTrayApp:
 
     def run(self):
         image = Image.open("AppIcon.icns")
-        self.icon = pystray.Icon("ActivityTracker", image, "ActivityTracker", self.generate_menu)
+        self.icon = Icon("ActivityTracker", image, "ActivityTracker", Menu(self.generate_menu))
         self.timer = threading.Timer(UPDATE_INTERVAL, self.update_and_reschedule)
         self.timer.start()
         self.icon.run()
@@ -950,7 +953,6 @@ class ActivityTrackerTrayApp:
         self.save_state(dirty=False)
         mark_state_clean()
         self.icon.stop()
-
     # --------------------------------------------------------
     # Runtime Calculations
     # --------------------------------------------------------
@@ -1090,13 +1092,6 @@ class ActivityTrackerTrayApp:
 
         TARGET_WORK_SECONDS = int(seconds)
         persist_target(seconds)
-        self.update_target_menu()
-
-        rumps.notification(
-            "ActivityTracker",
-            i18n.t("NOTIFICATION_DAILY_TARGET_UPDATED"),
-            f"{seconds / 3600:.2f} h"
-        )
 
     def set_target_6h(self, _):
         self.set_target(6 * 3600)
@@ -1119,19 +1114,11 @@ class ActivityTrackerTrayApp:
         if value is not None and value > 0:
             self.set_target(int(value * 3600))
 
-
     def set_weekly_target(self, seconds):
         global WEEKLY_TARGET_SECONDS
 
         WEEKLY_TARGET_SECONDS = int(seconds)
         persist_weekly_target(seconds)
-        self.update_weekly_target_menu()
-
-        rumps.notification(
-            "ActivityTracker",
-            i18n.t("NOTIFICATION_WEEKLY_TARGET_UPDATED"),
-            f"{seconds / 3600:.2f} h"
-        )
 
     def set_weekly_30h(self, _):
         self.set_weekly_target(30 * 3600)
@@ -1154,7 +1141,6 @@ class ActivityTrackerTrayApp:
         if value is not None and value > 0:
             self.set_weekly_target(int(value * 3600))
 
-
     # --------------------------------------------------------
     # Idle threshold settings
     # --------------------------------------------------------
@@ -1164,13 +1150,6 @@ class ActivityTrackerTrayApp:
 
         IDLE_THRESHOLD = int(seconds)
         persist_idle_threshold(seconds)
-        self.update_idle_menu()
-
-        rumps.notification(
-            "ActivityTracker",
-            i18n.t("NOTIFICATION_IDLE_THRESHOLD_UPDATED"),
-            i18n.t("UNIT_MINUTES", value=int(seconds // 60))
-        )
 
     def set_idle_2m(self, _):
         self.set_idle_threshold(2 * 60)
@@ -1196,41 +1175,21 @@ class ActivityTrackerTrayApp:
         if value is not None and value > 0:
             self.set_idle_threshold(int(value * 60))
 
-
     # --------------------------------------------------------
     # Autostart
     # --------------------------------------------------------
-
 
     def toggle_autostart(self, _):
         try:
             if is_autostart_installed():
                 uninstall_autostart()
-                self.update_autostart_ui()
-
-                rumps.notification(
-                    "ActivityTracker",
-                    i18n.t("NOTIFICATION_AUTOSTART_DISABLED"),
-                    i18n.t("AUTOSTART_LAUNCHAGENT_REMOVED")
-                )
             else:
                 self.save_delta()
                 self.save_state(dirty=True)
-
                 install_autostart()
-                self.update_autostart_ui()
-
-                rumps.notification(
-                    "ActivityTracker",
-                    i18n.t("NOTIFICATION_AUTOSTART_ENABLED"),
-                    i18n.t("AUTOSTART_LAUNCHAGENT_INSTALLED")
-                )
 
         except Exception as e:
-            rumps.alert(
-                title="ActivityTracker Autostart Error",
-                message=str(e)
-            )
+            print(f"Autostart error: {e}")
 
     def open_autostart_file(self, _):
         ensure_dir(LAUNCH_AGENT_DIR)
@@ -1244,7 +1203,6 @@ class ActivityTrackerTrayApp:
     # Version
     # --------------------------------------------------------
 
-
     # --------------------------------------------------------
     # Language
     # --------------------------------------------------------
@@ -1254,47 +1212,30 @@ class ActivityTrackerTrayApp:
         self.language_items = {}
 
         # "System Default" clears the override and follows the OS locale.
-        system_item = rumps.MenuItem(
+        system_item = MenuItem(
             i18n.t("LANGUAGE_SYSTEM_DEFAULT"),
-            callback=self.make_language_callback(None)
+            self.make_language_callback(None)
         )
         self.language_items[None] = system_item
         self.language_menu.add(system_item)
-        self.language_menu.add(None)
+        self.language_menu.add(Menu.SEPARATOR)
 
         for code in sorted(i18n.available_locales()):
-            item = rumps.MenuItem(
+            item = MenuItem(
                 locale_display_name(code),
-                callback=self.make_language_callback(code)
+                self.make_language_callback(code)
             )
             self.language_items[code] = item
             self.language_menu.add(item)
-
-        self.update_language_menu()
 
     def make_language_callback(self, code):
         def callback(_):
             self.set_language(code)
         return callback
 
-    def update_language_menu(self):
-        """Check the currently active locale (or System Default if unset)."""
-        active = get_config_value("locale")
-        for code, item in self.language_items.items():
-            item.state = 1 if code == active else 0
-
     def set_language(self, code):
         set_config_value("locale", code)
         i18n.set_locale(code)
-        self.relabel_menus()
-        self.update_language_menu()
-
-        rumps.notification(
-            "ActivityTracker",
-            i18n.t("NOTIFICATION_LANGUAGE_CHANGED"),
-            locale_display_name(code) if code else i18n.t("LANGUAGE_SYSTEM_DEFAULT")
-        )
-
 
     # --------------------------------------------------------
     # Dashboard
@@ -1304,10 +1245,7 @@ class ActivityTrackerTrayApp:
         script_path = find_dashboard_script()
 
         if not script_path.exists():
-            rumps.alert(
-                title=i18n.t("DASHBOARD_ERROR_TITLE"),
-                message=i18n.t("DASHBOARD_SCRIPT_NOT_FOUND", path=str(script_path))
-            )
+            print(f"Dashboard script not found at {script_path}")
             return
 
         python_exe, env = dashboard_python_command()
@@ -1337,116 +1275,6 @@ class ActivityTrackerTrayApp:
     # UI Update
     # --------------------------------------------------------
 
-    def update(self, _):
-        now, total_session, active_session, idle_session, is_idle = self.calculate_current_session()
-
-        # Day change detection
-        if now.date() > self.last_tick_date:
-            # New day, reset the first activity timestamp
-            self.first_activity_this_day = None
-
-        # Record first activity of the day if it has not been set yet and there is activity
-        if self.first_activity_this_day is None and not is_idle:
-            self.first_activity_this_day = now
-
-        self.last_tick_date = now.date()
-
-        if time.time() - self.last_write_time >= WRITE_INTERVAL:
-            self.save_delta()
-
-        self.save_state(dirty=True)
-
-        # Read the CSV once and share it across today's report and the weekly
-        # total (previously two separate reads per 5s tick).
-        csv_data = read_csv_data()
-
-        report = self.get_today_report_from_csv_plus_current_delta(
-            now,
-            total_session,
-            active_session,
-            idle_session,
-            data=csv_data
-        )
-
-        active_today = report["active_seconds"]
-        idle_today = report["idle_seconds"]
-        total_today = report["total_seconds"]
-
-        daily_overtime = active_today - TARGET_WORK_SECONDS
-
-        weekly_from_csv = get_weekly_seconds_from_csv(data=csv_data)
-        _, delta_active, _ = self.calculate_unsaved_delta(
-            total_session,
-            active_session,
-            idle_session
-        )
-
-        weekly_total = weekly_from_csv + delta_active
-        weekly_overtime = weekly_total - WEEKLY_TARGET_SECONDS
-
-        status_icon = get_status_icon(is_idle, active_today)
-        #self.title = f"{status_icon} {active_today / 3600:.2f}h"
-        self.title = f"{status_icon} {format_hours(active_today)}"
-
-        self.menu_active.title = i18n.t("MENU_ACTIVE", value=format_hours(active_today))
-        self.menu_idle.title = i18n.t("MENU_IDLE", value=format_hours(idle_today))
-        self.menu_total.title = i18n.t("MENU_TOTAL", value=format_hours(total_today))
-
-        self.menu_today_target.title = i18n.t("MENU_TODAY_TARGET", value=format_hours(TARGET_WORK_SECONDS))
-        if daily_overtime >= 0:
-            self.menu_today_overtime.title = i18n.t("TODAY_OVERTIME_POS", value=format_delta(daily_overtime))
-        else:
-            self.menu_today_overtime.title = i18n.t("TODAY_OVERTIME_NEG", value=format_delta(daily_overtime))
-
-        self.menu_week_total.title = i18n.t(
-            "WEEK_TOTAL",
-            value=format_hours(weekly_total),
-            target=format_hours(WEEKLY_TARGET_SECONDS)
-        )
-        if weekly_overtime >= 0:
-            self.menu_week_overtime.title = i18n.t("WEEK_OVERTIME_POS", value=format_delta(weekly_overtime))
-        else:
-            self.menu_week_overtime.title = i18n.t("WEEK_OVERTIME_NEG", value=format_delta(weekly_overtime))
-
-        display_start_time = self.first_activity_this_day.strftime('%H:%M:%S') if self.first_activity_this_day else 'N/A'
-        self.menu_start.title = i18n.t("MENU_START", value=display_start_time)
-        self.menu_update.title = i18n.t("MENU_UPDATE", value=now.strftime('%H:%M:%S'))
-        self.menu_saved.title = i18n.t("MENU_SAVED", value=self.last_save_display)
-
-        if self.recovery_result and "recovered_seconds" in self.recovery_result:
-            self.menu_recovery.title = i18n.t(
-                "MENU_RECOVERY_ADDED",
-                value=format_hours(self.recovery_result["recovered_seconds"])
-            )
-        elif self.recovery_result and "error" in self.recovery_result:
-            self.menu_recovery.title = i18n.t("MENU_RECOVERY_ERROR")
-        else:
-            self.menu_recovery.title = i18n.t("MENU_RECOVERY_NONE")
-
-        self.menu_csv.title = i18n.t("MENU_CSV", path=CSV_FILE or "-")
-        self.menu_state.title = i18n.t("MENU_STATE", path=STATE_FILE or "-")
-
-        # Autostart / version / target-menu states only change on user action,
-        # so they are refreshed in __init__ and their setters — not every tick.
-        # (is_autostart_loaded() spawns a launchctl subprocess; avoid it here.)
-
-        remaining = max(TARGET_WORK_SECONDS - active_today, 0)
-
-        self._tooltip = (
-            i18n.t("TOOLTIP_ACTIVE", value=format_hours(active_today)) + "\n"
-            + i18n.t("TOOLTIP_IDLE", value=format_hours(idle_today)) + "\n"
-            + i18n.t("TOOLTIP_TOTAL", value=format_hours(total_today)) + "\n"
-            + i18n.t("TOOLTIP_TARGET", value=format_hours(TARGET_WORK_SECONDS)) + "\n"
-            + i18n.t("TOOLTIP_REMAINING", value=format_hours(remaining)) + "\n"
-            + i18n.t(
-                "TOOLTIP_WEEK",
-                value=format_hours(weekly_total),
-                target=format_hours(WEEKLY_TARGET_SECONDS)
-            ) + "\n"
-            + i18n.t("TOOLTIP_VERSION", value=get_bundle_version()) + "\n"
-            + i18n.t("TOOLTIP_DATA_FOLDER", path=DATA_DIR)
-        )
-
     # --------------------------------------------------------
     # Settings Actions
     # --------------------------------------------------------
@@ -1466,15 +1294,6 @@ class ActivityTrackerTrayApp:
 
         self.save_state(dirty=True)
 
-        self.menu_csv.title = i18n.t("MENU_CSV", path=CSV_FILE)
-        self.menu_state.title = i18n.t("MENU_STATE", path=STATE_FILE)
-
-        rumps.notification(
-            "ActivityTracker",
-            i18n.t("NOTIFICATION_DATA_FOLDER_CHANGED"),
-            folder
-        )
-
     def open_data_folder(self, _):
         ensure_dir(DATA_DIR)
         subprocess.run(["open", DATA_DIR])
@@ -1488,59 +1307,12 @@ class ActivityTrackerTrayApp:
 
         self.save_state(dirty=True)
 
-        self.menu_csv.title = i18n.t("MENU_CSV", path=CSV_FILE)
-        self.menu_state.title = i18n.t("MENU_STATE", path=STATE_FILE)
-
-        rumps.notification(
-            "ActivityTracker",
-            i18n.t("NOTIFICATION_DATA_FOLDER_RESET"),
-            DATA_DIR
-        )
-
     # --------------------------------------------------------
     # Actions
     # --------------------------------------------------------
 
     def force_save(self, _):
-        self.save_delta()
-        rumps.notification(
-            "ActivityTracker",
-            i18n.t("NOTIFICATION_CSV_SAVED"),
-            self.last_save_display
-        )
-
-    def quit_app(self, _):
-        self.dashboard_refresh_event.set()
-
-        self.save_delta()
-        self.save_state(dirty=False)
-        mark_state_clean()
-        rumps.quit_application()
-
-
-    # --------------------------------------------------------
-    # Native Dialogs (macOS only)
-    # --------------------------------------------------------
-
-    def choose_data_folder(self):
-        if sys.platform == 'darwin':
-            # Native implementation is not available anymore
-            # This can be replaced with a cross-platform dialog
-            return None
-        return None
-
-    def ask_target_with_slider(self, current_hours, title="Set Target", min_hours=4.0, max_hours=12.0):
-        if sys.platform == 'darwin':
-            # Native implementation is not available anymore
-            return None
-        return None
-
-    def ask_minutes_with_slider(self, current_minutes, title="Set Value", min_minutes=1, max_minutes=30):
-        if sys.platform == 'darwin':
-            # Native implementation is not available anymore
-            return None
-        return None
-
+        self.save_delta(self)
     def generate_menu(self):
         now, total_session, active_session, idle_session, is_idle = self.calculate_current_session()
         csv_data = read_csv_data()
@@ -1569,35 +1341,35 @@ class ActivityTrackerTrayApp:
         settings_items = []
         if sys.platform == 'darwin':
             settings_items.extend([
-                pystray.MenuItem(i18n.t("SELECT_DATA_FOLDER"), self.select_data_folder),
-                pystray.MenuItem(i18n.t("OPEN_DATA_FOLDER"), self.open_data_folder),
-                pystray.MenuItem(i18n.t("RESET_DATA_FOLDER"), self.reset_data_folder),
-                pystray.Menu.SEPARATOR,
+                MenuItem(i18n.t("SELECT_DATA_FOLDER"), self.select_data_folder),
+                MenuItem(i18n.t("OPEN_DATA_FOLDER"), self.open_data_folder),
+                MenuItem(i18n.t("RESET_DATA_FOLDER"), self.reset_data_folder),
+                Menu.SEPARATOR,
             ])
 
-        target_menu = pystray.Menu(
-            pystray.MenuItem('6h', self.set_target_6h, checked=lambda item: TARGET_WORK_SECONDS == 6 * 3600),
-            pystray.MenuItem('8h', self.set_target_8h, checked=lambda item: TARGET_WORK_SECONDS == 8 * 3600),
-            pystray.MenuItem('10h', self.set_target_10h, checked=lambda item: TARGET_WORK_SECONDS == 10 * 3600),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(i18n.t("SET_DAILY_TARGET_SLIDER"), self.set_target_slider, enabled=sys.platform == 'darwin')
+        target_menu = Menu(
+            MenuItem('6h', self.set_target_6h, checked=lambda item: TARGET_WORK_SECONDS == 6 * 3600),
+            MenuItem('8h', self.set_target_8h, checked=lambda item: TARGET_WORK_SECONDS == 8 * 3600),
+            MenuItem('10h', self.set_target_10h, checked=lambda item: TARGET_WORK_SECONDS == 10 * 3600),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("SET_DAILY_TARGET_SLIDER"), self.set_target_slider, enabled=sys.platform == 'darwin')
         )
 
-        weekly_target_menu = pystray.Menu(
-            pystray.MenuItem('30h', self.set_weekly_30h, checked=lambda item: WEEKLY_TARGET_SECONDS == 30 * 3600),
-            pystray.MenuItem('40h', self.set_weekly_40h, checked=lambda item: WEEKLY_TARGET_SECONDS == 40 * 3600),
-            pystray.MenuItem('50h', self.set_weekly_50h, checked=lambda item: WEEKLY_TARGET_SECONDS == 50 * 3600),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(i18n.t("SET_WEEKLY_TARGET_SLIDER"), self.set_weekly_slider, enabled=sys.platform == 'darwin')
+        weekly_target_menu = Menu(
+            MenuItem('30h', self.set_weekly_30h, checked=lambda item: WEEKLY_TARGET_SECONDS == 30 * 3600),
+            MenuItem('40h', self.set_weekly_40h, checked=lambda item: WEEKLY_TARGET_SECONDS == 40 * 3600),
+            MenuItem('50h', self.set_weekly_50h, checked=lambda item: WEEKLY_TARGET_SECONDS == 50 * 3600),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("SET_WEEKLY_TARGET_SLIDER"), self.set_weekly_slider, enabled=sys.platform == 'darwin')
         )
 
-        idle_menu = pystray.Menu(
-            pystray.MenuItem('2 min', self.set_idle_2m, checked=lambda item: IDLE_THRESHOLD == 2 * 60),
-            pystray.MenuItem('5 min', self.set_idle_5m, checked=lambda item: IDLE_THRESHOLD == 5 * 60),
-            pystray.MenuItem('10 min', self.set_idle_10m, checked=lambda item: IDLE_THRESHOLD == 10 * 60),
-            pystray.MenuItem('15 min', self.set_idle_15m, checked=lambda item: IDLE_THRESHOLD == 15 * 60),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(i18n.t("SET_IDLE_THRESHOLD_SLIDER"), self.set_idle_slider, enabled=sys.platform == 'darwin')
+        idle_menu = Menu(
+            MenuItem('2 min', self.set_idle_2m, checked=lambda item: IDLE_THRESHOLD == 2 * 60),
+            MenuItem('5 min', self.set_idle_5m, checked=lambda item: IDLE_THRESHOLD == 5 * 60),
+            MenuItem('10 min', self.set_idle_10m, checked=lambda item: IDLE_THRESHOLD == 10 * 60),
+            MenuItem('15 min', self.set_idle_15m, checked=lambda item: IDLE_THRESHOLD == 15 * 60),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("SET_IDLE_THRESHOLD_SLIDER"), self.set_idle_slider, enabled=sys.platform == 'darwin')
         )
 
 
@@ -1605,43 +1377,43 @@ class ActivityTrackerTrayApp:
         # ... (language item generation)
 
         settings_items.extend([
-            pystray.MenuItem(i18n.t("DAILY_TARGET"), target_menu),
-            pystray.MenuItem(i18n.t("WEEKLY_TARGET"), weekly_target_menu),
-            pystray.MenuItem(i18n.t("IDLE_THRESHOLD"), idle_menu),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(i18n.t("LANGUAGE"), pystray.Menu(*language_items)),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(i18n.t("AUTOSTART_DISABLED"), self.toggle_autostart, checked=is_autostart_installed),
-            pystray.MenuItem(i18n.t("OPEN_AUTOSTART_FILE"), self.open_autostart_file),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(i18n.t("VERSION", value=get_bundle_version()), enabled=False),
-            pystray.MenuItem(i18n.t("BUILD", value=get_bundle_build_date()), enabled=False),
+            MenuItem(i18n.t("DAILY_TARGET"), target_menu),
+            MenuItem(i18n.t("WEEKLY_TARGET"), weekly_target_menu),
+            MenuItem(i18n.t("IDLE_THRESHOLD"), idle_menu),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("LANGUAGE"), Menu(*language_items)),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("AUTOSTART_DISABLED"), self.toggle_autostart, checked=lambda item: is_autostart_installed()),
+            MenuItem(i18n.t("OPEN_AUTOSTART_FILE"), self.open_autostart_file),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("VERSION", value=get_bundle_version()), None, enabled=False),
+            MenuItem(i18n.t("BUILD", value=get_bundle_build_date()), None, enabled=False),
 
         ])
 
 
         return (
-            pystray.MenuItem(i18n.t("MENU_ACTIVE", value=format_hours(active_today)), None),
-            pystray.MenuItem(i18n.t("MENU_IDLE", value=format_hours(idle_today)), None),
-            pystray.MenuItem(i18n.t("MENU_TOTAL", value=format_hours(total_today)), None),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(i18n.t("MENU_TODAY_TARGET", value=format_hours(TARGET_WORK_SECONDS)), None),
-            pystray.MenuItem(i18n.t("TODAY_OVERTIME_POS" if daily_overtime >= 0 else "TODAY_OVERTIME_NEG", value=format_delta(daily_overtime)), None),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(i18n.t("WEEK_TOTAL", value=format_hours(weekly_total), target=format_hours(WEEKLY_TARGET_SECONDS)), None),
-            pystray.MenuItem(i18n.t("WEEK_OVERTIME_POS" if weekly_overtime >= 0 else "WEEK_OVERTIME_NEG", value=format_delta(weekly_overtime)), None),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(i18n.t("MENU_START", value=self.first_activity_this_day.strftime('%H:%M:%S') if self.first_activity_this_day else 'N/A'), None),
-            pystray.MenuItem(i18n.t("MENU_UPDATE", value=now.strftime('%H:%M:%S')), None),
-            pystray.MenuItem(i18n.t("MENU_SAVED", value=self.last_save_display), None),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(i18n.t("MENU_CSV", path=CSV_FILE or "-"), self.open_data_folder),
-            pystray.MenuItem(i18n.t("MENU_STATE", path=STATE_FILE or "-"), self.open_data_folder),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(i18n.t("SETTINGS"), pystray.Menu(*settings_items)),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(i18n.t("FORCE_SAVE"), self.force_save),
-            pystray.MenuItem(i18n.t("QUIT"), self.quit_app),
+            MenuItem(i18n.t("MENU_ACTIVE", value=format_hours(active_today)), None, enabled=False),
+            MenuItem(i18n.t("MENU_IDLE", value=format_hours(idle_today)), None, enabled=False),
+            MenuItem(i18n.t("MENU_TOTAL", value=format_hours(total_today)), None, enabled=False),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("MENU_TODAY_TARGET", value=format_hours(TARGET_WORK_SECONDS)), None, enabled=False),
+            MenuItem(i18n.t("TODAY_OVERTIME_POS" if daily_overtime >= 0 else "TODAY_OVERTIME_NEG", value=format_delta(daily_overtime)), None, enabled=False),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("WEEK_TOTAL", value=format_hours(weekly_total), target=format_hours(WEEKLY_TARGET_SECONDS)), None, enabled=False),
+            MenuItem(i18n.t("WEEK_OVERTIME_POS" if weekly_overtime >= 0 else "WEEK_OVERTIME_NEG", value=format_delta(weekly_overtime)), None, enabled=False),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("MENU_START", value=self.first_activity_this_day.strftime('%H:%M:%S') if self.first_activity_this_day else 'N/A'), None, enabled=False),
+            MenuItem(i18n.t("MENU_UPDATE", value=now.strftime('%H:%M:%S')), None, enabled=False),
+            MenuItem(i18n.t("MENU_SAVED", value=self.last_save_display), None, enabled=False),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("MENU_CSV", path=CSV_FILE or "-"), self.open_data_folder),
+            MenuItem(i18n.t("MENU_STATE", path=STATE_FILE or "-"), self.open_data_folder),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("SETTINGS"), Menu(*settings_items)),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("FORCE_SAVE"), self.force_save),
+            MenuItem(i18n.t("QUIT"), self.quit_app),
         )
 # ------------------------------------------------------------
 # START
