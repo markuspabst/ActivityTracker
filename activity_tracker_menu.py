@@ -692,7 +692,7 @@ def get_day_from_csv(date_str, data=None):
     }
 
 
-def add_delta_to_csv(date_str, start_time, end_time, delta_total, delta_active, delta_idle):
+def add_delta_to_csv(date_str, start_time, end_time, delta_total, delta_active, delta_idle, first_activity_this_day=None):
     if delta_total <= 0:
         return
 
@@ -703,10 +703,16 @@ def add_delta_to_csv(date_str, start_time, end_time, delta_total, delta_active, 
     existing_active = existing["active_seconds"]
     existing_idle = existing["idle_seconds"]
 
+    # The start_time arg is the beginning of the *session*.
+    # The actual start of work for *this day* might be later, particularly
+    # if the session spanned midnight. Get the first-activity time from the app instance.
+    app = rumps.application()
+    first_activity_time = app.first_activity_this_day if app and app.first_activity_this_day else start_time
+
     if existing["start_time"]:
         csv_start_time = existing["start_time"]
     else:
-        csv_start_time = start_time.strftime("%H:%M:%S")
+        csv_start_time = first_activity_time.strftime("%H:%M:%S")
 
     new_total = existing_total + delta_total
     new_active = existing_active + delta_active
@@ -937,6 +943,15 @@ def locale_display_name(code):
 class ActivityTrackerApp(rumps.App):
 
     def __init__(self):
+        # First-run UI warm-up: create and immediately dismiss an alert to force
+        # all of AppKit's modal machinery to load. On some macOS versions, the
+        # first modal dialog shown after startup can be flaky (disappears
+        # instantly), and this preemptive warm-up call prevents that.
+        warmup_alert = NSAlert.alloc().init()
+        warmup_alert.addButtonWithTitle_("OK")
+        warmup_alert.performSelectorOnMainThread_withObject_waitUntilDone_("dismiss:", None, False)
+
+
         super().__init__("🟡 0.00h", quit_button=None)
 
         # initialize translations
@@ -947,6 +962,8 @@ class ActivityTrackerApp(rumps.App):
 
         # Runtime session state
         self.start_time = datetime.now()
+        self.last_tick_date = self.start_time.date()
+        self.first_activity_this_day = None
         self.total_idle_session = 0.0
         self.idle_start = None
 
@@ -1094,6 +1111,8 @@ class ActivityTrackerApp(rumps.App):
         self.force_save_item = rumps.MenuItem(i18n.t("FORCE_SAVE"), callback=self.force_save)
         self.quit_item = rumps.MenuItem(i18n.t("QUIT"), callback=self.quit_app)
 
+        self._active_alert = None
+
         self.menu = [
             self.menu_active,
             self.menu_idle,
@@ -1181,12 +1200,20 @@ class ActivityTrackerApp(rumps.App):
             idle_session
         )
 
+        today_start_time = csv_day["start_time"]
+        if not today_start_time:
+            if self.first_activity_this_day:
+                today_start_time = self.first_activity_this_day.strftime("%H:%M:%S")
+            else:
+                # Case: new day, but no activity yet. Show start of the session for now.
+                today_start_time = self.start_time.strftime("%H:%M:%S")
+
         return {
             "date": date_str,
             "total_seconds": csv_day["total_seconds"] + delta_total,
             "active_seconds": csv_day["active_seconds"] + delta_active,
             "idle_seconds": csv_day["idle_seconds"] + delta_idle,
-            "start_time": csv_day["start_time"] or self.start_time.strftime("%H:%M:%S"),
+            "start_time": today_start_time,
             "end_time": now.strftime("%H:%M:%S"),
             "last_updated": csv_day["last_updated"]
         }
@@ -1195,7 +1222,7 @@ class ActivityTrackerApp(rumps.App):
     # Save
     # --------------------------------------------------------
 
-    def save_delta(self):
+    def save_delta(self, first_activity_this_day=None):
         now, total_session, active_session, idle_session, _ = self.calculate_current_session()
 
         delta_total, delta_active, delta_idle = self.calculate_unsaved_delta(
@@ -1209,11 +1236,12 @@ class ActivityTrackerApp(rumps.App):
 
         add_delta_to_csv(
             now.date().isoformat(),
-            self.start_time,
-            now,
+            self.start_time, # The start of the whole session
+            now, # The end of this delta
             delta_total,
             delta_active,
-            delta_idle
+            delta_idle,
+            first_activity_this_day=first_activity_this_day
         )
 
         self.saved_total_session = total_session
@@ -1587,6 +1615,17 @@ class ActivityTrackerApp(rumps.App):
     def update(self, _):
         now, total_session, active_session, idle_session, is_idle = self.calculate_current_session()
 
+        # Day change detection
+        if now.date() > self.last_tick_date:
+            # New day, reset the first activity timestamp
+            self.first_activity_this_day = None
+
+        # Record first activity of the day if it has not been set yet and there is activity
+        if self.first_activity_this_day is None and not is_idle:
+            self.first_activity_this_day = now
+
+        self.last_tick_date = now.date()
+
         if time.time() - self.last_write_time >= WRITE_INTERVAL:
             self.save_delta()
 
@@ -1644,7 +1683,8 @@ class ActivityTrackerApp(rumps.App):
         else:
             self.menu_week_overtime.title = i18n.t("WEEK_OVERTIME_NEG", value=format_delta(weekly_overtime))
 
-        self.menu_start.title = i18n.t("MENU_START", value=self.start_time.strftime('%H:%M:%S'))
+        display_start_time = self.first_activity_this_day.strftime('%H:%M:%S') if self.first_activity_this_day else 'N/A'
+        self.menu_start.title = i18n.t("MENU_START", value=display_start_time)
         self.menu_update.title = i18n.t("MENU_UPDATE", value=now.strftime('%H:%M:%S'))
         self.menu_saved.title = i18n.t("MENU_SAVED", value=self.last_save_display)
 
