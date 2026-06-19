@@ -1,4 +1,5 @@
-import rumps
+
+from PIL import Image
 import subprocess
 import time
 from datetime import datetime, timedelta
@@ -14,16 +15,7 @@ import platformdirs
 from tenacity import retry, stop_after_attempt, wait_exponential
 from pydantic import BaseModel, Field, ValidationError, ConfigDict
 from typing import Optional
-
-from AppKit import (
-    NSOpenPanel,
-    NSModalResponseOK,
-    NSAlertFirstButtonReturn,
-    NSAlert,
-    NSSlider,
-    NSTextField,
-    NSView
-)
+from pystray import Icon, Menu, MenuItem
 
 import i18n
 
@@ -80,7 +72,7 @@ STATE_FILE = None
 class AppConfig(BaseModel):
     """Configuration model with validation."""
     model_config = ConfigDict(validate_assignment=True)
-    
+
     target_seconds: int = Field(
         default=DEFAULT_TARGET_SECONDS,
         ge=3600,  # At least 1 hour
@@ -127,7 +119,7 @@ def load_config():
 def save_config(config):
     """Save configuration with pydantic validation."""
     ensure_dir(CONFIG_DIR)
-    
+
     try:
         # Validate before saving
         validated_config = AppConfig(**config)
@@ -415,89 +407,6 @@ def is_autostart_loaded():
 # Native macOS Dialogs
 # ------------------------------------------------------------
 
-    def choose_data_folder(self):
-        panel = NSOpenPanel.openPanel()
-        panel.setCanChooseFiles_(False)
-        panel.setCanChooseDirectories_(True)
-        panel.setAllowsMultipleSelection_(False)
-        panel.setCanCreateDirectories_(True)
-        panel.setTitle_("Select ActivityTracker Data Folder")
-        panel.setPrompt_("Use Folder")
-
-        result = panel.runModal()
-
-        if result == NSModalResponseOK:
-            url = panel.URLs()[0]
-            return url.path()
-
-        return None
-
-    def ask_target_with_slider(self, current_hours, title="Set Target", min_hours=4.0, max_hours=12.0):
-        alert = NSAlert.alloc().init()
-        alert.setMessageText_(title)
-        alert.setInformativeText_("Adjust working hours.")
-        alert.addButtonWithTitle_("OK")
-        alert.addButtonWithTitle_("Cancel")
-
-        container = NSView.alloc().initWithFrame_(((0, 0), (280, 70)))
-
-        slider = NSSlider.alloc().initWithFrame_(((0, 30), (280, 24)))
-        slider.setMinValue_(min_hours)
-        slider.setMaxValue_(max_hours)
-        slider.setFloatValue_(float(current_hours))
-
-        label = NSTextField.alloc().initWithFrame_(((0, 0), (280, 24)))
-        label.setBezeled_(False)
-        label.setDrawsBackground_(False)
-        label.setEditable_(False)
-        label.setSelectable_(False)
-        label.setStringValue_(f"{float(current_hours):.2f} hours")
-
-        container.addSubview_(slider)
-        container.addSubview_(label)
-
-        alert.setAccessoryView_(container)
-        response = alert.runModal()
-
-        if response == NSAlertFirstButtonReturn:
-            return float(slider.floatValue())
-
-        return None
-
-    def ask_minutes_with_slider(self, current_minutes, title="Set Value", min_minutes=1, max_minutes=30):
-        """Slider dialog returning a whole number of minutes (or None if cancelled)."""
-        alert = NSAlert.alloc().init()
-        alert.setMessageText_(title)
-        alert.addButtonWithTitle_("OK")
-        alert.addButtonWithTitle_("Cancel")
-
-        container = NSView.alloc().initWithFrame_(((0, 0), (280, 70)))
-
-        slider = NSSlider.alloc().initWithFrame_(((0, 30), (280, 24)))
-        slider.setMinValue_(min_minutes)
-        slider.setMaxValue_(max_minutes)
-        slider.setNumberOfTickMarks_(max_minutes - min_minutes + 1)
-        slider.setAllowsTickMarkValuesOnly_(True)
-        slider.setIntValue_(int(current_minutes))
-
-        label = NSTextField.alloc().initWithFrame_(((0, 0), (280, 24)))
-        label.setBezeled_(False)
-        label.setDrawsBackground_(False)
-        label.setEditable_(False)
-        label.setSelectable_(False)
-        label.setStringValue_(i18n.t("UNIT_MINUTES", value=int(current_minutes)))
-
-        container.addSubview_(slider)
-        container.addSubview_(label)
-
-        alert.setAccessoryView_(container)
-        response = alert.runModal()
-
-        if response == NSAlertFirstButtonReturn:
-            return int(round(slider.doubleValue()))
-
-        return None
-
 
 # ------------------------------------------------------------
 # macOS Idle Time
@@ -529,24 +438,51 @@ def _get_idle_time_ioreg():
 
     return 0
 
-
 def get_idle_time():
     """Seconds since the last HID input event.
 
-    Uses the native Quartz API (CGEventSourceSecondsSinceLastEventType), which
-    is ~5 orders of magnitude cheaper than spawning ioreg and runs every tick.
-    Falls back to ioreg if Quartz is unavailable.
+    Uses a platform-specific implementation.
     """
-    if Quartz is not None:
+    if sys.platform == 'darwin':
+        if Quartz is not None:
+            try:
+                return Quartz.CGEventSourceSecondsSinceLastEventType(
+                    _CG_STATE, _CG_ANY_EVENT
+                )
+            except Exception:
+                pass
+        return _get_idle_time_ioreg()
+    elif sys.platform == 'win32':
+        from ctypes import Structure, windll, c_uint, sizeof, byref
+
+        class LASTINPUTINFO(Structure):
+            _fields_ = [
+                ('cbSize', c_uint),
+                ('dwTime', c_uint),
+            ]
+
+        lastInputInfo = LASTINPUTINFO()
+        lastInputInfo.cbSize = sizeof(lastInputInfo)
+        windll.user32.GetLastInputInfo(byref(lastInputInfo))
+        millis = windll.kernel32.GetTickCount() - lastInputInfo.dwTime
+        return millis / 1000.0
+    elif sys.platform.startswith('linux'):
         try:
-            return Quartz.CGEventSourceSecondsSinceLastEventType(
-                _CG_STATE, _CG_ANY_EVENT
-            )
-        except Exception:
-            pass
+            from Xlib import X, display
+            from Xlib.ext import screensaver
 
-    return _get_idle_time_ioreg()
-
+            d = display.Display()
+            s = d.screen()
+            root = s.root
+            info = screensaver.Info(d, root)
+            return info.idle / 1000.0
+        except (ImportError, AttributeError):
+            # Fallback to xprintidle if python-xlib is not available
+            try:
+                return int(subprocess.check_output(['xprintidle']).decode()) / 1000.0
+            except (FileNotFoundError, ValueError):
+                return 0
+    return 0
 
 # ------------------------------------------------------------
 # Formatting
@@ -692,7 +628,7 @@ def get_day_from_csv(date_str, data=None):
     }
 
 
-def add_delta_to_csv(date_str, start_time, end_time, delta_total, delta_active, delta_idle, first_activity_this_day=None):
+def add_delta_to_csv(app, date_str, start_time, end_time, delta_total, delta_active, delta_idle, first_activity_this_day=None):
     if delta_total <= 0:
         return
 
@@ -706,7 +642,6 @@ def add_delta_to_csv(date_str, start_time, end_time, delta_total, delta_active, 
     # The start_time arg is the beginning of the *session*.
     # The actual start of work for *this day* might be later, particularly
     # if the session spanned midnight. Get the first-activity time from the app instance.
-    app = rumps.application()
     first_activity_time = app.first_activity_this_day if app and app.first_activity_this_day else start_time
 
     if existing["start_time"]:
@@ -818,6 +753,7 @@ def recover_previous_session_if_needed():
 
         if start_time and last_seen and delta_total > 0:
             add_delta_to_csv(
+                None, # app instance
                 date_str,
                 start_time,
                 last_seen,
@@ -939,21 +875,9 @@ def locale_display_name(code):
 # ------------------------------------------------------------
 # Menubar App
 # ------------------------------------------------------------
-
-class ActivityTrackerApp(rumps.App):
+class ActivityTrackerTrayApp:
 
     def __init__(self):
-        # First-run UI warm-up: create and immediately dismiss an alert to force
-        # all of AppKit's modal machinery to load. On some macOS versions, the
-        # first modal dialog shown after startup can be flaky (disappears
-        # instantly), and this preemptive warm-up call prevents that.
-        warmup_alert = NSAlert.alloc().init()
-        warmup_alert.addButtonWithTitle_("OK")
-        warmup_alert.performSelectorOnMainThread_withObject_waitUntilDone_("dismiss:", None, False)
-
-
-        super().__init__("🟡 0.00h", quit_button=None)
-
         # initialize translations
         cfg = load_config()
         i18n.set_locale(cfg.get("locale"))
@@ -976,179 +900,59 @@ class ActivityTrackerApp(rumps.App):
         self.last_save_display = i18n.t("LAST_SAVE_NONE")
         self.dashboard_refresh_event = threading.Event()
         self.dashboard_thread = None
-
-        # Main menu items
-        self.menu_active = rumps.MenuItem(i18n.t("MENU_ACTIVE", value="-"))
-        self.menu_idle = rumps.MenuItem(i18n.t("MENU_IDLE", value="-"))
-        self.menu_total = rumps.MenuItem(i18n.t("MENU_TOTAL", value="-"))
-
-        self.menu_today_target = rumps.MenuItem(i18n.t("MENU_TODAY_TARGET", value="-"))
-        self.menu_today_overtime = rumps.MenuItem(i18n.t("TODAY_OVERTIME_NEG", value="-"))
-
-        self.menu_week_total = rumps.MenuItem(i18n.t("WEEK_TOTAL", value="-", target="-"))
-        self.menu_week_overtime = rumps.MenuItem(i18n.t("WEEK_OVERTIME_NEG", value="-"))
-
-        self.menu_start = rumps.MenuItem(i18n.t("MENU_START", value="-"))
-        self.menu_update = rumps.MenuItem(i18n.t("MENU_UPDATE", value="-"))
-        self.menu_saved = rumps.MenuItem(i18n.t("MENU_SAVED", value="-"))
-        self.menu_recovery = rumps.MenuItem(i18n.t("MENU_RECOVERY_NONE"))
-        self.menu_csv = rumps.MenuItem(i18n.t("MENU_CSV", path=CSV_FILE or "-"))
-        self.menu_state = rumps.MenuItem(i18n.t("MENU_STATE", path=STATE_FILE or "-"))
-
-        self.menu_dashboard = rumps.MenuItem(
-            i18n.t("ENTERPRISE_DASHBOARD"),
-            callback=self.open_enterprise_dashboard
-        )
-
-        # Settings menu
-        self.settings_menu = rumps.MenuItem(i18n.t("SETTINGS"))
-
-        self.select_data_folder_item = rumps.MenuItem(
-            i18n.t("SELECT_DATA_FOLDER"), callback=self.select_data_folder
-        )
-        self.open_data_folder_item = rumps.MenuItem(
-            i18n.t("OPEN_DATA_FOLDER"), callback=self.open_data_folder
-        )
-        self.reset_data_folder_item = rumps.MenuItem(
-            i18n.t("RESET_DATA_FOLDER"), callback=self.reset_data_folder
-        )
-
-        self.settings_menu.add(self.select_data_folder_item)
-        self.settings_menu.add(self.open_data_folder_item)
-        self.settings_menu.add(self.reset_data_folder_item)
-
-        self.settings_menu.add(None)
-
-        # Daily target menu
-        self.target_menu = rumps.MenuItem(i18n.t("DAILY_TARGET"))
-        self.target_6h = rumps.MenuItem("6h", callback=self.set_target_6h)
-        self.target_8h = rumps.MenuItem("8h", callback=self.set_target_8h)
-        self.target_10h = rumps.MenuItem("10h", callback=self.set_target_10h)
-        self.target_slider = rumps.MenuItem(
-            i18n.t("SET_DAILY_TARGET_SLIDER"),
-            callback=self.set_target_slider
-        )
-
-        self.target_menu.add(self.target_6h)
-        self.target_menu.add(self.target_8h)
-        self.target_menu.add(self.target_10h)
-        self.target_menu.add(None)
-        self.target_menu.add(self.target_slider)
-
-        self.settings_menu.add(self.target_menu)
-
-        # Weekly target menu
-        self.weekly_target_menu = rumps.MenuItem(i18n.t("WEEKLY_TARGET"))
-        self.weekly_30h = rumps.MenuItem("30h", callback=self.set_weekly_30h)
-        self.weekly_40h = rumps.MenuItem("40h", callback=self.set_weekly_40h)
-        self.weekly_50h = rumps.MenuItem("50h", callback=self.set_weekly_50h)
-        self.weekly_slider = rumps.MenuItem(
-            i18n.t("SET_WEEKLY_TARGET_SLIDER"),
-            callback=self.set_weekly_slider
-        )
-
-        self.weekly_target_menu.add(self.weekly_30h)
-        self.weekly_target_menu.add(self.weekly_40h)
-        self.weekly_target_menu.add(self.weekly_50h)
-        self.weekly_target_menu.add(None)
-        self.weekly_target_menu.add(self.weekly_slider)
-
-        self.settings_menu.add(self.weekly_target_menu)
-
-        # Idle threshold menu
-        self.idle_menu = rumps.MenuItem(i18n.t("IDLE_THRESHOLD"))
-        self.idle_2m = rumps.MenuItem("2 min", callback=self.set_idle_2m)
-        self.idle_5m = rumps.MenuItem("5 min", callback=self.set_idle_5m)
-        self.idle_10m = rumps.MenuItem("10 min", callback=self.set_idle_10m)
-        self.idle_15m = rumps.MenuItem("15 min", callback=self.set_idle_15m)
-        self.idle_slider = rumps.MenuItem(
-            i18n.t("SET_IDLE_THRESHOLD_SLIDER"),
-            callback=self.set_idle_slider
-        )
-
-        self.idle_menu.add(self.idle_2m)
-        self.idle_menu.add(self.idle_5m)
-        self.idle_menu.add(self.idle_10m)
-        self.idle_menu.add(self.idle_15m)
-        self.idle_menu.add(None)
-        self.idle_menu.add(self.idle_slider)
-
-        self.settings_menu.add(self.idle_menu)
-
-        self.settings_menu.add(None)
-
-        # Language
-        self.language_menu = rumps.MenuItem(i18n.t("LANGUAGE"))
-        self.language_items = {}
-        self.build_language_menu()
-        self.settings_menu.add(self.language_menu)
-
-        self.settings_menu.add(None)
-
-        # Autostart
-        self.autostart_item = rumps.MenuItem(
-            i18n.t("AUTOSTART_DISABLED"),
-            callback=self.toggle_autostart
-        )
-
-        self.open_autostart_file_item = rumps.MenuItem(
-            i18n.t("OPEN_AUTOSTART_FILE"),
-            callback=self.open_autostart_file
-        )
-
-        self.settings_menu.add(self.autostart_item)
-        self.settings_menu.add(self.open_autostart_file_item)
-
-        self.settings_menu.add(None)
-
-        # Version
-        self.version_item = rumps.MenuItem(i18n.t("VERSION", value="-"))
-        self.build_date_item = rumps.MenuItem(i18n.t("BUILD", value="-"))
-
-        self.settings_menu.add(self.version_item)
-        self.settings_menu.add(self.build_date_item)
-
-        self.force_save_item = rumps.MenuItem(i18n.t("FORCE_SAVE"), callback=self.force_save)
-        self.quit_item = rumps.MenuItem(i18n.t("QUIT"), callback=self.quit_app)
-
         self._active_alert = None
+        self.timer = None
+        self.icon = None
 
-        self.menu = [
-            self.menu_active,
-            self.menu_idle,
-            self.menu_total,
-            None,
-            self.menu_today_target,
-            self.menu_today_overtime,
-            None,
-            self.menu_week_total,
-            self.menu_week_overtime,
-            None,
-            self.menu_start,
-            self.menu_update,
-            self.menu_saved,
-            self.menu_recovery,
-            None,
-            self.menu_csv,
-            self.menu_state,
-            None,
-            self.settings_menu,
-            None,
-            self.menu_dashboard,
-            None,
-            self.force_save_item,
-            self.quit_item
-        ]
+    def update(self):
+        now, total_session, active_session, idle_session, is_idle = self.calculate_current_session()
 
-        self.update_autostart_ui()
-        self.update_version_ui()
-        self.update_target_menu()
-        self.update_weekly_target_menu()
-        self.update_idle_menu()
+        if now.date() > self.last_tick_date:
+            self.first_activity_this_day = None
 
-        self.timer = rumps.Timer(self.update, UPDATE_INTERVAL)
+        if self.first_activity_this_day is None and not is_idle:
+            self.first_activity_this_day = now
+
+        self.last_tick_date = now.date()
+
+        if time.time() - self.last_write_time >= WRITE_INTERVAL:
+            self.save_delta(self)
+
+        self.save_state(dirty=True)
+
+        csv_data = read_csv_data()
+        report = self.get_today_report_from_csv_plus_current_delta(
+            now,
+            total_session,
+            active_session,
+            idle_session,
+            data=csv_data
+        )
+
+        active_today = report["active_seconds"]
+        status_icon = get_status_icon(is_idle, active_today)
+        self.icon.title = f"{status_icon} {format_hours(active_today)}"
+        self.icon.update_menu()
+
+    def run(self):
+        image = Image.open("AppIcon.icns")
+        self.icon = Icon("ActivityTracker", image, "ActivityTracker", Menu(self.generate_menu))
+        self.timer = threading.Timer(UPDATE_INTERVAL, self.update_and_reschedule)
+        self.timer.start()
+        self.icon.run()
+
+    def update_and_reschedule(self):
+        self.update()
+        self.timer = threading.Timer(UPDATE_INTERVAL, self.update_and_reschedule)
         self.timer.start()
 
+    def quit_app(self):
+        self.dashboard_refresh_event.set()
+        self.timer.cancel()
+        self.save_delta(self)
+        self.save_state(dirty=False)
+        mark_state_clean()
+        self.icon.stop()
     # --------------------------------------------------------
     # Runtime Calculations
     # --------------------------------------------------------
@@ -1222,7 +1026,7 @@ class ActivityTrackerApp(rumps.App):
     # Save
     # --------------------------------------------------------
 
-    def save_delta(self, first_activity_this_day=None):
+    def save_delta(self, app, first_activity_this_day=None):
         now, total_session, active_session, idle_session, _ = self.calculate_current_session()
 
         delta_total, delta_active, delta_idle = self.calculate_unsaved_delta(
@@ -1235,6 +1039,7 @@ class ActivityTrackerApp(rumps.App):
             return
 
         add_delta_to_csv(
+            app,
             now.date().isoformat(),
             self.start_time, # The start of the whole session
             now, # The end of this delta
@@ -1287,13 +1092,6 @@ class ActivityTrackerApp(rumps.App):
 
         TARGET_WORK_SECONDS = int(seconds)
         persist_target(seconds)
-        self.update_target_menu()
-
-        rumps.notification(
-            "ActivityTracker",
-            i18n.t("NOTIFICATION_DAILY_TARGET_UPDATED"),
-            f"{seconds / 3600:.2f} h"
-        )
 
     def set_target_6h(self, _):
         self.set_target(6 * 3600)
@@ -1316,30 +1114,11 @@ class ActivityTrackerApp(rumps.App):
         if value is not None and value > 0:
             self.set_target(int(value * 3600))
 
-    def update_target_menu(self):
-        self.target_6h.title = "6h"
-        self.target_8h.title = "8h"
-        self.target_10h.title = "10h"
-
-        if TARGET_WORK_SECONDS == 6 * 3600:
-            self.target_6h.title += " ✅"
-        elif TARGET_WORK_SECONDS == 8 * 3600:
-            self.target_8h.title += " ✅"
-        elif TARGET_WORK_SECONDS == 10 * 3600:
-            self.target_10h.title += " ✅"
-
     def set_weekly_target(self, seconds):
         global WEEKLY_TARGET_SECONDS
 
         WEEKLY_TARGET_SECONDS = int(seconds)
         persist_weekly_target(seconds)
-        self.update_weekly_target_menu()
-
-        rumps.notification(
-            "ActivityTracker",
-            i18n.t("NOTIFICATION_WEEKLY_TARGET_UPDATED"),
-            f"{seconds / 3600:.2f} h"
-        )
 
     def set_weekly_30h(self, _):
         self.set_weekly_target(30 * 3600)
@@ -1362,18 +1141,6 @@ class ActivityTrackerApp(rumps.App):
         if value is not None and value > 0:
             self.set_weekly_target(int(value * 3600))
 
-    def update_weekly_target_menu(self):
-        self.weekly_30h.title = "30h"
-        self.weekly_40h.title = "40h"
-        self.weekly_50h.title = "50h"
-
-        if WEEKLY_TARGET_SECONDS == 30 * 3600:
-            self.weekly_30h.title += " ✅"
-        elif WEEKLY_TARGET_SECONDS == 40 * 3600:
-            self.weekly_40h.title += " ✅"
-        elif WEEKLY_TARGET_SECONDS == 50 * 3600:
-            self.weekly_50h.title += " ✅"
-
     # --------------------------------------------------------
     # Idle threshold settings
     # --------------------------------------------------------
@@ -1383,13 +1150,6 @@ class ActivityTrackerApp(rumps.App):
 
         IDLE_THRESHOLD = int(seconds)
         persist_idle_threshold(seconds)
-        self.update_idle_menu()
-
-        rumps.notification(
-            "ActivityTracker",
-            i18n.t("NOTIFICATION_IDLE_THRESHOLD_UPDATED"),
-            i18n.t("UNIT_MINUTES", value=int(seconds // 60))
-        )
 
     def set_idle_2m(self, _):
         self.set_idle_threshold(2 * 60)
@@ -1415,57 +1175,21 @@ class ActivityTrackerApp(rumps.App):
         if value is not None and value > 0:
             self.set_idle_threshold(int(value * 60))
 
-    def update_idle_menu(self):
-        presets = {2: self.idle_2m, 5: self.idle_5m, 10: self.idle_10m, 15: self.idle_15m}
-        active_minutes = IDLE_THRESHOLD // 60
-
-        for minutes, item in presets.items():
-            item.title = f"{minutes} min"
-            if minutes == active_minutes:
-                item.title += " ✅"
-
     # --------------------------------------------------------
     # Autostart
     # --------------------------------------------------------
-
-    def update_autostart_ui(self):
-        if is_autostart_installed():
-            if is_autostart_loaded():
-                self.autostart_item.title = i18n.t("AUTOSTART_ENABLED")
-            else:
-                self.autostart_item.title = i18n.t("AUTOSTART_INSTALLED")
-        else:
-            self.autostart_item.title = i18n.t("AUTOSTART_DISABLED")
 
     def toggle_autostart(self, _):
         try:
             if is_autostart_installed():
                 uninstall_autostart()
-                self.update_autostart_ui()
-
-                rumps.notification(
-                    "ActivityTracker",
-                    i18n.t("NOTIFICATION_AUTOSTART_DISABLED"),
-                    i18n.t("AUTOSTART_LAUNCHAGENT_REMOVED")
-                )
             else:
                 self.save_delta()
                 self.save_state(dirty=True)
-
                 install_autostart()
-                self.update_autostart_ui()
-
-                rumps.notification(
-                    "ActivityTracker",
-                    i18n.t("NOTIFICATION_AUTOSTART_ENABLED"),
-                    i18n.t("AUTOSTART_LAUNCHAGENT_INSTALLED")
-                )
 
         except Exception as e:
-            rumps.alert(
-                title="ActivityTracker Autostart Error",
-                message=str(e)
-            )
+            print(f"Autostart error: {e}")
 
     def open_autostart_file(self, _):
         ensure_dir(LAUNCH_AGENT_DIR)
@@ -1479,10 +1203,6 @@ class ActivityTrackerApp(rumps.App):
     # Version
     # --------------------------------------------------------
 
-    def update_version_ui(self):
-        self.version_item.title = i18n.t("VERSION", value=get_bundle_version())
-        self.build_date_item.title = i18n.t("BUILD", value=get_bundle_build_date())
-
     # --------------------------------------------------------
     # Language
     # --------------------------------------------------------
@@ -1492,84 +1212,30 @@ class ActivityTrackerApp(rumps.App):
         self.language_items = {}
 
         # "System Default" clears the override and follows the OS locale.
-        system_item = rumps.MenuItem(
+        system_item = MenuItem(
             i18n.t("LANGUAGE_SYSTEM_DEFAULT"),
-            callback=self.make_language_callback(None)
+            self.make_language_callback(None)
         )
         self.language_items[None] = system_item
         self.language_menu.add(system_item)
-        self.language_menu.add(None)
+        self.language_menu.add(Menu.SEPARATOR)
 
         for code in sorted(i18n.available_locales()):
-            item = rumps.MenuItem(
+            item = MenuItem(
                 locale_display_name(code),
-                callback=self.make_language_callback(code)
+                self.make_language_callback(code)
             )
             self.language_items[code] = item
             self.language_menu.add(item)
-
-        self.update_language_menu()
 
     def make_language_callback(self, code):
         def callback(_):
             self.set_language(code)
         return callback
 
-    def update_language_menu(self):
-        """Check the currently active locale (or System Default if unset)."""
-        active = get_config_value("locale")
-        for code, item in self.language_items.items():
-            item.state = 1 if code == active else 0
-
     def set_language(self, code):
         set_config_value("locale", code)
         i18n.set_locale(code)
-        self.relabel_menus()
-        self.update_language_menu()
-
-        rumps.notification(
-            "ActivityTracker",
-            i18n.t("NOTIFICATION_LANGUAGE_CHANGED"),
-            locale_display_name(code) if code else i18n.t("LANGUAGE_SYSTEM_DEFAULT")
-        )
-
-    def relabel_menus(self):
-        """Re-apply all static (non-tick) menu titles after a language change.
-
-        The dynamic metric rows are refreshed by update(); this covers the
-        labels that are otherwise only set once in __init__.
-        """
-        self.settings_menu.title = i18n.t("SETTINGS")
-        self.select_data_folder_item.title = i18n.t("SELECT_DATA_FOLDER")
-        self.open_data_folder_item.title = i18n.t("OPEN_DATA_FOLDER")
-        self.reset_data_folder_item.title = i18n.t("RESET_DATA_FOLDER")
-
-        self.target_menu.title = i18n.t("DAILY_TARGET")
-        self.target_slider.title = i18n.t("SET_DAILY_TARGET_SLIDER")
-        self.weekly_target_menu.title = i18n.t("WEEKLY_TARGET")
-        self.weekly_slider.title = i18n.t("SET_WEEKLY_TARGET_SLIDER")
-
-        self.idle_menu.title = i18n.t("IDLE_THRESHOLD")
-        self.idle_slider.title = i18n.t("SET_IDLE_THRESHOLD_SLIDER")
-
-        self.language_menu.title = i18n.t("LANGUAGE")
-        self.language_items[None].title = i18n.t("LANGUAGE_SYSTEM_DEFAULT")
-
-        self.open_autostart_file_item.title = i18n.t("OPEN_AUTOSTART_FILE")
-        self.menu_dashboard.title = i18n.t("ENTERPRISE_DASHBOARD")
-        self.force_save_item.title = i18n.t("FORCE_SAVE")
-        self.quit_item.title = i18n.t("QUIT")
-
-        # Items whose titles embed live state: refresh via their own updaters.
-        self.update_autostart_ui()
-        self.update_version_ui()
-        self.update_target_menu()
-        self.update_weekly_target_menu()
-        self.update_idle_menu()
-
-        # Refresh the dynamic metric rows immediately so the whole menu is
-        # consistent without waiting for the next timer tick.
-        self.update(None)
 
     # --------------------------------------------------------
     # Dashboard
@@ -1579,10 +1245,7 @@ class ActivityTrackerApp(rumps.App):
         script_path = find_dashboard_script()
 
         if not script_path.exists():
-            rumps.alert(
-                title=i18n.t("DASHBOARD_ERROR_TITLE"),
-                message=i18n.t("DASHBOARD_SCRIPT_NOT_FOUND", path=str(script_path))
-            )
+            print(f"Dashboard script not found at {script_path}")
             return
 
         python_exe, env = dashboard_python_command()
@@ -1612,116 +1275,6 @@ class ActivityTrackerApp(rumps.App):
     # UI Update
     # --------------------------------------------------------
 
-    def update(self, _):
-        now, total_session, active_session, idle_session, is_idle = self.calculate_current_session()
-
-        # Day change detection
-        if now.date() > self.last_tick_date:
-            # New day, reset the first activity timestamp
-            self.first_activity_this_day = None
-
-        # Record first activity of the day if it has not been set yet and there is activity
-        if self.first_activity_this_day is None and not is_idle:
-            self.first_activity_this_day = now
-
-        self.last_tick_date = now.date()
-
-        if time.time() - self.last_write_time >= WRITE_INTERVAL:
-            self.save_delta()
-
-        self.save_state(dirty=True)
-
-        # Read the CSV once and share it across today's report and the weekly
-        # total (previously two separate reads per 5s tick).
-        csv_data = read_csv_data()
-
-        report = self.get_today_report_from_csv_plus_current_delta(
-            now,
-            total_session,
-            active_session,
-            idle_session,
-            data=csv_data
-        )
-
-        active_today = report["active_seconds"]
-        idle_today = report["idle_seconds"]
-        total_today = report["total_seconds"]
-
-        daily_overtime = active_today - TARGET_WORK_SECONDS
-
-        weekly_from_csv = get_weekly_seconds_from_csv(data=csv_data)
-        _, delta_active, _ = self.calculate_unsaved_delta(
-            total_session,
-            active_session,
-            idle_session
-        )
-
-        weekly_total = weekly_from_csv + delta_active
-        weekly_overtime = weekly_total - WEEKLY_TARGET_SECONDS
-
-        status_icon = get_status_icon(is_idle, active_today)
-        #self.title = f"{status_icon} {active_today / 3600:.2f}h"
-        self.title = f"{status_icon} {format_hours(active_today)}"
-
-        self.menu_active.title = i18n.t("MENU_ACTIVE", value=format_hours(active_today))
-        self.menu_idle.title = i18n.t("MENU_IDLE", value=format_hours(idle_today))
-        self.menu_total.title = i18n.t("MENU_TOTAL", value=format_hours(total_today))
-
-        self.menu_today_target.title = i18n.t("MENU_TODAY_TARGET", value=format_hours(TARGET_WORK_SECONDS))
-        if daily_overtime >= 0:
-            self.menu_today_overtime.title = i18n.t("TODAY_OVERTIME_POS", value=format_delta(daily_overtime))
-        else:
-            self.menu_today_overtime.title = i18n.t("TODAY_OVERTIME_NEG", value=format_delta(daily_overtime))
-
-        self.menu_week_total.title = i18n.t(
-            "WEEK_TOTAL",
-            value=format_hours(weekly_total),
-            target=format_hours(WEEKLY_TARGET_SECONDS)
-        )
-        if weekly_overtime >= 0:
-            self.menu_week_overtime.title = i18n.t("WEEK_OVERTIME_POS", value=format_delta(weekly_overtime))
-        else:
-            self.menu_week_overtime.title = i18n.t("WEEK_OVERTIME_NEG", value=format_delta(weekly_overtime))
-
-        display_start_time = self.first_activity_this_day.strftime('%H:%M:%S') if self.first_activity_this_day else 'N/A'
-        self.menu_start.title = i18n.t("MENU_START", value=display_start_time)
-        self.menu_update.title = i18n.t("MENU_UPDATE", value=now.strftime('%H:%M:%S'))
-        self.menu_saved.title = i18n.t("MENU_SAVED", value=self.last_save_display)
-
-        if self.recovery_result and "recovered_seconds" in self.recovery_result:
-            self.menu_recovery.title = i18n.t(
-                "MENU_RECOVERY_ADDED",
-                value=format_hours(self.recovery_result["recovered_seconds"])
-            )
-        elif self.recovery_result and "error" in self.recovery_result:
-            self.menu_recovery.title = i18n.t("MENU_RECOVERY_ERROR")
-        else:
-            self.menu_recovery.title = i18n.t("MENU_RECOVERY_NONE")
-
-        self.menu_csv.title = i18n.t("MENU_CSV", path=CSV_FILE or "-")
-        self.menu_state.title = i18n.t("MENU_STATE", path=STATE_FILE or "-")
-
-        # Autostart / version / target-menu states only change on user action,
-        # so they are refreshed in __init__ and their setters — not every tick.
-        # (is_autostart_loaded() spawns a launchctl subprocess; avoid it here.)
-
-        remaining = max(TARGET_WORK_SECONDS - active_today, 0)
-
-        self._tooltip = (
-            i18n.t("TOOLTIP_ACTIVE", value=format_hours(active_today)) + "\n"
-            + i18n.t("TOOLTIP_IDLE", value=format_hours(idle_today)) + "\n"
-            + i18n.t("TOOLTIP_TOTAL", value=format_hours(total_today)) + "\n"
-            + i18n.t("TOOLTIP_TARGET", value=format_hours(TARGET_WORK_SECONDS)) + "\n"
-            + i18n.t("TOOLTIP_REMAINING", value=format_hours(remaining)) + "\n"
-            + i18n.t(
-                "TOOLTIP_WEEK",
-                value=format_hours(weekly_total),
-                target=format_hours(WEEKLY_TARGET_SECONDS)
-            ) + "\n"
-            + i18n.t("TOOLTIP_VERSION", value=get_bundle_version()) + "\n"
-            + i18n.t("TOOLTIP_DATA_FOLDER", path=DATA_DIR)
-        )
-
     # --------------------------------------------------------
     # Settings Actions
     # --------------------------------------------------------
@@ -1741,15 +1294,6 @@ class ActivityTrackerApp(rumps.App):
 
         self.save_state(dirty=True)
 
-        self.menu_csv.title = i18n.t("MENU_CSV", path=CSV_FILE)
-        self.menu_state.title = i18n.t("MENU_STATE", path=STATE_FILE)
-
-        rumps.notification(
-            "ActivityTracker",
-            i18n.t("NOTIFICATION_DATA_FOLDER_CHANGED"),
-            folder
-        )
-
     def open_data_folder(self, _):
         ensure_dir(DATA_DIR)
         subprocess.run(["open", DATA_DIR])
@@ -1763,39 +1307,118 @@ class ActivityTrackerApp(rumps.App):
 
         self.save_state(dirty=True)
 
-        self.menu_csv.title = i18n.t("MENU_CSV", path=CSV_FILE)
-        self.menu_state.title = i18n.t("MENU_STATE", path=STATE_FILE)
-
-        rumps.notification(
-            "ActivityTracker",
-            i18n.t("NOTIFICATION_DATA_FOLDER_RESET"),
-            DATA_DIR
-        )
-
     # --------------------------------------------------------
     # Actions
     # --------------------------------------------------------
 
     def force_save(self, _):
-        self.save_delta()
-        rumps.notification(
-            "ActivityTracker",
-            i18n.t("NOTIFICATION_CSV_SAVED"),
-            self.last_save_display
+        self.save_delta(self)
+    def generate_menu(self):
+        now, total_session, active_session, idle_session, is_idle = self.calculate_current_session()
+        csv_data = read_csv_data()
+        report = self.get_today_report_from_csv_plus_current_delta(
+            now,
+            total_session,
+            active_session,
+            idle_session,
+            data=csv_data
+        )
+        active_today = report["active_seconds"]
+        idle_today = report["idle_seconds"]
+        total_today = report["total_seconds"]
+        daily_overtime = active_today - TARGET_WORK_SECONDS
+
+        weekly_from_csv = get_weekly_seconds_from_csv(data=csv_data)
+        _, delta_active, _ = self.calculate_unsaved_delta(
+            total_session,
+            active_session,
+            idle_session
         )
 
-    def quit_app(self, _):
-        self.dashboard_refresh_event.set()
+        weekly_total = weekly_from_csv + delta_active
+        weekly_overtime = weekly_total - WEEKLY_TARGET_SECONDS
 
-        self.save_delta()
-        self.save_state(dirty=False)
-        mark_state_clean()
-        rumps.quit_application()
+        settings_items = []
+        if sys.platform == 'darwin':
+            settings_items.extend([
+                MenuItem(i18n.t("SELECT_DATA_FOLDER"), self.select_data_folder),
+                MenuItem(i18n.t("OPEN_DATA_FOLDER"), self.open_data_folder),
+                MenuItem(i18n.t("RESET_DATA_FOLDER"), self.reset_data_folder),
+                Menu.SEPARATOR,
+            ])
+
+        target_menu = Menu(
+            MenuItem('6h', self.set_target_6h, checked=lambda item: TARGET_WORK_SECONDS == 6 * 3600),
+            MenuItem('8h', self.set_target_8h, checked=lambda item: TARGET_WORK_SECONDS == 8 * 3600),
+            MenuItem('10h', self.set_target_10h, checked=lambda item: TARGET_WORK_SECONDS == 10 * 3600),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("SET_DAILY_TARGET_SLIDER"), self.set_target_slider, enabled=sys.platform == 'darwin')
+        )
+
+        weekly_target_menu = Menu(
+            MenuItem('30h', self.set_weekly_30h, checked=lambda item: WEEKLY_TARGET_SECONDS == 30 * 3600),
+            MenuItem('40h', self.set_weekly_40h, checked=lambda item: WEEKLY_TARGET_SECONDS == 40 * 3600),
+            MenuItem('50h', self.set_weekly_50h, checked=lambda item: WEEKLY_TARGET_SECONDS == 50 * 3600),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("SET_WEEKLY_TARGET_SLIDER"), self.set_weekly_slider, enabled=sys.platform == 'darwin')
+        )
+
+        idle_menu = Menu(
+            MenuItem('2 min', self.set_idle_2m, checked=lambda item: IDLE_THRESHOLD == 2 * 60),
+            MenuItem('5 min', self.set_idle_5m, checked=lambda item: IDLE_THRESHOLD == 5 * 60),
+            MenuItem('10 min', self.set_idle_10m, checked=lambda item: IDLE_THRESHOLD == 10 * 60),
+            MenuItem('15 min', self.set_idle_15m, checked=lambda item: IDLE_THRESHOLD == 15 * 60),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("SET_IDLE_THRESHOLD_SLIDER"), self.set_idle_slider, enabled=sys.platform == 'darwin')
+        )
 
 
+        language_items = []
+        # ... (language item generation)
+
+        settings_items.extend([
+            MenuItem(i18n.t("DAILY_TARGET"), target_menu),
+            MenuItem(i18n.t("WEEKLY_TARGET"), weekly_target_menu),
+            MenuItem(i18n.t("IDLE_THRESHOLD"), idle_menu),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("LANGUAGE"), Menu(*language_items)),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("AUTOSTART_DISABLED"), self.toggle_autostart, checked=lambda item: is_autostart_installed()),
+            MenuItem(i18n.t("OPEN_AUTOSTART_FILE"), self.open_autostart_file),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("VERSION", value=get_bundle_version()), None, enabled=False),
+            MenuItem(i18n.t("BUILD", value=get_bundle_build_date()), None, enabled=False),
+
+        ])
+
+
+        return (
+            MenuItem(i18n.t("MENU_ACTIVE", value=format_hours(active_today)), None, enabled=False),
+            MenuItem(i18n.t("MENU_IDLE", value=format_hours(idle_today)), None, enabled=False),
+            MenuItem(i18n.t("MENU_TOTAL", value=format_hours(total_today)), None, enabled=False),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("MENU_TODAY_TARGET", value=format_hours(TARGET_WORK_SECONDS)), None, enabled=False),
+            MenuItem(i18n.t("TODAY_OVERTIME_POS" if daily_overtime >= 0 else "TODAY_OVERTIME_NEG", value=format_delta(daily_overtime)), None, enabled=False),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("WEEK_TOTAL", value=format_hours(weekly_total), target=format_hours(WEEKLY_TARGET_SECONDS)), None, enabled=False),
+            MenuItem(i18n.t("WEEK_OVERTIME_POS" if weekly_overtime >= 0 else "WEEK_OVERTIME_NEG", value=format_delta(weekly_overtime)), None, enabled=False),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("MENU_START", value=self.first_activity_this_day.strftime('%H:%M:%S') if self.first_activity_this_day else 'N/A'), None, enabled=False),
+            MenuItem(i18n.t("MENU_UPDATE", value=now.strftime('%H:%M:%S')), None, enabled=False),
+            MenuItem(i18n.t("MENU_SAVED", value=self.last_save_display), None, enabled=False),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("MENU_CSV", path=CSV_FILE or "-"), self.open_data_folder),
+            MenuItem(i18n.t("MENU_STATE", path=STATE_FILE or "-"), self.open_data_folder),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("SETTINGS"), Menu(*settings_items)),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("FORCE_SAVE"), self.force_save),
+            MenuItem(i18n.t("QUIT"), self.quit_app),
+        )
 # ------------------------------------------------------------
 # START
 # ------------------------------------------------------------
 
 if __name__ == "__main__":
-    ActivityTrackerApp().run()
+    app = ActivityTrackerTrayApp()
+    app.run()

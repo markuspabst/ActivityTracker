@@ -1,8 +1,6 @@
-rumps==0.4.0
-pyobjc==12.2
-py2app==0.28.10
-modulegraph==0.19.7
-setuptools==82.0.1
+# System Tray & Icon
+pystray
+Pillow
 
 # Path & Platform Support
 platformdirs==4.2.2
@@ -12,3 +10,6 @@ pydantic==2.13.4
 
 # Retry Logic & Resilience
 tenacity==9.1.4
+
+# Localization
+i18n
