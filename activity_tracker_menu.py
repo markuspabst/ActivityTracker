@@ -1,20 +1,17 @@
 
-from PIL import Image, ImageDraw, ImageFont
-import subprocess
-import time
-from datetime import datetime, timedelta
+from PIL import Image, ImageDraw
 import os
-import csv
-import json
 import sys
-import functools
+import json
+import csv
+import subprocess
 import plistlib
+import functools
 import threading
+import time
 from pathlib import Path
 import platformdirs
-from tenacity import retry, stop_after_attempt, wait_exponential
-from pydantic import BaseModel, Field, ValidationError, ConfigDict
-from typing import Optional
+from datetime import datetime, timedelta
 from pystray import Icon, Menu, MenuItem
 
 import i18n
@@ -79,29 +76,20 @@ CSV_FILE = None
 STATE_FILE = None
 
 
-# Configuration Model with Validation
-# Using pydantic for automatic type validation and error handling
-# ============================================================
+# Simplified configuration
+class AppConfig:
+    """Lightweight configuration"""
+    def __init__(self):
+        self.target_seconds = DEFAULT_TARGET_SECONDS
+        self.weekly_target_seconds = DEFAULT_WEEKLY_TARGET_SECONDS
+        self.idle_threshold_seconds = DEFAULT_IDLE_THRESHOLD
+        
+    def validate(self):
+        """Basic validation"""
+        self.target_seconds = max(3600, min(43200, self.target_seconds))
+        self.weekly_target_seconds = max(10*3600, min(168*3600, self.weekly_target_seconds))
+        self.idle_threshold_seconds = max(60, min(1800, self.idle_threshold_seconds))
 
-class AppConfig(BaseModel):
-    """Configuration model with validation."""
-    model_config = ConfigDict(validate_assignment=True)
-
-    target_seconds: int = Field(
-        default=DEFAULT_TARGET_SECONDS,
-        ge=3600,  # At least 1 hour
-        le=43200  # At most 12 hours
-    )
-    weekly_target_seconds: int = Field(
-        default=DEFAULT_WEEKLY_TARGET_SECONDS,
-        ge=10 * 3600,  # At least 10 hours/week
-        le=168 * 3600  # At most 168 hours/week (full week)
-    )
-    idle_threshold_seconds: int = Field(
-        default=DEFAULT_IDLE_THRESHOLD,
-        ge=60,    # At least 1 minute
-        le=1800   # At most 30 minutes
-    )
     data_dir: Optional[str] = None
     # None = follow the system locale (auto-detect); otherwise a locale code
     # like "en" / "de" matching a file in locales/.
@@ -115,36 +103,64 @@ def ensure_dir(path):
 def load_config():
     """Load and validate configuration from file."""
     ensure_dir(CONFIG_DIR)
-
+    config = AppConfig()
+    
     if not os.path.isfile(CONFIG_FILE):
-        return AppConfig().model_dump()
+        return {
+            'target_seconds': config.target_seconds,
+            'weekly_target_seconds': config.weekly_target_seconds,
+            'idle_threshold_seconds': config.idle_threshold_seconds
+        }
 
     try:
         with open(CONFIG_FILE, "r") as f:
             config_data = json.load(f)
-        # Validate and return the config
-        validated_config = AppConfig(**config_data)
-        return validated_config.model_dump()
+            config.target_seconds = config_data.get('target_seconds', DEFAULT_TARGET_SECONDS)
+            config.weekly_target_seconds = config_data.get('weekly_target_seconds', DEFAULT_WEEKLY_TARGET_SECONDS)
+            config.idle_threshold_seconds = config_data.get('idle_threshold_seconds', DEFAULT_IDLE_THRESHOLD)
+            config.validate()
+            return {
+                'target_seconds': config.target_seconds,
+                'weekly_target_seconds': config.weekly_target_seconds,
+                'idle_threshold_seconds': config.idle_threshold_seconds
+            }
     except Exception as e:
         print(f"Warning: Invalid config, using defaults: {e}")
-        return AppConfig().model_dump()
+        return {
+            'target_seconds': config.target_seconds,
+            'weekly_target_seconds': config.weekly_target_seconds,
+            'idle_threshold_seconds': config.idle_threshold_seconds
+        }
 
 
 def save_config(config):
-    """Save configuration with pydantic validation."""
+    """Save configuration with validation."""
     ensure_dir(CONFIG_DIR)
-
+    
     try:
-        # Validate before saving
-        validated_config = AppConfig(**config)
+        # Create config object and validate
+        cfg = AppConfig()
+        cfg.target_seconds = config.get('target_seconds', DEFAULT_TARGET_SECONDS)
+        cfg.weekly_target_seconds = config.get('weekly_target_seconds', DEFAULT_WEEKLY_TARGET_SECONDS)
+        cfg.idle_threshold_seconds = config.get('idle_threshold_seconds', DEFAULT_IDLE_THRESHOLD)
+        cfg.validate()
+        
         with open(CONFIG_FILE, "w") as f:
-            json.dump(validated_config.model_dump(), f, indent=2)
-    except ValidationError as e:
+            json.dump({
+                'target_seconds': cfg.target_seconds,
+                'weekly_target_seconds': cfg.weekly_target_seconds,
+                'idle_threshold_seconds': cfg.idle_threshold_seconds
+            }, f, indent=2)
+    except Exception as e:
         print(f"Warning: Invalid config values: {e}")
-        # Save only valid fields
-        valid_config = AppConfig()
+        # Save defaults if validation fails
+        cfg = AppConfig()
         with open(CONFIG_FILE, "w") as f:
-            json.dump(valid_config.model_dump(), f, indent=2)
+            json.dump({
+                'target_seconds': cfg.target_seconds,
+                'weekly_target_seconds': cfg.weekly_target_seconds,
+                'idle_threshold_seconds': cfg.idle_threshold_seconds
+            }, f, indent=2)
 
 
 def get_config_value(key, default=None):
@@ -366,24 +382,31 @@ def install_autostart():
     _bootstrap_launchctl()
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=4))
 def _bootstrap_launchctl():
     """Bootstrap launchctl with retry logic."""
-    subprocess.run(
-        ["launchctl", "bootout", launchctl_domain(), LAUNCH_AGENT_FILE],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
-    )
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            subprocess.run(
+                ["launchctl", "bootout", launchctl_domain(), LAUNCH_AGENT_FILE],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
 
-    subprocess.run(
-        ["launchctl", "bootstrap", launchctl_domain(), LAUNCH_AGENT_FILE],
-        check=False
-    )
+            subprocess.run(
+                ["launchctl", "bootstrap", launchctl_domain(), LAUNCH_AGENT_FILE],
+                check=False
+            )
 
-    subprocess.run(
-        ["launchctl", "enable", f"{launchctl_domain()}/{LAUNCH_AGENT_LABEL}"],
-        check=False
-    )
+            subprocess.run(
+                ["launchctl", "enable", f"{launchctl_domain()}/{LAUNCH_AGENT_LABEL}"],
+                check=False
+            )
+            return
+        except Exception:
+            if attempt == max_attempts - 1:
+                raise
+            time.sleep(min(1 * (2 ** attempt), 4))  # Exponential backoff with max 4 seconds
 
 
 def uninstall_autostart():
@@ -393,14 +416,21 @@ def uninstall_autostart():
         os.remove(LAUNCH_AGENT_FILE)
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=4))
 def _unbootstrap_launchctl():
     """Unbootstrap launchctl with retry logic."""
-    subprocess.run(
-        ["launchctl", "bootout", launchctl_domain(), LAUNCH_AGENT_FILE],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
-    )
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            subprocess.run(
+                ["launchctl", "bootout", launchctl_domain(), LAUNCH_AGENT_FILE],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            return
+        except Exception:
+            if attempt == max_attempts - 1:
+                raise
+            time.sleep(min(1 * (2 ** attempt), 4))  # Exponential backoff with max 4 seconds
 
 
 def is_autostart_installed():

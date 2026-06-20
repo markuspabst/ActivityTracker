@@ -5,11 +5,9 @@ Pillow
 # Path & Platform Support
 platformdirs==4.2.2
 
-# Configuration Validation
-pydantic==2.13.4
-
-# Retry Logic & Resilience
-tenacity==9.1.4
+# Core Utilities
+pyobjc-core
+pyobjc-framework-Quartz
 
 # Localization
 i18n
