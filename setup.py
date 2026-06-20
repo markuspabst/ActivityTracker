@@ -36,7 +36,9 @@ OPTIONS = {
         "CFBundleVersion": APP_BUILD,
         "ActivityTrackerBuildDate": APP_BUILD_DATE,
 
-        "LSUIElement": True
+        "LSUIElement": True,
+        "NSMainNibFile": False,
+        "NSPrincipalClass": "NSApplication",
     },
     # platformdirs is imported by both the main app and the dashboard
     # subprocess; bundle it as a whole package so the subprocess can import it
@@ -57,8 +59,9 @@ OPTIONS = {
 
 
 DATA_FILES = [
-    ("scripts", ["scripts/generate_dashboard.py"]),
-    ("locales", [str(p) for p in sorted(Path("locales").glob("*.json"))])
+    ("", ("app-icon.png", "icon_red.png", "icon_yellow.png", "icon_green.png")),
+    ("scripts", ("scripts/generate_dashboard.py",)),
+    ("locales", ("locales/en.json", "locales/de.json"))
 ]
 
 

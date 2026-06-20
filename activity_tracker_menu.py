@@ -1,5 +1,5 @@
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import subprocess
 import time
 from datetime import datetime, timedelta
@@ -18,6 +18,20 @@ from typing import Optional
 from pystray import Icon, Menu, MenuItem
 
 import i18n
+
+
+def get_resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
+
+
 
 
 # ------------------------------------------------------------
@@ -408,6 +422,59 @@ def is_autostart_loaded():
 # ------------------------------------------------------------
 
 
+def bring_app_to_front():
+    """Focus the current application to accept dialog input."""
+    try:
+        from AppKit import NSApplication
+
+        app = NSApplication.sharedApplication()
+        app.activateIgnoringOtherApps_(True)
+
+    except Exception:
+        pass
+
+
+def ask_target_with_slider_osascript(current_value, title="", min_value=0, max_value=100):
+    """
+    Display a dialog with a text field to simulate a slider.
+    Returns the new value as a float, or None if canceled.
+    """
+    bring_app_to_front()
+    script = f'''
+    tell application "System Events"
+        activate
+        try
+            set response to display dialog "{title}" default answer "{current_value:.1f}" buttons {{"Cancel", "OK"}} default button "OK"
+            return text returned of response
+        on error number -128 -- User canceled
+            return ""
+        end try
+    end tell
+    '''
+    try:
+        proc = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            check=False
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            new_value_str = proc.stdout.strip()
+            try:
+                new_value = float(new_value_str)
+                # Clamp the value to the min/max range
+                return max(min(new_value, max_value), min_value)
+            except ValueError:
+                # Handle cases where the user enters non-numeric text
+                return None
+        else:
+            # User cancelled or other script error
+            return None
+    except Exception as e:
+        print(f"Error displaying osascript dialog: {e}")
+        return None
+
+
 # ------------------------------------------------------------
 # macOS Idle Time
 # ------------------------------------------------------------
@@ -530,6 +597,7 @@ def parse_datetime(value):
     except (ValueError, TypeError):
         return None
 
+
 def get_status_icon(is_idle, active_today):
     if is_idle:
         return "🔴"
@@ -538,6 +606,25 @@ def get_status_icon(is_idle, active_today):
         return "🟡"
 
     return "🟢"
+
+
+def emoji_icon(emoji_char, size=64):
+    """Render a colored circle icon regardless of the input emoji shape."""
+    _APPROX = {"🔴": (255, 50, 50), "🟡": (255, 200, 30), "🟢": (50, 200, 50)}
+    # Default to a gray circle if the emoji is not in our approximation map
+    colour = _APPROX.get(emoji_char, (200, 200, 200))
+
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    # Draw a filled circle. The margin is used to ensure the circle doesn't touch the image edges.
+    margin = 3
+    diameter = size - 2 * margin
+    draw.ellipse(
+        [margin, margin, margin + diameter, margin + diameter],
+        fill=colour + (255,),
+    )
+    return img
 
 # ------------------------------------------------------------
 # CSV Handling
@@ -930,13 +1017,18 @@ class ActivityTrackerTrayApp:
         )
 
         active_today = report["active_seconds"]
-        status_icon = get_status_icon(is_idle, active_today)
-        self.icon.title = f"{status_icon} {format_hours(active_today)}"
+
+        status_emoji = get_status_icon(is_idle, active_today)
+        self.icon.icon = emoji_icon(status_emoji)
+
+        self.icon.title = f"{format_hours(active_today)}"
         self.icon.update_menu()
 
     def run(self):
-        image = Image.open("app-icon.icns")
-        self.icon = Icon("ActivityTracker", image, "ActivityTracker", Menu(self.generate_menu))
+        # correct one within a few seconds.
+        initial_icon = emoji_icon("🟢")
+
+        self.icon = Icon("ActivityTracker", initial_icon, "ActivityTracker", Menu(self.generate_menu))
         self.timer = threading.Timer(UPDATE_INTERVAL, self.update_and_reschedule)
         self.timer.start()
         self.icon.run()
@@ -1086,21 +1178,17 @@ class ActivityTrackerTrayApp:
     # --------------------------------------------------------
     # Target settings
     # --------------------------------------------------------
+    def ask_target_with_slider(self, current_hours, title="", min_hours=4.0, max_hours=12.0):
+        return ask_target_with_slider_osascript(current_hours, title=title, min_value=min_hours, max_value=max_hours)
+
+    def ask_minutes_with_slider(self, current_minutes, title="", min_minutes=1, max_minutes=30):
+        return ask_target_with_slider_osascript(current_minutes, title=title, min_value=min_minutes, max_value=max_minutes)
 
     def set_target(self, seconds):
         global TARGET_WORK_SECONDS
 
         TARGET_WORK_SECONDS = int(seconds)
         persist_target(seconds)
-
-    def set_target_6h(self, _):
-        self.set_target(6 * 3600)
-
-    def set_target_8h(self, _):
-        self.set_target(8 * 3600)
-
-    def set_target_10h(self, _):
-        self.set_target(10 * 3600)
 
     def set_target_slider(self, _):
         current_hours = TARGET_WORK_SECONDS / 3600
@@ -1119,15 +1207,6 @@ class ActivityTrackerTrayApp:
 
         WEEKLY_TARGET_SECONDS = int(seconds)
         persist_weekly_target(seconds)
-
-    def set_weekly_30h(self, _):
-        self.set_weekly_target(30 * 3600)
-
-    def set_weekly_40h(self, _):
-        self.set_weekly_target(40 * 3600)
-
-    def set_weekly_50h(self, _):
-        self.set_weekly_target(50 * 3600)
 
     def set_weekly_slider(self, _):
         current_hours = WEEKLY_TARGET_SECONDS / 3600
@@ -1150,18 +1229,6 @@ class ActivityTrackerTrayApp:
 
         IDLE_THRESHOLD = int(seconds)
         persist_idle_threshold(seconds)
-
-    def set_idle_2m(self, _):
-        self.set_idle_threshold(2 * 60)
-
-    def set_idle_5m(self, _):
-        self.set_idle_threshold(5 * 60)
-
-    def set_idle_10m(self, _):
-        self.set_idle_threshold(10 * 60)
-
-    def set_idle_15m(self, _):
-        self.set_idle_threshold(15 * 60)
 
     def set_idle_slider(self, _):
         current_minutes = IDLE_THRESHOLD / 60
@@ -1206,27 +1273,6 @@ class ActivityTrackerTrayApp:
     # --------------------------------------------------------
     # Language
     # --------------------------------------------------------
-
-    def build_language_menu(self):
-        """Populate the Language submenu: System Default + one item per locale."""
-        self.language_items = {}
-
-        # "System Default" clears the override and follows the OS locale.
-        system_item = MenuItem(
-            i18n.t("LANGUAGE_SYSTEM_DEFAULT"),
-            self.make_language_callback(None)
-        )
-        self.language_items[None] = system_item
-        self.language_menu.add(system_item)
-        self.language_menu.add(Menu.SEPARATOR)
-
-        for code in sorted(i18n.available_locales()):
-            item = MenuItem(
-                locale_display_name(code),
-                self.make_language_callback(code)
-            )
-            self.language_items[code] = item
-            self.language_menu.add(item)
 
     def make_language_callback(self, code):
         def callback(_):
@@ -1275,17 +1321,13 @@ class ActivityTrackerTrayApp:
     # UI Update
     # --------------------------------------------------------
 
-    # --------------------------------------------------------
-    # Settings Actions
-    # --------------------------------------------------------
-
     def select_data_folder(self, _):
         folder = self.choose_data_folder()
 
         if not folder:
             return
 
-        self.save_delta()
+        self.save_delta(self)
         self.save_state(dirty=False)
         mark_state_clean()
 
@@ -1299,13 +1341,122 @@ class ActivityTrackerTrayApp:
         subprocess.run(["open", DATA_DIR])
 
     def reset_data_folder(self, _):
-        self.save_delta()
+        self.save_delta(self)
         self.save_state(dirty=False)
         mark_state_clean()
 
         reset_data_dir_to_default()
 
         self.save_state(dirty=True)
+
+    def choose_data_folder(self):
+        """Native macOS folder selection dialog."""
+        bring_app_to_front()
+
+        script = '''
+        set chosen_folder to choose folder with prompt "Select a folder for CSV and state data:"
+        return POSIX path of chosen_folder
+        '''
+        try:
+            proc = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, check=False)
+            if proc.returncode == 0:
+                return proc.stdout.strip()
+            return None
+        except Exception as e:
+            print(f"Error opening folder choice dialog: {e}")
+            return None
+
+    def select_data_folder(self, _):
+        folder = self.choose_data_folder()
+
+        if not folder:
+            return
+
+        self.save_delta(self)
+        self.save_state(dirty=False)
+        mark_state_clean()
+
+        set_data_dir(folder)
+        persist_data_dir(folder)
+
+        self.save_state(dirty=True)
+
+    def open_data_folder(self, _):
+        ensure_dir(DATA_DIR)
+        subprocess.run(["open", DATA_DIR])
+
+    def reset_data_folder(self, _):
+        self.save_delta(self)
+        self.save_state(dirty=False)
+        mark_state_clean()
+
+        reset_data_dir_to_default()
+
+        self.save_state(dirty=True)
+
+    def choose_data_folder(self):
+        """Native macOS folder selection dialog."""
+        bring_app_to_front()
+
+        script = '''
+        set chosen_folder to choose folder with prompt "Select a folder for CSV and state data:"
+        return POSIX path of chosen_folder
+        '''
+        try:
+            proc = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, check=False)
+            if proc.returncode == 0:
+                return proc.stdout.strip()
+            return None
+        except Exception as e:
+            print(f"Error opening folder choice dialog: {e}")
+            return None
+
+    def select_data_folder(self, _):
+        folder = self.choose_data_folder()
+
+        if not folder:
+            return
+
+        self.save_delta(self)
+        self.save_state(dirty=False)
+        mark_state_clean()
+
+        set_data_dir(folder)
+        persist_data_dir(folder)
+
+        self.save_state(dirty=True)
+
+    def open_data_folder(self, _):
+        ensure_dir(DATA_DIR)
+        subprocess.run(["open", DATA_DIR])
+
+    def reset_data_folder(self, _):
+        self.save_delta(self)
+        self.save_state(dirty=False)
+        mark_state_clean()
+
+        reset_data_dir_to_default()
+
+        self.save_state(dirty=True)
+
+    def choose_data_folder(self):
+        """Native macOS folder selection dialog."""
+        bring_app_to_front()
+
+        script = '''
+        set chosen_folder to choose folder with prompt "Select a folder for CSV and state data:"
+        return POSIX path of chosen_folder
+        '''
+        try:
+            proc = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, check=False)
+            if proc.returncode == 0:
+                return proc.stdout.strip()
+            return None
+        except Exception as e:
+            print(f"Error opening folder choice dialog: {e}")
+            return None
+
+
 
     # --------------------------------------------------------
     # Actions
@@ -1347,41 +1498,90 @@ class ActivityTrackerTrayApp:
                 Menu.SEPARATOR,
             ])
 
-        target_menu = Menu(
-            MenuItem('6h', self.set_target_6h, checked=lambda item: TARGET_WORK_SECONDS == 6 * 3600),
-            MenuItem('8h', self.set_target_8h, checked=lambda item: TARGET_WORK_SECONDS == 8 * 3600),
-            MenuItem('10h', self.set_target_10h, checked=lambda item: TARGET_WORK_SECONDS == 10 * 3600),
+        target_menu_items = []
+        for h in range(4, 13):
+            target_menu_items.append(
+                MenuItem(
+                    f'{h}h',
+                    lambda _, h=h: self.set_target(h * 3600),
+                    checked=lambda item, h=h: TARGET_WORK_SECONDS == h * 3600
+                )
+            )
+        target_menu_items.extend([
             Menu.SEPARATOR,
-            MenuItem(i18n.t("SET_DAILY_TARGET_SLIDER"), self.set_target_slider, enabled=sys.platform == 'darwin')
-        )
+            MenuItem(
+                i18n.t("SET_CUSTOM_VALUE"),
+                self.set_target_slider,
+                enabled=sys.platform == 'darwin'
+            )
+        ])
+        target_menu = Menu(*target_menu_items)
 
-        weekly_target_menu = Menu(
-            MenuItem('30h', self.set_weekly_30h, checked=lambda item: WEEKLY_TARGET_SECONDS == 30 * 3600),
-            MenuItem('40h', self.set_weekly_40h, checked=lambda item: WEEKLY_TARGET_SECONDS == 40 * 3600),
-            MenuItem('50h', self.set_weekly_50h, checked=lambda item: WEEKLY_TARGET_SECONDS == 50 * 3600),
+        weekly_target_menu_items = []
+        for h in range(20, 61, 5):
+            weekly_target_menu_items.append(
+                MenuItem(
+                    f'{h}h',
+                    lambda _, h=h: self.set_weekly_target(h * 3600),
+                    checked=lambda item, h=h: WEEKLY_TARGET_SECONDS == h * 3600
+                )
+            )
+        weekly_target_menu_items.extend([
             Menu.SEPARATOR,
-            MenuItem(i18n.t("SET_WEEKLY_TARGET_SLIDER"), self.set_weekly_slider, enabled=sys.platform == 'darwin')
-        )
+            MenuItem(
+                i18n.t("SET_CUSTOM_VALUE"),
+                self.set_weekly_slider,
+                enabled=sys.platform == 'darwin'
+            )
+        ])
+        weekly_target_menu = Menu(*weekly_target_menu_items)
 
-        idle_menu = Menu(
-            MenuItem('2 min', self.set_idle_2m, checked=lambda item: IDLE_THRESHOLD == 2 * 60),
-            MenuItem('5 min', self.set_idle_5m, checked=lambda item: IDLE_THRESHOLD == 5 * 60),
-            MenuItem('10 min', self.set_idle_10m, checked=lambda item: IDLE_THRESHOLD == 10 * 60),
-            MenuItem('15 min', self.set_idle_15m, checked=lambda item: IDLE_THRESHOLD == 15 * 60),
+        idle_menu_items = []
+        for m in [1, 2, 3, 5, 10, 15, 20, 30]:
+            idle_menu_items.append(
+                MenuItem(
+                    f'{m} min',
+                    lambda _, m=m: self.set_idle_threshold(m * 60),
+                    checked=lambda item, m=m: IDLE_THRESHOLD == m * 60
+                )
+            )
+        idle_menu_items.extend([
             Menu.SEPARATOR,
-            MenuItem(i18n.t("SET_IDLE_THRESHOLD_SLIDER"), self.set_idle_slider, enabled=sys.platform == 'darwin')
+            MenuItem(
+                i18n.t("SET_CUSTOM_VALUE"),
+                self.set_idle_slider,
+                enabled=sys.platform == 'darwin'
+            )
+        ])
+        idle_menu = Menu(*idle_menu_items)
+
+
+        language_menu_items = []
+        system_item = MenuItem(
+            i18n.t("LANGUAGE_SYSTEM_DEFAULT"),
+            self.make_language_callback(None),
+            checked=lambda item: get_config_value("locale") is None
         )
+        language_menu_items.append(system_item)
+        language_menu_items.append(Menu.SEPARATOR)
 
+        for code in sorted(i18n.available_locales()):
+            item = MenuItem(
+                locale_display_name(code),
+                self.make_language_callback(code),
+                checked=lambda item, c=code: get_config_value("locale") == c
+            )
+            language_menu_items.append(item)
 
-        language_items = []
-        # ... (language item generation)
+        language_menu = Menu(*language_menu_items)
+
 
         settings_items.extend([
             MenuItem(i18n.t("DAILY_TARGET"), target_menu),
             MenuItem(i18n.t("WEEKLY_TARGET"), weekly_target_menu),
             MenuItem(i18n.t("IDLE_THRESHOLD"), idle_menu),
             Menu.SEPARATOR,
-            MenuItem(i18n.t("LANGUAGE"), Menu(*language_items)),
+            MenuItem(i18n.t("LANGUAGE"), language_menu),
             Menu.SEPARATOR,
             MenuItem(i18n.t("AUTOSTART_DISABLED"), self.toggle_autostart, checked=lambda item: is_autostart_installed()),
             MenuItem(i18n.t("OPEN_AUTOSTART_FILE"), self.open_autostart_file),
