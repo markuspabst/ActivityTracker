@@ -34,7 +34,7 @@ to a CSV you own. It is designed for:
 | Runtime engine | Computes active/idle/total session metrics every 5 s | `calculate_current_session()`, `update()` |
 | CSV storage | Long-term daily persistence (stdlib `csv`) | `read_csv_data()` / `write_csv_data()` |
 | State file | Crash-safe recovery of unsaved time | `read_state()` / `recover_previous_session_if_needed()` |
-| Config | User preferences, validated with pydantic | `AppConfig`, `load_config()` / `save_config()` |
+| Config | User preferences, cached validated values | `AppConfig`, `load_config()` / `save_config()` |
 | LaunchAgent | Autostart via `launchctl` | `install_autostart()` / `uninstall_autostart()` |
 | i18n | Locale-aware UI strings | `i18n.py`, `locales/*.json` |
 | Dashboard | HTML productivity report | `scripts/generate_dashboard.py` |
@@ -44,10 +44,10 @@ to a CSV you own. It is designed for:
 | Constant | Value | Meaning |
 |----------|-------|---------|
 | `UPDATE_INTERVAL` | 5 s | UI + state refresh interval |
-| `WRITE_INTERVAL` | 3600 s | CSV auto-save interval (also saved on quit / force-save / folder change) |
+| `WRITE_INTERVAL` | 3600 s | CSV auto-save interval |
 | `DEFAULT_TARGET_SECONDS` | 8 h | Default daily target (user-configurable) |
 | `DEFAULT_WEEKLY_TARGET_SECONDS` | 40 h | Default weekly target (user-configurable) |
-| `DEFAULT_IDLE_THRESHOLD` | 300 s | Default idle threshold — idle after 5 min of no input (user-configurable) |
+| `DEFAULT_IDLE_THRESHOLD` | 300 s | Idle after 5 min of no input (user-configurable) |
 
 ---
 
@@ -107,7 +107,7 @@ pip install -r requirements.txt
 ```
 
 Key libraries: `rumps` + `pyobjc` (menu bar, native dialogs, Quartz idle API),
-`platformdirs` (storage paths), `pydantic` (config validation), `tenacity`
+`platformdirs` (storage paths)
 (launchctl retry), `py2app` (packaging). CSV handling and the dashboard CLI use
 only the Python standard library.
 

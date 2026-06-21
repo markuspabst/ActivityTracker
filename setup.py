@@ -25,24 +25,19 @@ APP_VERSION, APP_BUILD, APP_BUILD_DATE = read_version()
 
 
 OPTIONS = {
-        "argv_emulation": True,
+    "argv_emulation": True,
     "iconfile": "app-icon.icns",
     "plist": {
         "CFBundleName": "ActivityTracker",
         "CFBundleDisplayName": "ActivityTracker",
         "CFBundleIdentifier": "com.markus.activitytracker",
-
         "CFBundleShortVersionString": APP_VERSION,
         "CFBundleVersion": APP_BUILD,
         "ActivityTrackerBuildDate": APP_BUILD_DATE,
-
         "LSUIElement": True,
         "NSMainNibFile": False,
         "NSPrincipalClass": "NSApplication",
     },
-    # platformdirs is imported by both the main app and the dashboard
-    # subprocess; bundle it as a whole package so the subprocess can import it
-    # inside the .app (py2app's analysis of the main app alone may prune it).
     "packages": ["rumps", "platformdirs"],
     "includes": [
         "AppKit",
@@ -52,14 +47,11 @@ OPTIONS = {
         "i18n",
         "version_generated",
         "platformdirs",
-        "pydantic",
-        "tenacity"
     ]
 }
 
 
 DATA_FILES = [
-    ("", ("app-icon.png", "icon_red.png", "icon_yellow.png", "icon_green.png")),
     ("scripts", ("scripts/generate_dashboard.py",)),
     ("locales", ("locales/en.json", "locales/de.json"))
 ]
