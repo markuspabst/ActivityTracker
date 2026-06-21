@@ -7,13 +7,17 @@ import sys
 import webbrowser
 from datetime import datetime, timedelta
 from pathlib import Path
-import platformdirs
 
-# -------- PATHS --------
-
-APP_NAME = "ActivityTracker"
-DATA_DIR = Path(platformdirs.user_data_dir(APP_NAME))
-CSV_FILE = DATA_DIR / "activity_tracker_log.csv"
+# Reuse the shared data / tracking layer
+import tracking
+from tracking import (
+    read_csv_data,
+    get_day_from_csv,
+    get_current_week_dates,
+    get_weekly_seconds_from_csv,
+    DATA_DIR,
+    CSV_FILE,
+)
 
 OUTPUT_HTML = Path.home() / "ActivityTracker_Dashboard.html"
 OUTPUT_JS = Path.home() / "ActivityTracker_Dashboard_Data.js"
@@ -25,42 +29,23 @@ WEEKLY_TARGET = 40 * 3600
 
 
 # ------------------------------------------------------------
-# DATA LOAD
+# DATA LOAD (reuses tracking module's CSV reader)
 # ------------------------------------------------------------
 
-def read_data():
-    """Read CSV data into a list of row dicts using stdlib csv."""
-    if not CSV_FILE.exists():
-        return []
-
-    try:
-        with open(CSV_FILE, "r", newline="") as f:
-            return list(csv.DictReader(f))
-    except (csv.Error, UnicodeDecodeError, IOError) as e:
-        print(f"Warning: Could not read CSV: {e}")
-        return []
-
-
-def last_n_days(rows, n):
+def _last_n_days(n):
     """Get last n days of data, filling missing dates with zeros."""
-    if not rows:
-        return []
-    
+    csv_data = read_csv_data()
     today = datetime.now().date()
     result = []
 
     for i in range(n):
         d = (today - timedelta(days=i)).isoformat()
-        row = next((r for r in rows if r.get("date") == d), None)
-
-        if row:
-            result.append({
-                "date": row.get("date", d),
-                "active": float(row.get("active_seconds", 0) or 0),
-                "idle": float(row.get("idle_seconds", 0) or 0)
-            })
-        else:
-            result.append({"date": d, "active": 0, "idle": 0})
+        day = get_day_from_csv(d, csv_data)
+        result.append({
+            "date": d,
+            "active": day["active_seconds"],
+            "idle": day["idle_seconds"],
+        })
 
     return list(reversed(result))
 
@@ -69,9 +54,8 @@ def last_n_days(rows, n):
 # PRODUCTIVITY SCORE
 # ------------------------------------------------------------
 
-def compute_score(rows):
-    last7 = last_n_days(rows, 7)
-
+def compute_score():
+    last7 = _last_n_days(7)
     today = last7[-1]
     active = today["active"]
     idle = today["idle"]
@@ -107,9 +91,9 @@ def compute_score(rows):
 # BUILD DATA
 # ------------------------------------------------------------
 
-def build_data(rows):
-    last7 = last_n_days(rows, 7)
-    score = compute_score(rows)
+def build_data():
+    last7 = _last_n_days(7)
+    score = compute_score()
 
     return {
         "generated": datetime.now().strftime("%H:%M:%S"),
@@ -225,9 +209,10 @@ setInterval(refresh, 10000);
 
 def main(data_only=False):
     """Generate ActivityTracker dashboard."""
-    rows = read_data()
+    # Ensure tracking module has paths initialised
+    tracking.set_data_dir(tracking.get_configured_data_dir())
 
-    data = build_data(rows)
+    data = build_data()
     write_data(data)
 
     if data_only:

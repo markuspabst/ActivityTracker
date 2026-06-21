@@ -47,6 +47,9 @@ OPTIONS = {
         "i18n",
         "version_generated",
         "platformdirs",
+        "tracking",
+        "platform_layer",
+        "platform_layer.macos",
     ]
 }
 
