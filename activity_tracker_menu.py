@@ -1,10 +1,12 @@
 
 from PIL import Image, ImageDraw
-import os, sys, json, csv, subprocess, plistlib, functools, threading, time
+import os, sys, json, csv, subprocess, functools, threading, time
 from pathlib import Path
 import platformdirs
 from datetime import datetime, timedelta
 from pystray import Icon, Menu, MenuItem
+
+from platform_layer import get_platform, detect_platform
 import i18n
 
 try:
@@ -197,222 +199,51 @@ IDLE_THRESHOLD = load_idle_threshold()
 
 
 # ------------------------------------------------------------
-# Version Handling
+# Version Handling (delegated to platform layer)
 # ------------------------------------------------------------
+plat = get_platform()
 
-def get_app_bundle_path():
-    executable = Path(sys.executable).resolve()
-
-    for parent in [executable] + list(executable.parents):
-        if parent.suffix == ".app":
-            return str(parent)
-
-    return None
-
-
-def get_bundle_info_plist():
-    try:
-        app_path = get_app_bundle_path()
-
-        if not app_path:
-            return None
-
-        plist_path = Path(app_path) / "Contents" / "Info.plist"
-
-        if not plist_path.exists():
-            return None
-
-        with open(plist_path, "rb") as f:
-            return plistlib.load(f)
-
-    except Exception:
-        return None
-
-
-# Version/build date are immutable for the process lifetime; cache them so the
-# per-tick tooltip doesn't re-read and parse the bundle Info.plist from disk.
-@functools.lru_cache(maxsize=1)
 def get_bundle_version():
-    plist = get_bundle_info_plist()
+    return plat.get_bundle_version(fallback=APP_FULL_VERSION)
 
-    if plist:
-        version = plist.get("CFBundleShortVersionString", "unknown")
-        build = plist.get("CFBundleVersion", "")
-
-        if build:
-            return f"{version} ({build})"
-
-        return version
-
-    return APP_FULL_VERSION
-
-
-@functools.lru_cache(maxsize=1)
 def get_bundle_build_date():
-    plist = get_bundle_info_plist()
-
-    if plist:
-        return plist.get("ActivityTrackerBuildDate", APP_BUILD_DATE)
-
-    return APP_BUILD_DATE
+    return plat.get_bundle_build_date(fallback=APP_BUILD_DATE)
 
 
 # ------------------------------------------------------------
-# Enterprise Autostart / LaunchAgent
+# Autostart (delegated to platform layer)
 # ------------------------------------------------------------
 
-LAUNCH_AGENT_LABEL = "com.markus.activitytracker"
-LAUNCH_AGENT_DIR = os.path.expanduser("~/Library/LaunchAgents")
-LAUNCH_AGENT_FILE = os.path.join(
-    LAUNCH_AGENT_DIR,
-    f"{LAUNCH_AGENT_LABEL}.plist"
-)
-
-LOG_DIR = os.path.expanduser("~/Library/Logs/ActivityTracker")
-LAUNCH_AGENT_OUT = os.path.join(LOG_DIR, "activitytracker.out.log")
-LAUNCH_AGENT_ERR = os.path.join(LOG_DIR, "activitytracker.err.log")
-
-
-def launchctl_domain():
-    return f"gui/{os.getuid()}"
-
-
-def get_app_executable_path():
-    app_path = get_app_bundle_path()
-    if not app_path:
-        return None
-    exec_dir = Path(app_path) / "Contents" / "MacOS"
-    if not exec_dir.exists():
-        return None
-    executables = [str(f) for f in exec_dir.iterdir() if f.is_file() and os.access(f, os.X_OK)]
-    return executables[0] if executables else None
-
-
-def write_launch_agent_plist():
-    app_executable = get_app_executable_path()
-    if not app_executable:
-        raise RuntimeError("Autostart requires packaged ActivityTracker.app. Build with py2app first.")
-    ensure_dir(LAUNCH_AGENT_DIR); ensure_dir(LOG_DIR)
-    plist = {"Label": LAUNCH_AGENT_LABEL, "ProgramArguments": [app_executable], "RunAtLoad": True,
-             "KeepAlive": False, "LimitLoadToSessionType": "Aqua",
-             "StandardOutPath": LAUNCH_AGENT_OUT, "StandardErrorPath": LAUNCH_AGENT_ERR,
-             "WorkingDirectory": str(Path(app_executable).parent)}
-    with open(LAUNCH_AGENT_FILE, "wb") as f:
-        plistlib.dump(plist, f)
-
-
-def _retry_launchctl(cmd):
-    write_launch_agent_plist()
-    _retry_launchctl(["launchctl", "bootout", launchctl_domain(), LAUNCH_AGENT_FILE])
-    _retry_launchctl(["launchctl", "bootstrap", launchctl_domain(), LAUNCH_AGENT_FILE])
-    _retry_launchctl(["launchctl", "enable", f"{launchctl_domain()}/{LAUNCH_AGENT_LABEL}"])
+def install_autostart():
+    plat.install_autostart()
 
 def uninstall_autostart():
-    _retry_launchctl(["launchctl", "bootout", launchctl_domain(), LAUNCH_AGENT_FILE])
-    if os.path.isfile(LAUNCH_AGENT_FILE):
-        os.remove(LAUNCH_AGENT_FILE)
-
+    plat.uninstall_autostart()
 
 def is_autostart_installed():
-    return os.path.isfile(LAUNCH_AGENT_FILE)
-
+    return plat.autostart_installed()
 
 def is_autostart_loaded():
-    result = subprocess.run(
-        ["launchctl", "print", f"{launchctl_domain()}/{LAUNCH_AGENT_LABEL}"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
-    )
-
-    return result.returncode == 0
+    return plat.autostart_loaded()
 
 
 # ------------------------------------------------------------
-# Native macOS Dialogs
+# Native Dialogs (delegated to platform layer)
 # ------------------------------------------------------------
-
 
 def bring_app_to_front():
-    """Focus the app for dialog input."""
-    try:
-        from AppKit import NSApplication
-        NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
-    except Exception:
-        pass
-
+    plat.bring_app_to_front()
 
 def ask_target_with_slider_osascript(current_value, title="", min_value=0, max_value=100):
-    """Display an OS dialog and return the entered value as float, or None."""
-    bring_app_to_front()
-    proc = subprocess.run(
-        ["osascript", "-e", f'''tell application "System Events" to set response to display dialog "{title}" default answer "{current_value:.1f}" buttons {{"Cancel", "OK"}} default button "OK"'''],
-        capture_output=True, text=True, check=False
-    )
-    if proc.returncode == 0 and proc.stdout.strip():
-        try:
-            return max(min(float(proc.stdout.strip()), max_value), min_value)
-        except ValueError:
-            return None
-    return None
+    return plat.ask_slider_dialog(title, current_value, min_value, max_value)
 
 
 # ------------------------------------------------------------
-# Idle time cache (1 second TTL to avoid redundant Quartz calls)
+# Idle time (delegated to platform layer)
 # ------------------------------------------------------------
-_idle_cache = {'time': 0, 'value': 0}
-IDLE_CACHE_TTL = 1.0  # 1 second cache to avoid redundant Quartz calls
 
 def get_idle_time():
-    """Seconds since the last HID input event."""
-    now = time.time()
-    if now - _idle_cache['time'] < IDLE_CACHE_TTL:
-        return _idle_cache['value']
-
-    if sys.platform == 'darwin':
-        try:
-            import Quartz
-            value = Quartz.CGEventSourceSecondsSinceLastEventType(
-                Quartz.kCGEventSourceStateHIDSystemState,
-                Quartz.kCGAnyInputEventType
-            )
-        except Exception:
-            try:
-                output = subprocess.check_output(
-                    ["ioreg", "-c", "IOHIDSystem"],
-                    stderr=subprocess.DEVNULL
-                ).decode()
-                value = 0
-                for line in output.split("\n"):
-                    if "HIDIdleTime" in line:
-                        value = int(line.split("=")[-1].strip()) / 1_000_000_000
-                        break
-            except Exception:
-                value = 0
-    elif sys.platform == 'win32':
-        from ctypes import Structure, windll, c_uint, sizeof, byref
-        class LASTINPUTINFO(Structure):
-            _fields_ = [('cbSize', c_uint), ('dwTime', c_uint)]
-        info = LASTINPUTINFO()
-        info.cbSize = sizeof(info)
-        windll.user32.GetLastInputInfo(byref(info))
-        value = (windll.kernel32.GetTickCount() - info.dwTime) / 1000.0
-    elif sys.platform.startswith('linux'):
-        try:
-            from Xlib import X, display
-            from Xlib.ext import screensaver
-            d = display.Display()
-            info = screensaver.Info(d, d.screen().root)
-            value = info.idle / 1000.0
-        except (ImportError, AttributeError):
-            try:
-                value = int(subprocess.check_output(['xprintidle']).decode()) / 1000.0
-            except (FileNotFoundError, ValueError):
-                value = 0
-    else:
-        value = 0
-
-    _idle_cache.update(time=now, value=value)
-    return value
+    return plat.get_idle_time()
 
 # ------------------------------------------------------------
 # Formatting
@@ -727,43 +558,23 @@ def recover_previous_session_if_needed():
 
 
 # ------------------------------------------------------------
-# Dashboard script path
+# Dashboard script path (delegated to platform layer)
 # ------------------------------------------------------------
 
 def find_dashboard_script():
-    """Locate generate_dashboard.py in the source tree or py2app bundle."""
-    local_path = Path(__file__).resolve().parent / "scripts" / "generate_dashboard.py"
-    if local_path.exists():
-        return local_path
-    app_path = get_app_bundle_path()
-    if app_path:
-        bundle_path = Path(app_path) / "Contents" / "Resources" / "scripts" / "generate_dashboard.py"
-        if bundle_path.exists():
-            return bundle_path
-    return local_path
+    return plat.find_dashboard_script()
 
 
 def dashboard_python_command():
-    """Return (executable, env) for running the dashboard script as a subprocess."""
-    app_path = get_app_bundle_path()
-    if app_path:
-        bundled_python = Path(app_path) / "Contents" / "MacOS" / "python"
-        resources = Path(app_path) / "Contents" / "Resources"
-        lib_dir = resources / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}"
-        if bundled_python.exists() and lib_dir.exists():
-            env = os.environ.copy()
-            env["PYTHONHOME"] = str(resources)
-            env["PYTHONPATH"] = os.pathsep.join([str(lib_dir), str(lib_dir / "lib-dynload")])
-            return str(bundled_python), env
-    return sys.executable, None
+    return plat.get_dashboard_python_cmd()
 
 
 # ------------------------------------------------------------
 # Locale display names
 # ------------------------------------------------------------
 
-# Fallback names for locale codes; the native macOS API is preferred when
-# available so new locale files get a sensible autonym for free.
+# Fallback names for locale codes; the platform layer can provide a native
+# name (macOS uses NSLocale), otherwise we use these fallbacks.
 _LOCALE_FALLBACK_NAMES = {
     "en": "English",
     "de": "Deutsch",
@@ -772,15 +583,9 @@ _LOCALE_FALLBACK_NAMES = {
 
 def locale_display_name(code):
     """Human-readable, self-localized name for a locale code (e.g. 'Deutsch')."""
-    try:
-        from Foundation import NSLocale, NSLocaleIdentifier
-        loc = NSLocale.alloc().initWithLocaleIdentifier_(code)
-        name = loc.displayNameForKey_value_(NSLocaleIdentifier, code)
-        if name:
-            return name[:1].upper() + name[1:]
-    except Exception:
-        pass
-
+    name = plat.locale_display_name(code)
+    if name:
+        return name
     return _LOCALE_FALLBACK_NAMES.get(code, code.upper())
 
 
@@ -1020,12 +825,14 @@ class ActivityTrackerTrayApp:
             print(f"Autostart error: {e}")
 
     def open_autostart_file(self, _):
-        ensure_dir(LAUNCH_AGENT_DIR)
-
-        if os.path.isfile(LAUNCH_AGENT_FILE):
-            subprocess.run(["open", "-R", LAUNCH_AGENT_FILE])
-        else:
-            subprocess.run(["open", LAUNCH_AGENT_DIR])
+        info = plat.get_autostart_config_path()
+        if info:
+            config_dir, config_file = info
+            if config_file and os.path.isfile(config_file):
+                plat.reveal_file_in_manager(config_file)
+            elif config_dir:
+                os.makedirs(config_dir, exist_ok=True)
+                plat.open_file_manager(config_dir)
 
     # --------------------------------------------------------
     # Version
@@ -1091,8 +898,9 @@ class ActivityTrackerTrayApp:
         self.save_state(dirty=True)
 
     def open_data_folder(self, _):
-        ensure_dir(DATA_DIR)
-        subprocess.run(["open", DATA_DIR])
+        path = DATA_DIR or DEFAULT_BASE_DIR
+        ensure_dir(path)
+        plat.open_file_manager(path)
 
     def reset_data_folder(self, _):
         self.save_delta(self)
@@ -1104,15 +912,8 @@ class ActivityTrackerTrayApp:
         self.save_state(dirty=True)
 
     def choose_data_folder(self):
-        """Native macOS folder selection dialog."""
-        bring_app_to_front()
-        try:
-            r = subprocess.run(["osascript", "-e", 'set f to choose folder with prompt "Select a folder for CSV and state data:"\nreturn POSIX path of f'],
-                              capture_output=True, text=True, check=False)
-            return r.stdout.strip() if r.returncode == 0 else None
-        except Exception as e:
-            print(f"Error opening folder choice dialog: {e}")
-            return None
+        """Native folder selection dialog (delegated to platform layer)."""
+        return plat.choose_folder_dialog(prompt="Select a folder for CSV and state data:")
 
 
     # --------------------------------------------------------
@@ -1141,7 +942,7 @@ class ActivityTrackerTrayApp:
         weekly_overtime = weekly_total - WEEKLY_TARGET_SECONDS
 
         settings_items = []
-        if sys.platform == 'darwin':
+        if detect_platform() == 'macos':
             settings_items.extend([
                 MenuItem(i18n.t("SELECT_DATA_FOLDER"), self.select_data_folder),
                 MenuItem(i18n.t("OPEN_DATA_FOLDER"), self.open_data_folder),
@@ -1163,7 +964,7 @@ class ActivityTrackerTrayApp:
             MenuItem(
                 i18n.t("SET_CUSTOM_VALUE"),
                 self.set_target_slider,
-                enabled=sys.platform == 'darwin'
+                enabled=plat.supports_native_dialogs()
             )
         ])
         target_menu = Menu(*target_menu_items)
@@ -1182,7 +983,7 @@ class ActivityTrackerTrayApp:
             MenuItem(
                 i18n.t("SET_CUSTOM_VALUE"),
                 self.set_weekly_slider,
-                enabled=sys.platform == 'darwin'
+                enabled=plat.supports_native_dialogs()
             )
         ])
         weekly_target_menu = Menu(*weekly_target_menu_items)
@@ -1201,7 +1002,7 @@ class ActivityTrackerTrayApp:
             MenuItem(
                 i18n.t("SET_CUSTOM_VALUE"),
                 self.set_idle_slider,
-                enabled=sys.platform == 'darwin'
+                enabled=plat.supports_native_dialogs()
             )
         ])
         idle_menu = Menu(*idle_menu_items)

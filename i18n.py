@@ -4,10 +4,7 @@ import os
 import sys
 from pathlib import Path
 
-try:
-    from Foundation import NSUserDefaults
-except Exception:
-    NSUserDefaults = None
+from platform_layer import get_platform
 
 _translations = {}
 _lang = None
@@ -28,6 +25,7 @@ def _get_locales_dir():
 
 
 def _get_system_locale():
+    # Try environment variables first (works on all platforms)
     for env_var in ("LC_ALL", "LANGUAGE", "LANG"):
         value = os.environ.get(env_var)
         if value:
@@ -35,21 +33,18 @@ def _get_system_locale():
             if lang and lang.lower() != "c":
                 return lang
 
+    # Try stdlib locale module
     sys_loc = locale.getdefaultlocale()[0] or locale.getlocale()[0]
     if sys_loc:
         lang = sys_loc.split(".")[0].split("_")[0]
         if lang and lang.lower() != "c":
             return lang
 
-    if NSUserDefaults is not None:
-        try:
-            langs = NSUserDefaults.standardUserDefaults().objectForKey_("AppleLanguages")
-            if langs and len(langs) > 0:
-                lang = str(langs[0]).split("-")[0]
-                if lang and lang.lower() != "c":
-                    return lang
-        except Exception:
-            pass
+    # Try platform-specific API
+    plat = get_platform()
+    platform_lang = plat.get_system_locale()
+    if platform_lang:
+        return platform_lang
 
     return "en"
 
