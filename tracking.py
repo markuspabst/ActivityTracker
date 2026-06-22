@@ -273,10 +273,10 @@ def parse_datetime(value: Optional[str]) -> Optional[datetime]:
         return None
 
 
-def get_status_icon(is_idle: bool, active_today: float) -> str:
+def get_status_icon(is_idle: bool, active_today: float, target_work_seconds: int) -> str:
     if is_idle:
         return "🔴"
-    if active_today < TARGET_WORK_SECONDS:
+    if active_today < target_work_seconds:
         return "🟡"
     return "🟢"
 

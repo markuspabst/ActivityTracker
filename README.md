@@ -35,7 +35,7 @@ The app runs as a **menu bar-only app (no Dock icon)** via `LSUIElement`.
 -   **From source:**
 
     ```bash
-    python3 activity_tracker_menu.py
+    python3 app.py
     ```
 
 -   **Build the macOS app:**
@@ -52,7 +52,7 @@ The app runs as a **menu bar-only app (no Dock icon)** via `LSUIElement`.
 ## 2. Features
 
 -   **Time Tracking:** Tracks active, idle, and total time per day.
--   **Live Menu Bar:** Shows a status icon (ð target met, ð below target, ð´ idle) and live updates.
+-   **Live Menu Bar:** Shows a status icon (ðŸ”š target met, ðŸ”› below target, ðŸ”´ idle) and live updates.
 -   **Daily & Weekly Targets:** Set and monitor daily and weekly work goals.
 -   **Persistence:**
     -   **CSV:** Stores daily logs in `activity_tracker_log.csv`.
@@ -69,7 +69,8 @@ The app runs as a **menu bar-only app (no Dock icon)** via `LSUIElement`.
 
 | Component | Responsibility | Where |
 |---|---|---|
-| Menu UI | Displays metrics, targets, and settings | `activity_tracker_menu.py` (`ActivityTrackerApp`) |
+| App Controller | Core application logic, state management, and event loop | `app.py` (`ActivityTrackerApp`) |
+| Menu UI | Displays metrics, targets, and settings | `activity_tracker_menu.py` (`AppMenu`) |
 | Idle detection | Native Quartz idle API (falls back to `ioreg`) | `get_idle_time()` |
 | Runtime engine | Computes active/idle/total session metrics every 5 s | `calculate_current_session()`, `update()` |
 | CSV storage | Long-term daily persistence (stdlib `csv`) | `read_csv_data()` / `write_csv_data()` |

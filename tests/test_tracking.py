@@ -22,11 +22,11 @@ def test_format_delta():
 
 def test_get_status_icon():
     # Assuming TARGET_WORK_SECONDS hasn't been changed from default 8 * 3600
-    assert get_status_icon(is_idle=True, active_today=0) == "🔴"
-    assert get_status_icon(is_idle=False, active_today=10000) == "🟡"
-    assert get_status_icon(is_idle=False, active_today=30000) == "🟢"
+    target = 8 * 3600
+    assert get_status_icon(is_idle=True, active_today=0, target_work_seconds=target) == "🔴"
+    assert get_status_icon(is_idle=False, active_today=10000, target_work_seconds=target) == "🟡"
+    assert get_status_icon(is_idle=False, active_today=30000, target_work_seconds=target) == "🟢"
 
 def test_hours():
     assert hours(3600) == 1.0
     assert hours(5400) == 1.5
-

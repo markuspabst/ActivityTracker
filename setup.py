@@ -2,7 +2,7 @@ from setuptools import setup
 from pathlib import Path
 import json
 
-APP = ["activity_tracker_menu.py"]
+APP = ["app.py"]
 
 VERSION_FILE = Path("version.json")
 
@@ -38,14 +38,13 @@ OPTIONS = {
         "NSMainNibFile": False,
         "NSPrincipalClass": "NSApplication",
     },
-    "packages": ["rumps", "platformdirs"],
+    "packages": ["platformdirs"],
     "includes": [
         "AppKit",
         "Foundation",
         "Quartz",
         "objc",
         "i18n",
-        "version_generated",
         "platformdirs",
         "tracking",
         "platform_layer",
