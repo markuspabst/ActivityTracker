@@ -9,6 +9,7 @@
   "TODAY_OVERTIME_NEG": "Fehlzeit heute: {value}",
   "WEEK_OVERTIME_NEG": "Fehlzeit diese Woche: {value}",
   "MENU_START": "Sitzungsbeginn: {value}",
+  "MENU_START_TIME": "Startzeit: {value}",
   "MENU_UPDATE": "Letzte Aktualisierung: {value}",
   "MENU_SAVED": "Zuletzt gespeichert: {value}",
   "MENU_CSV": "CSV: {path}",

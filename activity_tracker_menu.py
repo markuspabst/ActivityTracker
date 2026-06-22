@@ -590,6 +590,8 @@ class ActivityTrackerTrayApp:
             MenuItem(i18n.t("MENU_IDLE", value=format_hours(idle_today)), None, enabled=False),
             MenuItem(i18n.t("MENU_TOTAL", value=format_hours(total_today)), None, enabled=False),
             Menu.SEPARATOR,
+            MenuItem(i18n.t("MENU_START_TIME", value=report["start_time"]), None, enabled=False),
+            Menu.SEPARATOR,
             MenuItem(i18n.t("MENU_TODAY_TARGET", value=format_hours(TARGET_WORK_SECONDS)), None, enabled=False),
             MenuItem(i18n.t("TODAY_OVERTIME_POS" if daily_overtime >= 0 else "TODAY_OVERTIME_NEG", value=format_delta(daily_overtime)), None, enabled=False),
             Menu.SEPARATOR,
