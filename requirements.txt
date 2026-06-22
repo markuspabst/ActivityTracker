@@ -11,3 +11,6 @@ pyobjc-framework-Quartz
 
 # Localization
 i18n
+
+# Testing
+pytest

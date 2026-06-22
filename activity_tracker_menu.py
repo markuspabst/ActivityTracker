@@ -28,6 +28,8 @@ from tracking import (
     persist_weekly_target,
     load_idle_threshold,
     persist_idle_threshold,
+    load_save_interval,
+    persist_save_interval,
     ensure_dir,
     format_hours,
     format_hours_decimal,
@@ -50,6 +52,7 @@ from tracking import (
     DEFAULT_TARGET_SECONDS,
     DEFAULT_WEEKLY_TARGET_SECONDS,
     DEFAULT_IDLE_THRESHOLD,
+    DEFAULT_SAVE_INTERVAL_SECONDS,
 )
 from platform_layer import get_platform, detect_platform
 import i18n
@@ -68,6 +71,7 @@ set_data_dir(get_configured_data_dir())
 TARGET_WORK_SECONDS = load_target()
 WEEKLY_TARGET_SECONDS = load_weekly_target()
 IDLE_THRESHOLD = load_idle_threshold()
+WRITE_INTERVAL = load_save_interval()
 
 
 # ------------------------------------------------------------
@@ -301,6 +305,16 @@ class ActivityTrackerTrayApp:
         v = self._slider("ASK_IDLE_THRESHOLD_TITLE", IDLE_THRESHOLD / 60, 60, 1, 30)
         if v: self.set_idle_threshold(v)
 
+    def set_save_interval(self, seconds):
+        global WRITE_INTERVAL
+        WRITE_INTERVAL = int(seconds)
+        persist_save_interval(seconds)
+
+    def set_save_interval_slider(self, _):
+        v = self._slider("ASK_SAVE_INTERVAL_TITLE", WRITE_INTERVAL / 60, 60, 1, 120)
+        if v: self.set_save_interval(v)
+
+
     # --------------------------------------------------------
     # Autostart
     # --------------------------------------------------------
@@ -498,6 +512,28 @@ class ActivityTrackerTrayApp:
         idle_menu = Menu(*idle_menu_items)
 
 
+        save_interval_menu_items = []
+        for m in [1, 5, 15, 30, 60, 120]:
+            save_interval_menu_items.append(
+                MenuItem(
+                    f'{m} min',
+                    (lambda m_val: lambda *args: self.set_save_interval(m_val * 60))(m),
+                    checked=(lambda m_val: lambda *args: WRITE_INTERVAL == m_val * 60)(m)
+                )
+            )
+        save_interval_menu_items.extend([
+            Menu.SEPARATOR,
+            MenuItem(
+                i18n.t("SET_CUSTOM_VALUE"),
+                self.set_save_interval_slider,
+                enabled=plat.supports_native_dialogs()
+            )
+        ])
+        save_interval_menu = Menu(*save_interval_menu_items)
+
+
+
+
         language_menu_items = []
         system_item = MenuItem(
             i18n.t("LANGUAGE_SYSTEM_DEFAULT"),
@@ -534,6 +570,7 @@ class ActivityTrackerTrayApp:
             MenuItem(i18n.t("DAILY_TARGET"), target_menu),
             MenuItem(i18n.t("WEEKLY_TARGET"), weekly_target_menu),
             MenuItem(i18n.t("IDLE_THRESHOLD"), idle_menu),
+            MenuItem(i18n.t("SAVE_INTERVAL"), save_interval_menu),
             Menu.SEPARATOR,
             MenuItem(i18n.t("DATA_FOLDER"), data_folder_menu),
             Menu.SEPARATOR,

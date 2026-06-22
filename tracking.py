@@ -27,6 +27,7 @@ APP_NAME = "ActivityTracker"
 DEFAULT_TARGET_SECONDS = 8 * 3600        # 8 h
 DEFAULT_WEEKLY_TARGET_SECONDS = 40 * 3600  # 40 h
 DEFAULT_IDLE_THRESHOLD = 300              # 5 min
+DEFAULT_SAVE_INTERVAL_SECONDS = 3600    # 1 h
 
 TARGET_WORK_SECONDS = DEFAULT_TARGET_SECONDS
 WEEKLY_TARGET_SECONDS = DEFAULT_WEEKLY_TARGET_SECONDS
@@ -57,11 +58,13 @@ class AppConfig:
         self.target_seconds = DEFAULT_TARGET_SECONDS
         self.weekly_target_seconds = DEFAULT_WEEKLY_TARGET_SECONDS
         self.idle_threshold_seconds = DEFAULT_IDLE_THRESHOLD
+        self.save_interval_seconds = DEFAULT_SAVE_INTERVAL_SECONDS
 
     def validate(self) -> None:
         self.target_seconds = max(3600, min(43200, self.target_seconds))
         self.weekly_target_seconds = max(10 * 3600, min(168 * 3600, self.weekly_target_seconds))
         self.idle_threshold_seconds = max(60, min(1800, self.idle_threshold_seconds))
+        self.save_interval_seconds = max(60, min(7200, self.save_interval_seconds))
 
 
 def _config_to_dict(cfg: AppConfig) -> dict:
@@ -69,6 +72,7 @@ def _config_to_dict(cfg: AppConfig) -> dict:
         "target_seconds": cfg.target_seconds,
         "weekly_target_seconds": cfg.weekly_target_seconds,
         "idle_threshold_seconds": cfg.idle_threshold_seconds,
+        "save_interval_seconds": cfg.save_interval_seconds,
     }
 
 
@@ -95,11 +99,12 @@ def load_config() -> dict:
             config.target_seconds = config_data.get("target_seconds", DEFAULT_TARGET_SECONDS)
             config.weekly_target_seconds = config_data.get("weekly_target_seconds", DEFAULT_WEEKLY_TARGET_SECONDS)
             config.idle_threshold_seconds = config_data.get("idle_threshold_seconds", DEFAULT_IDLE_THRESHOLD)
+            config.save_interval_seconds = config_data.get("save_interval_seconds", DEFAULT_SAVE_INTERVAL_SECONDS)
             config.validate()
             merged = _config_to_dict(config)
             # Preserve extra keys from the stored config (e.g. data_dir, locale)
             for k, v in config_data.items():
-                if k not in ("target_seconds", "weekly_target_seconds", "idle_threshold_seconds"):
+                if k not in ("target_seconds", "weekly_target_seconds", "idle_threshold_seconds", "save_interval_seconds"):
                     merged[k] = v
             _config_cache = merged
             return _config_cache
@@ -119,12 +124,13 @@ def save_config(config: dict) -> None:
         cfg.target_seconds = config.get("target_seconds", DEFAULT_TARGET_SECONDS)
         cfg.weekly_target_seconds = config.get("weekly_target_seconds", DEFAULT_WEEKLY_TARGET_SECONDS)
         cfg.idle_threshold_seconds = config.get("idle_threshold_seconds", DEFAULT_IDLE_THRESHOLD)
+        cfg.save_interval_seconds = config.get("save_interval_seconds", DEFAULT_SAVE_INTERVAL_SECONDS)
         cfg.validate()
         # Start with validated core keys
         merged = _config_to_dict(cfg)
         # Preserve any extra keys from the input (e.g. data_dir, locale)
         for k, v in config.items():
-            if k not in ("target_seconds", "weekly_target_seconds", "idle_threshold_seconds"):
+            if k not in ("target_seconds", "weekly_target_seconds", "idle_threshold_seconds", "save_interval_seconds"):
                 merged[k] = v
         _config_cache = merged
         with open(CONFIG_FILE, "w") as f:
@@ -135,7 +141,7 @@ def save_config(config: dict) -> None:
         merged = _config_to_dict(cfg)
         # Also preserve extra keys in the fallback path
         for k, v in config.items():
-            if k not in ("target_seconds", "weekly_target_seconds", "idle_threshold_seconds"):
+            if k not in ("target_seconds", "weekly_target_seconds", "idle_threshold_seconds", "save_interval_seconds"):
                 merged[k] = v
         _config_cache = merged
         with open(CONFIG_FILE, "w") as f:
@@ -212,6 +218,14 @@ def load_idle_threshold() -> int:
 
 def persist_idle_threshold(s: int) -> None:
     set_config_value("idle_threshold_seconds", int(s))
+
+
+def load_save_interval() -> int:
+    return int(get_config_value("save_interval_seconds", DEFAULT_SAVE_INTERVAL_SECONDS))
+
+
+def persist_save_interval(s: int) -> None:
+    set_config_value("save_interval_seconds", int(s))
 
 
 # ------------------------------------------------------------
