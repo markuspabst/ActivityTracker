@@ -96,7 +96,12 @@ def load_config() -> dict:
             config.weekly_target_seconds = config_data.get("weekly_target_seconds", DEFAULT_WEEKLY_TARGET_SECONDS)
             config.idle_threshold_seconds = config_data.get("idle_threshold_seconds", DEFAULT_IDLE_THRESHOLD)
             config.validate()
-            _config_cache = _config_to_dict(config)
+            merged = _config_to_dict(config)
+            # Preserve extra keys from the stored config (e.g. data_dir, locale)
+            for k, v in config_data.items():
+                if k not in ("target_seconds", "weekly_target_seconds", "idle_threshold_seconds"):
+                    merged[k] = v
+            _config_cache = merged
             return _config_cache
     except Exception as e:
         print(f"Warning: Invalid config, using defaults: {e}")
@@ -115,13 +120,24 @@ def save_config(config: dict) -> None:
         cfg.weekly_target_seconds = config.get("weekly_target_seconds", DEFAULT_WEEKLY_TARGET_SECONDS)
         cfg.idle_threshold_seconds = config.get("idle_threshold_seconds", DEFAULT_IDLE_THRESHOLD)
         cfg.validate()
-        _config_cache = _config_to_dict(cfg)
+        # Start with validated core keys
+        merged = _config_to_dict(cfg)
+        # Preserve any extra keys from the input (e.g. data_dir, locale)
+        for k, v in config.items():
+            if k not in ("target_seconds", "weekly_target_seconds", "idle_threshold_seconds"):
+                merged[k] = v
+        _config_cache = merged
         with open(CONFIG_FILE, "w") as f:
             json.dump(_config_cache, f, indent=2)
     except Exception as e:
         print(f"Warning: Invalid config values: {e}")
         cfg = AppConfig()
-        _config_cache = _config_to_dict(cfg)
+        merged = _config_to_dict(cfg)
+        # Also preserve extra keys in the fallback path
+        for k, v in config.items():
+            if k not in ("target_seconds", "weekly_target_seconds", "idle_threshold_seconds"):
+                merged[k] = v
+        _config_cache = merged
         with open(CONFIG_FILE, "w") as f:
             json.dump(_config_cache, f, indent=2)
 
@@ -146,11 +162,14 @@ def get_configured_data_dir() -> str:
 
 
 def set_data_dir(path: str) -> None:
-    global DATA_DIR, CSV_FILE, STATE_FILE
+    global DATA_DIR, CSV_FILE, STATE_FILE, _csv_cache, _csv_cache_time
     DATA_DIR = os.path.expanduser(path)
     ensure_dir(DATA_DIR)
     CSV_FILE = os.path.join(DATA_DIR, "activity_tracker_log.csv")
     STATE_FILE = os.path.join(DATA_DIR, "activity_tracker_state.json")
+    # Invalidate caches so the next read picks up the new location
+    _csv_cache = None
+    _csv_cache_time = 0.0
 
 
 def persist_data_dir(path: str) -> None:

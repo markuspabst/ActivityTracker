@@ -16,6 +16,55 @@ from typing import Optional, Tuple
 from platform_layer import PlatformABC
 
 
+# ------------------------------------------------------------
+# Helper for running code on the main thread
+# ------------------------------------------------------------
+try:
+    from Foundation import NSObject
+    import objc
+
+    class _MainThreadRunner(NSObject):
+        def initWithCallable_args_kwargs_(self, callable_fn, args, kwargs):
+            self = objc.super(_MainThreadRunner, self).init()
+            if self is None:
+                return None
+            self.callable_fn = callable_fn
+            self.args = args
+            self.kwargs = kwargs
+            self.result = None
+            self.exception = None
+            return self
+
+        def run(self):
+            try:
+                self.result = self.callable_fn(*self.args, **self.kwargs)
+            except Exception as e:
+                self.exception = e
+
+    def _run_on_main(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            runner = _MainThreadRunner.alloc().initWithCallable_args_kwargs_(
+                func, args, kwargs
+            )
+            runner.performSelectorOnMainThread_withObject_waitUntilDone_("run", None, True)
+            if runner.exception:
+                raise runner.exception
+            return runner.result
+        return wrapper
+
+    _CAN_RUN_ON_MAIN = True
+
+except Exception:
+    _MainThreadRunner = None  # noqa
+    def _run_on_main(func):
+        return func # Passthrough if pyobjc fails
+    _CAN_RUN_ON_MAIN = False
+
+
+from platform_layer import PlatformABC
+
+
 APP_NAME = "ActivityTracker"
 
 LAUNCH_AGENT_LABEL = "com.markus.activitytracker"
@@ -24,6 +73,33 @@ LAUNCH_AGENT_FILE = os.path.join(LAUNCH_AGENT_DIR, f"{LAUNCH_AGENT_LABEL}.plist"
 LOG_DIR = os.path.expanduser("~/Library/Logs/ActivityTracker")
 LAUNCH_AGENT_OUT = os.path.join(LOG_DIR, "activitytracker.out.log")
 LAUNCH_AGENT_ERR = os.path.join(LOG_DIR, "activitytracker.err.log")
+
+
+# ------------------------------------------------------------
+# Helper ObjC class for the slider dialog
+# ------------------------------------------------------------
+try:
+    from Foundation import NSObject
+    import objc
+
+    class _SliderHandler(NSObject):
+        """Receives NSSlider action messages and updates the value label."""
+
+        def initWithLabel_(self, label):
+            self = objc.super(_SliderHandler, self).init()
+            if self is None:
+                return None
+            self._label = label
+            return self
+
+        @objc.typedSelector(b"v@:@")
+        def sliderChanged_(self, sender):
+            self._label.setStringValue_(f"{sender.doubleValue():.1f}")
+
+    _HAS_SLIDER_HANDLER = True
+except Exception:
+    _SliderHandler = None  # noqa
+    _HAS_SLIDER_HANDLER = False
 
 
 class MacOSPlatform(PlatformABC):
@@ -114,7 +190,80 @@ class MacOSPlatform(PlatformABC):
         self, title: str, current: float,
         min_value: float = 0, max_value: float = 100,
     ) -> Optional[float]:
-        self.bring_app_to_front()
+        """Native dialog with a slider.
+
+        Note: pystray menu callbacks run on a background thread, so we use
+        osascript for the dialog to avoid beachball cursor from AppKit calls
+        on non-main threads.
+        """
+        if _CAN_RUN_ON_MAIN:
+            return self._ask_slider_native(title, current, min_value, max_value)
+        return self._ask_slider_osascript(title, current, min_value, max_value)
+
+    @_run_on_main
+    def _ask_slider_native(self, title, current, min_value, max_value):
+        """AppKit-based slider dialog (main thread only)."""
+        if not _HAS_SLIDER_HANDLER:
+            return None
+        try:
+            from AppKit import (
+                NSAlert,
+                NSSlider,
+                NSTextField,
+                NSView,
+                NSMakeRect,
+                NSFont,
+                NSTextAlignmentCenter,
+            )
+
+            alert = NSAlert.alloc().init()
+            alert.setMessageText_(title)
+            alert.addButtonWithTitle_("OK")
+            alert.addButtonWithTitle_("Cancel")
+
+            # Bring app to front
+            NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+
+            # Custom view: slider + live value label
+            view = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 300, 55))
+
+            slider = NSSlider.alloc().initWithFrame_(NSMakeRect(20, 5, 260, 30))
+            slider.setMinValue_(min_value)
+            slider.setMaxValue_(max_value)
+            slider.setDoubleValue_(current)
+            slider.setContinuous_(True)
+
+            label = NSTextField.alloc().initWithFrame_(NSMakeRect(130, 28, 60, 22))
+            label.setEditable_(False)
+            label.setBezeled_(False)
+            label.setDrawsBackground_(False)
+            label.setStringValue_(f"{current:.1f}")
+            label.setFont_(NSFont.systemFontOfSize_(14))
+            label.setAlignment_(NSTextAlignmentCenter)
+
+            handler = _SliderHandler.alloc().initWithLabel_(label)
+            slider.setTarget_(handler)
+            slider.setAction_("sliderChanged:")
+
+            view.addSubview_(slider)
+            view.addSubview_(label)
+            alert.setAccessoryView_(view)
+
+            subprocess.run(
+                ["osascript", "-e", 'tell application "System Events" to activate'],
+                capture_output=True, check=False,
+            )
+
+            response = alert.runModal()
+            if response == 1000:  # NSAlertFirstButtonReturn
+                return max(min(slider.doubleValue(), max_value), min_value)
+            return None
+        except Exception as e:
+            print(f"Native slider dialog failed: {e}")
+            return None
+
+    def _ask_slider_osascript(self, title, current, min_value, max_value):
+        """osascript-based text input dialog (thread-safe)."""
         proc = subprocess.run(
             [
                 "osascript", "-e",
@@ -126,13 +275,56 @@ class MacOSPlatform(PlatformABC):
         )
         if proc.returncode == 0 and proc.stdout.strip():
             try:
-                return max(min(float(proc.stdout.strip()), max_value), min_value)
+                # Output format: "button returned:OK, text returned:8.0"
+                text = proc.stdout.strip()
+                for part in text.split(","):
+                    part = part.strip()
+                    if part.startswith("text returned:"):
+                        value = float(part.split(":", 1)[1])
+                        return max(min(value, max_value), min_value)
             except ValueError:
-                return None
+                pass
         return None
 
     def choose_folder_dialog(self, prompt: str = "") -> Optional[str]:
-        self.bring_app_to_front()
+        if _CAN_RUN_ON_MAIN:
+            return self._choose_folder_native(prompt)
+        return self._choose_folder_osascript(prompt)
+
+    @_run_on_main
+    def _choose_folder_native(self, prompt: str = "") -> Optional[str]:
+        """AppKit-based folder chooser (main thread only)."""
+        try:
+            from AppKit import NSOpenPanel, NSApplication
+
+            # Activate to bring the panel to the front
+            NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+
+            panel = NSOpenPanel.openPanel()
+            panel.setCanChooseFiles_(False)
+            panel.setCanChooseDirectories_(True)
+            panel.setCanCreateDirectories_(True)
+            panel.setAllowsMultipleSelection_(False)
+            if prompt:
+                panel.setMessage_(prompt)
+
+            if panel.runModal() == 1:
+                return str(panel.URLs()[0].path()) if panel.URLs() else None
+            return None
+        except Exception as e:
+            print(f"Native folder chooser failed: {e}")
+            return None
+
+    def _choose_folder_osascript(self, prompt: str = "") -> Optional[str]:
+        # Use osascript to activate instead of AppKit to avoid
+        # beachball cursor when called from a non-main thread.
+        try:
+            subprocess.run(
+                ["osascript", "-e", 'tell application "System Events" to activate'],
+                capture_output=True, check=False,
+            )
+        except Exception:
+            pass
         try:
             script = 'set f to choose folder'
             if prompt:

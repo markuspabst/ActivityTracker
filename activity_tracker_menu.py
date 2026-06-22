@@ -64,6 +64,11 @@ except Exception:
 # Initialise tracking paths and settings
 set_data_dir(get_configured_data_dir())
 
+# Load persisted target values into the globals used by the menu
+TARGET_WORK_SECONDS = load_target()
+WEEKLY_TARGET_SECONDS = load_weekly_target()
+IDLE_THRESHOLD = load_idle_threshold()
+
 
 # ------------------------------------------------------------
 # Version Handling (delegated to platform layer)
@@ -383,10 +388,12 @@ class ActivityTrackerTrayApp:
         set_data_dir(folder)
         persist_data_dir(folder)
 
+        # Reset session so it picks up the new location's state
+        self.session.reset()
         self.save_state(dirty=True)
 
     def open_data_folder(self, _):
-        path = DATA_DIR or DEFAULT_BASE_DIR
+        path = get_configured_data_dir()
         ensure_dir(path)
         plat.open_file_manager(path)
 
@@ -397,6 +404,8 @@ class ActivityTrackerTrayApp:
 
         reset_data_dir_to_default()
 
+        # Reset session so it picks up the default location's state
+        self.session.reset()
         self.save_state(dirty=True)
 
     def choose_data_folder(self):
@@ -430,21 +439,14 @@ class ActivityTrackerTrayApp:
         weekly_overtime = weekly_total - WEEKLY_TARGET_SECONDS
 
         settings_items = []
-        if detect_platform() == 'macos':
-            settings_items.extend([
-                MenuItem(i18n.t("SELECT_DATA_FOLDER"), self.select_data_folder),
-                MenuItem(i18n.t("OPEN_DATA_FOLDER"), self.open_data_folder),
-                MenuItem(i18n.t("RESET_DATA_FOLDER"), self.reset_data_folder),
-                Menu.SEPARATOR,
-            ])
 
         target_menu_items = []
         for h in range(4, 13):
             target_menu_items.append(
                 MenuItem(
                     f'{h}h',
-                    lambda _, h=h: self.set_target(h * 3600),
-                    checked=lambda item, h=h: TARGET_WORK_SECONDS == h * 3600
+                    (lambda h_val: lambda *args: self.set_target(h_val * 3600))(h),
+                    checked=(lambda h_val: lambda *args: TARGET_WORK_SECONDS == h_val * 3600)(h)
                 )
             )
         target_menu_items.extend([
@@ -462,8 +464,8 @@ class ActivityTrackerTrayApp:
             weekly_target_menu_items.append(
                 MenuItem(
                     f'{h}h',
-                    lambda _, h=h: self.set_weekly_target(h * 3600),
-                    checked=lambda item, h=h: WEEKLY_TARGET_SECONDS == h * 3600
+                    (lambda h_val: lambda *args: self.set_weekly_target(h_val * 3600))(h),
+                    checked=(lambda h_val: lambda *args: WEEKLY_TARGET_SECONDS == h_val * 3600)(h)
                 )
             )
         weekly_target_menu_items.extend([
@@ -481,8 +483,8 @@ class ActivityTrackerTrayApp:
             idle_menu_items.append(
                 MenuItem(
                     f'{m} min',
-                    lambda _, m=m: self.set_idle_threshold(m * 60),
-                    checked=lambda item, m=m: IDLE_THRESHOLD == m * 60
+                    (lambda m_val: lambda *args: self.set_idle_threshold(m_val * 60))(m),
+                    checked=(lambda m_val: lambda *args: IDLE_THRESHOLD == m_val * 60)(m)
                 )
             )
         idle_menu_items.extend([
@@ -516,14 +518,28 @@ class ActivityTrackerTrayApp:
         language_menu = Menu(*language_menu_items)
 
 
+        data_folder_menu = Menu(
+            MenuItem(
+                get_configured_data_dir(),
+                None,
+                enabled=False
+            ),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t("OPEN_DATA_FOLDER"), self.open_data_folder),
+            MenuItem(i18n.t("SELECT_DATA_FOLDER"), self.select_data_folder, enabled=plat.supports_native_dialogs()),
+            MenuItem(i18n.t("RESET_DATA_FOLDER"), self.reset_data_folder),
+        )
+
         settings_items.extend([
             MenuItem(i18n.t("DAILY_TARGET"), target_menu),
             MenuItem(i18n.t("WEEKLY_TARGET"), weekly_target_menu),
             MenuItem(i18n.t("IDLE_THRESHOLD"), idle_menu),
             Menu.SEPARATOR,
+            MenuItem(i18n.t("DATA_FOLDER"), data_folder_menu),
+            Menu.SEPARATOR,
             MenuItem(i18n.t("LANGUAGE"), language_menu),
             Menu.SEPARATOR,
-            MenuItem(i18n.t("AUTOSTART_DISABLED"), self.toggle_autostart, checked=lambda item: is_autostart_installed()),
+            MenuItem(i18n.t("AUTOSTART_ENABLED" if is_autostart_installed() else "AUTOSTART_DISABLED"), self.toggle_autostart, checked=lambda item: is_autostart_installed()),
             MenuItem(i18n.t("OPEN_AUTOSTART_FILE"), self.open_autostart_file),
             Menu.SEPARATOR,
             MenuItem(i18n.t("VERSION", value=get_bundle_version()), None, enabled=False),
@@ -547,8 +563,6 @@ class ActivityTrackerTrayApp:
             MenuItem(i18n.t("MENU_UPDATE", value=now.strftime('%H:%M:%S')), None, enabled=False),
             MenuItem(i18n.t("MENU_SAVED", value=self.last_save_display), None, enabled=False),
             Menu.SEPARATOR,
-            MenuItem(i18n.t("MENU_CSV", path=CSV_FILE or "-"), self.open_data_folder),
-            MenuItem(i18n.t("MENU_STATE", path=STATE_FILE or "-"), self.open_data_folder),
             Menu.SEPARATOR,
             MenuItem(i18n.t("SETTINGS"), Menu(*settings_items)),
             Menu.SEPARATOR,
