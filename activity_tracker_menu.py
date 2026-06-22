@@ -80,7 +80,6 @@ WRITE_INTERVAL = load_save_interval()
 plat = get_platform()
 
 # UI update / save intervals (seconds)
-WRITE_INTERVAL = 3600
 UPDATE_INTERVAL = 5
 
 def get_bundle_version():
