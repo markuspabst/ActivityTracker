@@ -115,20 +115,22 @@ class AppMenu:
 
         # Daily Target
         target_menu_items = []
-        for h in range(4, 13):
+        for h in range(1, 25):
             target_menu_items.append(MenuItem(f'{h}h', (lambda h_val: lambda *args: self.app.set_target(h_val * 3600))(h), checked=lambda item, h_val=h: self.app.target_work_seconds == h_val * 3600))
         target_menu_items.extend([
             Menu.SEPARATOR,
-            MenuItem(i18n.t("SET_CUSTOM_VALUE"), _slider_callback(self.app.set_target, "ASK_DAILY_TARGET_TITLE", self.app.target_work_seconds / 3600, 3600, 4.0, 12.0), enabled=self.platform.supports_native_dialogs())
+            MenuItem(i18n.t("SET_CUSTOM_VALUE"), _slider_callback(self.app.set_target, "ASK_DAILY_TARGET_TITLE", self.app.target_work_seconds / 3600, 3600, 1.0, 24.0), enabled=self.platform.supports_native_dialogs())
         ])
 
         # Weekly Target
         weekly_target_menu_items = []
-        for h in range(20, 61, 5):
+        weekly_target_menu_items.append(MenuItem('1h', (lambda *args: self.app.set_weekly_target(1 * 3600)), checked=lambda item: self.app.weekly_target_seconds == 1 * 3600))
+        for h in range(5, 169, 5):
             weekly_target_menu_items.append(MenuItem(f'{h}h', (lambda h_val: lambda *args: self.app.set_weekly_target(h_val * 3600))(h), checked=lambda item, h_val=h: self.app.weekly_target_seconds == h_val * 3600))
+        weekly_target_menu_items.append(MenuItem('168h', (lambda *args: self.app.set_weekly_target(168 * 3600)), checked=lambda item: self.app.weekly_target_seconds == 168 * 3600))
         weekly_target_menu_items.extend([
             Menu.SEPARATOR,
-            MenuItem(i18n.t("SET_CUSTOM_VALUE"), _slider_callback(self.app.set_weekly_target, "ASK_WEEKLY_TARGET_TITLE", self.app.weekly_target_seconds / 3600, 3600, 20.0, 60.0), enabled=self.platform.supports_native_dialogs())
+            MenuItem(i18n.t("SET_CUSTOM_VALUE"), _slider_callback(self.app.set_weekly_target, "ASK_WEEKLY_TARGET_TITLE", self.app.weekly_target_seconds / 3600, 3600, 1.0, 168.0), enabled=self.platform.supports_native_dialogs())
         ])
 
         # Idle Threshold

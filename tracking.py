@@ -61,8 +61,8 @@ class AppConfig:
         self.save_interval_seconds = DEFAULT_SAVE_INTERVAL_SECONDS
 
     def validate(self) -> None:
-        self.target_seconds = max(3600, min(43200, self.target_seconds))
-        self.weekly_target_seconds = max(10 * 3600, min(168 * 3600, self.weekly_target_seconds))
+        self.target_seconds = max(3600, min(86400, self.target_seconds))
+        self.weekly_target_seconds = max(3600, min(168 * 3600, self.weekly_target_seconds))
         self.idle_threshold_seconds = max(60, min(1800, self.idle_threshold_seconds))
         self.save_interval_seconds = max(60, min(7200, self.save_interval_seconds))
 

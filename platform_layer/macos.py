@@ -208,6 +208,7 @@ class MacOSPlatform(PlatformABC):
         try:
             from AppKit import (
                 NSAlert,
+                NSApplication,
                 NSSlider,
                 NSTextField,
                 NSView,
