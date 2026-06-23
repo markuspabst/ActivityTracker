@@ -160,6 +160,10 @@ class AppMenu:
             MenuItem(i18n.t("RESET_DATA_FOLDER"), self.app.reset_data_folder),
         )
 
+        # Autostart
+        autostart_installed = self.platform.autostart_installed()
+        autostart_label = "AUTOSTART_ENABLED" if autostart_installed else "AUTOSTART_DISABLED"
+
 
         return Menu(
             MenuItem(i18n.t("DAILY_TARGET"), Menu(*target_menu_items)),
@@ -168,6 +172,20 @@ class AppMenu:
             MenuItem(i18n.t("SAVE_INTERVAL"), Menu(*save_interval_menu_items)),
             Menu.SEPARATOR,
             MenuItem(i18n.t("DATA_FOLDER"), data_folder_menu),
-            # ... Add other settings menus for Language, Autostart, Version etc. here
+            MenuItem(i18n.t(autostart_label), self._toggle_autostart, checked=lambda item: self.platform.autostart_installed()),
         )
 
+    # ── Autostart ─────────────────────────────────────────────
+
+    def _toggle_autostart(self):
+        """Toggle the launch-at-login autostart on/off."""
+        try:
+            if self.platform.autostart_installed():
+                self.platform.uninstall_autostart()
+            else:
+                self.app.force_save()
+                self.platform.install_autostart()
+        except Exception as e:
+            print(f"Autostart error: {e}")
+
+    
