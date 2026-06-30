@@ -303,6 +303,7 @@ class SessionTracker:
         self.first_activity_this_day: Optional[datetime] = None
         self.total_idle_session: float = 0.0
         self.idle_start: Optional[datetime] = None
+        self.idle_before_first_activity: float = 0.0
         self.saved_total_session: float = 0.0
         self.saved_active_session: float = 0.0
         self.saved_idle_session: float = 0.0
@@ -312,7 +313,11 @@ class SessionTracker:
     def calculate_current_session(
         self, idle_threshold: int, get_idle_time_fn
     ) -> tuple:
-        """Return (now, total_session, active_session, idle_session, is_idle)."""
+        """Return (now, total_session, active_session, idle_session, is_idle).
+
+        ``idle_session`` excludes idle time that occurred before the first
+        activity of the day (e.g. overnight before the user wakes up).
+        """
         now = datetime.now()
         idle_time = get_idle_time_fn()
 
@@ -321,7 +326,10 @@ class SessionTracker:
                 self.idle_start = now
         else:
             if self.idle_start is not None:
-                self.total_idle_session += (now - self.idle_start).total_seconds()
+                elapsed = (now - self.idle_start).total_seconds()
+                self.total_idle_session += elapsed
+                if self.first_activity_this_day is None:
+                    self.idle_before_first_activity += elapsed
                 self.idle_start = None
 
         current_idle = self.total_idle_session
@@ -330,9 +338,16 @@ class SessionTracker:
 
         total_session = (now - self.start_time).total_seconds()
         active_session = max(total_session - current_idle, 0)
+
+        # Exclude idle time that occurred before the day's first activity
+        pre_activity = self.idle_before_first_activity
+        if self.idle_start is not None and self.first_activity_this_day is None:
+            pre_activity += (now - self.idle_start).total_seconds()
+        reported_idle = max(current_idle - pre_activity, 0)
+
         is_idle = idle_time > idle_threshold
 
-        return now, total_session, active_session, current_idle, is_idle
+        return now, total_session, active_session, reported_idle, is_idle
 
     def calculate_unsaved_delta(
         self, total_session: float, active_session: float, idle_session: float
@@ -348,6 +363,7 @@ class SessionTracker:
         now = datetime.now()
         if now.date() > self.last_tick_date:
             self.first_activity_this_day = None
+            self.idle_before_first_activity = 0.0
         if self.first_activity_this_day is None and not is_idle:
             self.first_activity_this_day = now
         self.last_tick_date = now.date()

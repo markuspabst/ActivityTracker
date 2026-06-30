@@ -71,11 +71,10 @@ class AppMenu:
         weekly_total = weekly_from_csv + delta_active
         weekly_overtime = weekly_total - self.app.weekly_target_seconds
 
+        yield MenuItem(i18n.t("MENU_START_TIME", value=report["start_time"]), None, enabled=False)
         yield MenuItem(i18n.t("MENU_ACTIVE", value=format_hours(active_today)), None, enabled=False)
         yield MenuItem(i18n.t("MENU_IDLE", value=format_hours(idle_today)), None, enabled=False)
         yield MenuItem(i18n.t("MENU_TOTAL", value=format_hours(total_today)), None, enabled=False)
-        yield Menu.SEPARATOR
-        yield MenuItem(i18n.t("MENU_START_TIME", value=report["start_time"]), None, enabled=False)
         yield Menu.SEPARATOR
 
         # Daily target
