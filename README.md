@@ -51,13 +51,15 @@ The app runs as a **menu bar-only app (no Dock icon)** via `LSUIElement`.
 
 ## 2. Features
 
--   **Time Tracking:** Tracks active, idle, and total time per day.
--   **Live Menu Bar:** Shows a status icon (ðŸ”š target met, ðŸ”› below target, ðŸ”´ idle) and live updates.
+-   **Time Tracking:** Tracks active, idle, and total time per day. Each day's tracking starts fresh after the first keyboard/mouse activity.
+-   **Live Menu Bar:** Shows a status icon (🔊 target met, 🟡 below target, 🔴 idle) and live time display.
 -   **Daily & Weekly Targets:** Set and monitor daily and weekly work goals.
 -   **Persistence:**
-    -   **CSV:** Stores daily logs in `activity_tracker_log.csv`.
+    -   **CSV:** Stores daily logs with per-day start/end times in `activity_tracker_log.csv`.
     -   **JSON State:** Ensures crash-safe recovery with `activity_tracker_state.json`.
     -   **JSON Config:** Saves user settings in `activity_tracker_config.json`.
+-   **Midnight-safe:** Session resets at midnight — each day gets its own `start_time` and clean counters, even if the app runs continuously.
+-   **End Time from Last Activity:** The CSV `end_time` reflects the last moment of activity, not the save timestamp — idle time after the last activity is excluded.
 -   **Customizable Data Folder:** Change the storage location from the Settings menu.
 -   **Autostart:** Automatically starts on login.
 -   **Productivity Dashboard:** Generates an HTML report with productivity insights.
@@ -69,28 +71,64 @@ The app runs as a **menu bar-only app (no Dock icon)** via `LSUIElement`.
 
 | Component | Responsibility | Where |
 |---|---|---|
-| App Controller | Core application logic, state management, and event loop | `app.py` (`ActivityTrackerApp`) |
+| App Controller | Core application logic, event loop, save scheduling | `app.py` (`ActivityTrackerApp`) |
+| Session Tracker | Pure data model: computes active/idle/total, tracks idle transitions, detects midnight rollover | `tracking.py` (`SessionTracker`) |
 | Menu UI | Displays metrics, targets, and settings | `activity_tracker_menu.py` (`AppMenu`) |
-| Idle detection | Native Quartz idle API (falls back to `ioreg`) | `get_idle_time()` |
-| Runtime engine | Computes active/idle/total session metrics every 5 s | `calculate_current_session()`, `update()` |
-| CSV storage | Long-term daily persistence (stdlib `csv`) | `read_csv_data()` / `write_csv_data()` |
-| State file | Crash-safe recovery of unsaved time| `read_state()` / `recover_previous_session_if_needed()` |
-| Config | User preferences, cached validated values | `AppConfig`, `load_config()` / `save_config()` |
-| LaunchAgent | Autostart via `launchctl` | `install_autostart()` / `uninstall_autostart()` |
+| Idle detection | Native Quartz idle API (falls back to `ioreg`) | `platform_layer/*.py` (`get_idle_time()`) |
+| CSV storage | Long-term daily persistence (stdlib `csv`) | `tracking.py` (`read_csv_data()` / `add_delta_to_csv()`) |
+| State file | Crash-safe recovery of unsaved time | `tracking.py` (`read_state()` / `recover_previous_session_if_needed()`) |
+| Config | User preferences, cached validated values | `tracking.py` (`AppConfig`, `load_config()` / `save_config()`) |
+| LaunchAgent | Autostart via `launchctl` | `platform_layer/*.py` (`install_autostart()` / `uninstall_autostart()`) |
 | i18n | Locale-aware UI strings | `i18n.py`, `locales/*.json` |
 | Dashboard | HTML productivity report | `scripts/generate_dashboard.py` |
 
+### Data flow (per tick, every 5 s)
+
+```
+platform_layer.get_idle_time()  ─┐
+                                 ├─→  SessionTracker.calculate_current_session()
+SessionTracker.on_tick(is_idle)  ─┘    →  active / idle / total / is_idle
+                                          │
+                                          ├─→  app._do_save_delta()  →  CSV (every WRITE_INTERVAL)
+                                          │
+                                          └─→  menu.update_ui()      →  tray icon & tooltip
+```
+
 ### Timing Constants
 
-| Constant | Default Value | Meaning |
+| Constant | Default | Meaning |
 |---|---|---|
-| `UPDATE_INTERVAL` | 5s | UI + state refresh interval |
-| `WRITE_INTERVAL` | 3600s | CSV auto-save interval |
-| `DEFAULT_IDLE_THRESHOLD` | 300s | Idle after 5 min of no input (user-configurable) |
+| Tick interval (hard-coded) | 5 s | UI + state refresh interval |
+| `DEFAULT_SAVE_INTERVAL_SECONDS` | 3600 s | CSV auto-save interval (user-configurable) |
+| `DEFAULT_IDLE_THRESHOLD` | 300 s | Considered idle after 5 min of no input (user-configurable) |
+
+### CSV structure (`activity_tracker_log.csv`)
+
+Each row stores the aggregate for one date:
+
+| Column | Description |
+|---|---|
+| `date` | Calendar date (ISO‑8601) |
+| `start_time` | First activity of that day |
+| `end_time` | Last moment of activity (not save time) |
+| `total_seconds` | Total elapsed time (active + idle) |
+| `active_seconds` | Time with keyboard/mouse input |
+| `idle_seconds` | Time idle (idle before first activity is excluded) |
+| `total_hours` / `active_hours` / `idle_hours` | Same as seconds, in decimal hours |
 
 ---
 
-## 4. Contributing
+## 4. Running Tests
+
+```bash
+python3 -m pytest tests/ -v
+```
+
+The test suite covers idle detection, idle transitions, midnight rollover, per-day session reset, delta consistency, `last_active_time` tracking, pre-activity idle exclusion, and multi-break scenarios.
+
+---
+
+## 5. Contributing
 
 Contributions are welcome! Please follow these steps to contribute:
 
@@ -102,6 +140,6 @@ Contributions are welcome! Please follow these steps to contribute:
 
 ---
 
-## 5. License
+## 6. License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

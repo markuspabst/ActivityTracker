@@ -26,7 +26,11 @@ version_generated.py
 .Trashes
 
 # Editor / IDE
-.vscode/settings.json
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
 .idea/
 *.swp
 *.swo
