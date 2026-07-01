@@ -301,6 +301,7 @@ class SessionTracker:
         self.start_time: datetime = now
         self.last_tick_date = now.date()
         self.first_activity_this_day: Optional[datetime] = None
+        self.last_active_time: Optional[datetime] = None
         self.total_idle_session: float = 0.0
         self.idle_start: Optional[datetime] = None
         self.idle_before_first_activity: float = 0.0
@@ -320,6 +321,12 @@ class SessionTracker:
         """
         now = datetime.now()
         idle_time = get_idle_time_fn()
+
+        # Continuous tracking: keep the last moment the user was active.
+        # When idle is first detected this stops updating, freezing the last
+        # active time at the most recent activity.
+        if idle_time <= idle_threshold:
+            self.last_active_time = now
 
         if idle_time > idle_threshold:
             if self.idle_start is None:
@@ -352,21 +359,41 @@ class SessionTracker:
     def calculate_unsaved_delta(
         self, total_session: float, active_session: float, idle_session: float
     ) -> tuple:
-        """Return (delta_total, delta_active, delta_idle) since last save."""
-        delta_total = max(total_session - self.saved_total_session, 0)
+        """Return (delta_total, delta_active, delta_idle) since last save.
+
+        *delta_total* is derived from (active + idle) rather than
+        *total_session* so that the CSV invariant
+        ``total == active + idle`` stays correct even before the first
+        activity of the day (when pre-activity idle is excluded from the
+        reported values).
+        """
         delta_active = max(active_session - self.saved_active_session, 0)
         delta_idle = max(idle_session - self.saved_idle_session, 0)
+        delta_total = delta_active + delta_idle
         return delta_total, delta_active, delta_idle
 
-    def on_tick(self, is_idle: bool) -> None:
-        """Call on every tick to handle midnight rollover and first activity."""
+    def on_tick(self, is_idle: bool) -> Optional[datetime.date]:
+        """Handle midnight rollover and first activity detection.
+
+        Returns the previous date if a new day was first detected,
+        ``None`` otherwise.  The caller (the menu app) should save any
+        remaining delta to the returned date and then call
+        :meth:`reset()` to start the new day's accumulators fresh.
+        """
         now = datetime.now()
         if now.date() > self.last_tick_date:
+            prev_date = self.last_tick_date
             self.first_activity_this_day = None
             self.idle_before_first_activity = 0.0
+            if self.first_activity_this_day is None and not is_idle:
+                self.first_activity_this_day = now
+            self.last_tick_date = now.date()
+            return prev_date
+
         if self.first_activity_this_day is None and not is_idle:
             self.first_activity_this_day = now
         self.last_tick_date = now.date()
+        return None
 
     def mark_saved(
         self,
@@ -409,7 +436,7 @@ class SessionTracker:
             "active_seconds": csv_day["active_seconds"] + delta_active,
             "idle_seconds": csv_day["idle_seconds"] + delta_idle,
             "start_time": today_start_time,
-            "end_time": now.strftime("%H:%M:%S"),
+            "end_time": (self.last_active_time or now).strftime("%H:%M:%S"),
             "last_updated": csv_day["last_updated"],
         }
 
@@ -428,6 +455,7 @@ class SessionTracker:
             "date": now.date().isoformat(),
             "session_start": self.start_time.isoformat(),
             "last_seen": now.isoformat(),
+            "last_active_time": self.last_active_time.isoformat() if self.last_active_time else None,
             "total_session": round(total_session, 0),
             "active_session": round(active_session, 0),
             "idle_session": round(idle_session, 0),
@@ -648,6 +676,12 @@ def recover_previous_session_if_needed() -> Optional[dict]:
         start_time = parse_datetime(state["session_start"])
         last_seen = parse_datetime(state["last_seen"])
 
+        # Use the stored last_active_time if available — it is more
+        # accurate than last_seen (which could be well into an idle
+        # period or after a midnight rollover).
+        last_active = parse_datetime(state.get("last_active_time"))
+        end_time = last_active or last_seen
+
         total_session = float(state.get("total_session", 0))
         active_session = float(state.get("active_session", 0))
         idle_session = float(state.get("idle_session", 0))
@@ -656,12 +690,12 @@ def recover_previous_session_if_needed() -> Optional[dict]:
         saved_active = float(state.get("saved_active_session", 0))
         saved_idle = float(state.get("saved_idle_session", 0))
 
-        delta_total = max(total_session - saved_total, 0)
         delta_active = max(active_session - saved_active, 0)
         delta_idle = max(idle_session - saved_idle, 0)
+        delta_total = delta_active + delta_idle
 
-        if start_time and last_seen and delta_total > 0:
-            add_delta_to_csv(None, date_str, start_time, last_seen, delta_total, delta_active, delta_idle)
+        if start_time and end_time and delta_total > 0:
+            add_delta_to_csv(None, date_str, start_time, end_time, delta_total, delta_active, delta_idle)
 
         state["dirty"] = False
         state["recovered_at"] = datetime.now().isoformat()
@@ -670,7 +704,7 @@ def recover_previous_session_if_needed() -> Optional[dict]:
         return {
             "date": date_str,
             "recovered_seconds": delta_total,
-            "last_seen": last_seen.strftime("%Y-%m-%d %H:%M:%S") if last_seen else "",
+            "last_active": end_time.strftime("%Y-%m-%d %H:%M:%S") if end_time else "",
         }
     except Exception as e:
         return {"error": str(e)}

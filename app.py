@@ -77,7 +77,16 @@ class ActivityTrackerApp:
     def update(self):
         """Main update logic for the application."""
         now, total, active, idle, is_idle = self.calculate_current_session()
-        self.session.on_tick(is_idle)
+        prev_date = self.session.on_tick(is_idle)
+
+        # Midnight rollover — save remaining delta to the *previous* day,
+        # then reset the session so the new day starts with fresh counters
+        # and a correct start_time.
+        if prev_date is not None:
+            self._do_save_delta(now, total, active, idle, date_str=prev_date.isoformat())
+            self.session.reset()
+            now, total, active, idle, is_idle = self.calculate_current_session()
+            self.session.write_state(now, total, active, idle, dirty=True)
 
         # Check if it's time to save
         if time.time() - self.last_write_time >= self.write_interval:
@@ -104,19 +113,25 @@ class ActivityTrackerApp:
         """Delegates session calculation to the session tracker."""
         return self.session.calculate_current_session(self.idle_threshold, self.platform.get_idle_time)
 
-    def _do_save_delta(self, now, total_session, active_session, idle_session):
-        """Saves the unsaved time delta to the CSV file."""
+    def _do_save_delta(self, now, total_session, active_session, idle_session, date_str=None):
+        """Saves the unsaved time delta to the CSV file.
+
+        If *date_str* is provided (e.g. during midnight rollover) the delta
+        is written to that day's row instead of *now*'s date.
+        """
         delta_total, delta_active, delta_idle = self.session.calculate_unsaved_delta(
             total_session, active_session, idle_session
         )
         if delta_total <= 0:
             return
 
+        csv_end_time = self.session.last_active_time or now
+
         add_delta_to_csv(
             self.session.first_activity_this_day,
-            now.date().isoformat(),
+            date_str or now.date().isoformat(),
             self.session.start_time,
-            now,
+            csv_end_time,
             delta_total,
             delta_active,
             delta_idle,
