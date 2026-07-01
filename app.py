@@ -6,28 +6,18 @@ import time
 import i18n
 from platform_layer import get_platform
 from tracking import (
-    IDLE_THRESHOLD,
-    TARGET_WORK_SECONDS,
-    WEEKLY_TARGET_SECONDS,
     SessionTracker,
     add_delta_to_csv,
     get_configured_data_dir,
+    get_config_value,
     load_config,
-    load_idle_threshold,
-    load_save_interval,
-    load_target,
-    load_weekly_target,
     mark_state_clean,
     persist_data_dir,
-    persist_idle_threshold,
-    persist_save_interval,
-    persist_target,
-    persist_weekly_target,
     read_csv_data,
     recover_previous_session_if_needed,
     reset_data_dir_to_default,
+    set_config_value,
     set_data_dir,
-    set_config_value
 )
 
 from activity_tracker_menu import AppMenu
@@ -45,10 +35,10 @@ class ActivityTrackerApp:
         self.recovery_result = recover_previous_session_if_needed()
 
         # Load settings
-        self.target_work_seconds = load_target()
-        self.weekly_target_seconds = load_weekly_target()
-        self.idle_threshold = load_idle_threshold()
-        self.write_interval = load_save_interval()
+        self.target_work_seconds = int(get_config_value("target_seconds", 8 * 3600))
+        self.weekly_target_seconds = int(get_config_value("weekly_target_seconds", 40 * 3600))
+        self.idle_threshold = int(get_config_value("idle_threshold_seconds", 300))
+        self.write_interval = int(get_config_value("save_interval_seconds", 3600))
 
         # State variables
         self.last_write_time = time.time()
@@ -148,19 +138,19 @@ class ActivityTrackerApp:
 
     def set_target(self, seconds):
         self.target_work_seconds = int(seconds)
-        persist_target(seconds)
+        set_config_value("target_seconds", int(seconds))
 
     def set_weekly_target(self, seconds):
         self.weekly_target_seconds = int(seconds)
-        persist_weekly_target(seconds)
+        set_config_value("weekly_target_seconds", int(seconds))
 
     def set_idle_threshold(self, seconds):
         self.idle_threshold = int(seconds)
-        persist_idle_threshold(seconds)
+        set_config_value("idle_threshold_seconds", int(seconds))
 
     def set_save_interval(self, seconds):
         self.write_interval = int(seconds)
-        persist_save_interval(seconds)
+        set_config_value("save_interval_seconds", int(seconds))
 
     def set_language(self, code):
         set_config_value("locale", code)

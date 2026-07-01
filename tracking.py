@@ -12,7 +12,6 @@ import json
 import os
 import time
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Any, Optional
 
 import platformdirs
@@ -28,10 +27,6 @@ DEFAULT_TARGET_SECONDS = 8 * 3600        # 8 h
 DEFAULT_WEEKLY_TARGET_SECONDS = 40 * 3600  # 40 h
 DEFAULT_IDLE_THRESHOLD = 300              # 5 min
 DEFAULT_SAVE_INTERVAL_SECONDS = 3600    # 1 h
-
-TARGET_WORK_SECONDS = DEFAULT_TARGET_SECONDS
-WEEKLY_TARGET_SECONDS = DEFAULT_WEEKLY_TARGET_SECONDS
-IDLE_THRESHOLD = DEFAULT_IDLE_THRESHOLD
 
 
 # ------------------------------------------------------------
@@ -119,33 +114,24 @@ def save_config(config: dict) -> None:
     global _config_cache
     ensure_dir(CONFIG_DIR)
 
+    cfg = AppConfig()
+    cfg.target_seconds = config.get("target_seconds", DEFAULT_TARGET_SECONDS)
+    cfg.weekly_target_seconds = config.get("weekly_target_seconds", DEFAULT_WEEKLY_TARGET_SECONDS)
+    cfg.idle_threshold_seconds = config.get("idle_threshold_seconds", DEFAULT_IDLE_THRESHOLD)
+    cfg.save_interval_seconds = config.get("save_interval_seconds", DEFAULT_SAVE_INTERVAL_SECONDS)
+    cfg.validate()
+
+    # Start with validated core keys, then preserve extra keys (e.g. data_dir, locale)
+    merged = _config_to_dict(cfg)
+    for k, v in config.items():
+        if k not in merged:
+            merged[k] = v
+    _config_cache = merged
     try:
-        cfg = AppConfig()
-        cfg.target_seconds = config.get("target_seconds", DEFAULT_TARGET_SECONDS)
-        cfg.weekly_target_seconds = config.get("weekly_target_seconds", DEFAULT_WEEKLY_TARGET_SECONDS)
-        cfg.idle_threshold_seconds = config.get("idle_threshold_seconds", DEFAULT_IDLE_THRESHOLD)
-        cfg.save_interval_seconds = config.get("save_interval_seconds", DEFAULT_SAVE_INTERVAL_SECONDS)
-        cfg.validate()
-        # Start with validated core keys
-        merged = _config_to_dict(cfg)
-        # Preserve any extra keys from the input (e.g. data_dir, locale)
-        for k, v in config.items():
-            if k not in ("target_seconds", "weekly_target_seconds", "idle_threshold_seconds", "save_interval_seconds"):
-                merged[k] = v
-        _config_cache = merged
         with open(CONFIG_FILE, "w") as f:
             json.dump(_config_cache, f, indent=2)
     except Exception as e:
-        print(f"Warning: Invalid config values: {e}")
-        cfg = AppConfig()
-        merged = _config_to_dict(cfg)
-        # Also preserve extra keys in the fallback path
-        for k, v in config.items():
-            if k not in ("target_seconds", "weekly_target_seconds", "idle_threshold_seconds", "save_interval_seconds"):
-                merged[k] = v
-        _config_cache = merged
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(_config_cache, f, indent=2)
+        print(f"Warning: Could not write config: {e}")
 
 
 def get_config_value(key: str, default: Any = None) -> Any:
@@ -190,42 +176,6 @@ def reset_data_dir_to_default() -> None:
         del config["data_dir"]
     save_config(config)
     set_data_dir(DEFAULT_BASE_DIR)
-
-
-# ------------------------------------------------------------
-# Config wrappers
-# ------------------------------------------------------------
-
-def load_target() -> int:
-    return int(get_config_value("target_seconds", DEFAULT_TARGET_SECONDS))
-
-
-def persist_target(s: int) -> None:
-    set_config_value("target_seconds", int(s))
-
-
-def load_weekly_target() -> int:
-    return int(get_config_value("weekly_target_seconds", DEFAULT_WEEKLY_TARGET_SECONDS))
-
-
-def persist_weekly_target(s: int) -> None:
-    set_config_value("weekly_target_seconds", int(s))
-
-
-def load_idle_threshold() -> int:
-    return int(get_config_value("idle_threshold_seconds", DEFAULT_IDLE_THRESHOLD))
-
-
-def persist_idle_threshold(s: int) -> None:
-    set_config_value("idle_threshold_seconds", int(s))
-
-
-def load_save_interval() -> int:
-    return int(get_config_value("save_interval_seconds", DEFAULT_SAVE_INTERVAL_SECONDS))
-
-
-def persist_save_interval(s: int) -> None:
-    set_config_value("save_interval_seconds", int(s))
 
 
 # ------------------------------------------------------------
@@ -321,38 +271,38 @@ class SessionTracker:
         """
         now = datetime.now()
         idle_time = get_idle_time_fn()
+        is_idle = idle_time > idle_threshold
 
-        # Continuous tracking: keep the last moment the user was active.
-        # When idle is first detected this stops updating, freezing the last
-        # active time at the most recent activity.
-        if idle_time <= idle_threshold:
+        # ── Track idle transitions ───────────────────────────
+        #   idle just started  → record idle_start
+        #   idle just ended    → finalise the completed period into total_idle_session
+        if is_idle and self.idle_start is None:
+            self.idle_start = now
+        elif not is_idle and self.idle_start is not None:
+            elapsed = (now - self.idle_start).total_seconds()
+            self.total_idle_session += elapsed
+            if self.first_activity_this_day is None:
+                self.idle_before_first_activity += elapsed
+            self.idle_start = None
+
+        # ── Track last active moment ─────────────────────────
+        if not is_idle:
             self.last_active_time = now
 
-        if idle_time > idle_threshold:
-            if self.idle_start is None:
-                self.idle_start = now
-        else:
-            if self.idle_start is not None:
-                elapsed = (now - self.idle_start).total_seconds()
-                self.total_idle_session += elapsed
-                if self.first_activity_this_day is None:
-                    self.idle_before_first_activity += elapsed
-                self.idle_start = None
-
+        # ── Compute current idle (completed + ongoing) ───────
         current_idle = self.total_idle_session
         if self.idle_start is not None:
             current_idle += (now - self.idle_start).total_seconds()
 
-        total_session = (now - self.start_time).total_seconds()
-        active_session = max(total_session - current_idle, 0)
-
-        # Exclude idle time that occurred before the day's first activity
+        # ── Compute pre‑activity idle (excluded from reported) ──
         pre_activity = self.idle_before_first_activity
         if self.idle_start is not None and self.first_activity_this_day is None:
             pre_activity += (now - self.idle_start).total_seconds()
-        reported_idle = max(current_idle - pre_activity, 0)
 
-        is_idle = idle_time > idle_threshold
+        # ── Derive time segments ─────────────────────────────
+        total_session = (now - self.start_time).total_seconds()
+        active_session = max(total_session - current_idle, 0)
+        reported_idle = max(current_idle - pre_activity, 0)
 
         return now, total_session, active_session, reported_idle, is_idle
 
@@ -381,19 +331,18 @@ class SessionTracker:
         :meth:`reset()` to start the new day's accumulators fresh.
         """
         now = datetime.now()
+        prev_date = None
+
         if now.date() > self.last_tick_date:
             prev_date = self.last_tick_date
             self.first_activity_this_day = None
             self.idle_before_first_activity = 0.0
-            if self.first_activity_this_day is None and not is_idle:
-                self.first_activity_this_day = now
-            self.last_tick_date = now.date()
-            return prev_date
 
         if self.first_activity_this_day is None and not is_idle:
             self.first_activity_this_day = now
+
         self.last_tick_date = now.date()
-        return None
+        return prev_date
 
     def mark_saved(
         self,
@@ -487,6 +436,20 @@ CSV_FIELDS = [
     "last_updated",
 ]
 
+# Template for an empty CSV day row (used when a date has no data yet).
+EMPTY_DAY_DICT: dict = {
+    "date": "",
+    "start_time": "",
+    "end_time": "",
+    "total_seconds": 0.0,
+    "active_seconds": 0.0,
+    "idle_seconds": 0.0,
+    "total_hours": 0.0,
+    "active_hours": 0.0,
+    "idle_hours": 0.0,
+    "last_updated": "",
+}
+
 _csv_cache: Optional[dict] = None
 _csv_cache_time: float = 0.0
 CSV_CACHE_TTL: float = 10.0
@@ -539,18 +502,7 @@ def get_day_from_csv(date_str: str, data: Optional[dict] = None) -> dict:
         data = read_csv_data()
 
     if date_str not in data:
-        return {
-            "date": date_str,
-            "start_time": "",
-            "end_time": "",
-            "total_seconds": 0.0,
-            "active_seconds": 0.0,
-            "idle_seconds": 0.0,
-            "total_hours": 0.0,
-            "active_hours": 0.0,
-            "idle_hours": 0.0,
-            "last_updated": "",
-        }
+        return dict(EMPTY_DAY_DICT, date=date_str)
 
     row = data[date_str]
     return {
@@ -583,20 +535,16 @@ def add_delta_to_csv(
     data = read_csv_data()
     existing = get_day_from_csv(date_str, data)
 
-    existing_total = existing["total_seconds"]
-    existing_active = existing["active_seconds"]
-    existing_idle = existing["idle_seconds"]
+    # Pick start_time: prefer existing CSV value → first activity → session start
+    csv_start_time = (
+        existing["start_time"]
+        or (first_activity_time.strftime("%H:%M:%S") if first_activity_time else None)
+        or start_time.strftime("%H:%M:%S")
+    )
 
-    if existing["start_time"]:
-        csv_start_time = existing["start_time"]
-    elif first_activity_time:
-        csv_start_time = first_activity_time.strftime("%H:%M:%S")
-    else:
-        csv_start_time = start_time.strftime("%H:%M:%S")
-
-    new_total = existing_total + delta_total
-    new_active = existing_active + delta_active
-    new_idle = existing_idle + delta_idle
+    new_total = existing["total_seconds"] + delta_total
+    new_active = existing["active_seconds"] + delta_active
+    new_idle = existing["idle_seconds"] + delta_idle
 
     data[date_str] = {
         "date": date_str,
