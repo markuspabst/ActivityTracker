@@ -3,6 +3,7 @@
   "MENU_IDLE": "Leerlauf heute: {value}",
   "MENU_TOTAL": "Gesamtzeit heute: {value}",
   "MENU_TODAY_TARGET": "Tagesziel: {value}",
+  "ACTIVE_BAR": "Fortschritt: {bar}",
   "TODAY_OVERTIME_POS": "Überstunden heute: {value}",
   "WEEK_TOTAL": "Diese Woche: {value} / {target}",
   "WEEK_OVERTIME_POS": "Überstunden diese Woche: {value}",

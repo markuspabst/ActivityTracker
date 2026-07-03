@@ -3,6 +3,7 @@
   "MENU_IDLE": "Idle time today: {value}",
   "MENU_TOTAL": "Total time today: {value}",
   "MENU_TODAY_TARGET": "Daily target: {value}",
+  "ACTIVE_BAR": "Progress: {bar}",
   "TODAY_OVERTIME_POS": "Overtime today: {value}",
   "WEEK_TOTAL": "This week: {value} / {target}",
   "WEEK_OVERTIME_POS": "Overtime this week: {value}",

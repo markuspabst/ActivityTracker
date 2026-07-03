@@ -373,11 +373,8 @@ class SessionTracker:
         )
 
         today_start_time = csv_day["start_time"]
-        if not today_start_time:
-            if self.first_activity_this_day:
-                today_start_time = self.first_activity_this_day.strftime("%H:%M:%S")
-            else:
-                today_start_time = self.start_time.strftime("%H:%M:%S")
+        if not today_start_time and self.first_activity_this_day:
+            today_start_time = self.first_activity_this_day.strftime("%H:%M:%S")
 
         return {
             "date": date_str,
