@@ -36,6 +36,8 @@ def make_session(start_time=None):
     s.saved_total_session = 0.0
     s.saved_active_session = 0.0
     s.saved_idle_session = 0.0
+    s.last_was_idle = False
+    s.previous_is_idle = None
     return s
 
 
@@ -147,6 +149,24 @@ def test_on_tick_midnight_rollover_sets_first_activity_when_not_idle():
         result = s.on_tick(is_idle=False)
     assert result == FROZEN_DAY1.date()
     assert s.first_activity_this_day == FROZEN_DAY2
+
+
+def test_on_tick_does_not_set_first_activity_after_resume_without_prior_idle():
+    s = make_session(start_time=FROZEN_DAY1)
+    s.last_was_idle = False
+    s.previous_is_idle = False
+    with patch_now(FROZEN_DAY1_1030):
+        s.on_tick(is_idle=False)
+    assert s.first_activity_this_day is None
+
+
+def test_on_tick_sets_first_activity_after_idle_transition():
+    s = make_session(start_time=FROZEN_DAY1)
+    s.last_was_idle = False
+    s.previous_is_idle = True
+    with patch_now(FROZEN_DAY1_1030):
+        s.on_tick(is_idle=False)
+    assert s.first_activity_this_day == FROZEN_DAY1_1030
 
 
 def test_on_tick_midnight_rollover_resets_idle_before_first_activity():
@@ -305,11 +325,11 @@ def test_build_report_falls_back_to_first_activity():
     assert report["start_time"] == "10:30:00"
 
 
-def test_build_report_falls_back_to_session_start_time():
-    """When CSV has no start_time and no first_activity, falls back to start_time."""
+def test_build_report_returns_na_when_no_start_time():
+    """When CSV has no start_time and no first_activity, report shows N/A."""
     s = make_session(start_time=FROZEN_DAY2)
     report = s.build_report(FROZEN_DAY2, 5.0, 0.0, 0.0, csv_data={})
-    assert report["start_time"] == FROZEN_DAY2.strftime("%H:%M:%S")
+    assert report["start_time"] == "N/A"
 
 
 def test_build_report_merges_csv_and_unsaved_delta():
@@ -473,7 +493,8 @@ def test_idle_just_detected_sets_idle_start():
     with patch_now(t):
         n, total, active, idle, is_idle = s.calculate_current_session(300, lambda: 600)
 
-    assert s.idle_start == t
+    # The tracker computes the true idle start as "now - idle_time".
+    assert s.idle_start == t - timedelta(seconds=600)
     assert s.total_idle_session == 0.0
     assert is_idle is True
 
@@ -609,14 +630,15 @@ def test_scenario_active_then_idle_then_active():
     tidle_start = datetime(2026, 7, 1, 10, 5, 0)
     with patch_now(tidle_start):
         s.calculate_current_session(300, lambda: 360)
-    assert s.idle_start == tidle_start
+        # idle_start is computed as now - idle_time (360s => 6 minutes earlier)
+        assert s.idle_start == tidle_start - timedelta(seconds=360)
     assert s.total_idle_session == 0.0
 
     # ── 10:20 idle ongoing (15 min of idle accumulated) ──
     t2 = datetime(2026, 7, 1, 10, 20, 0)
     with patch_now(t2):
         n2, total2, act2, idl2, is_idle2 = s.calculate_current_session(300, lambda: 600)
-    assert idl2 == pytest.approx(900.0, rel=0.01)    # 15 min
+    assert idl2 == pytest.approx(1260.0, rel=0.01)    # 21 min (computed from last input)
     assert is_idle2 is True
     assert s.last_active_time == t1                   # frozen at 10:00
 
@@ -624,10 +646,10 @@ def test_scenario_active_then_idle_then_active():
     t3 = datetime(2026, 7, 1, 10, 30, 0)
     with patch_now(t3):
         n3, total3, act3, idl3, is_idle3 = s.calculate_current_session(300, lambda: 0)
-    assert s.total_idle_session == pytest.approx(1500.0, rel=0.01)  # 25 min total idle
+    assert s.total_idle_session == pytest.approx(1860.0, rel=0.01)  # 31 min total idle
     assert s.idle_start is None
-    assert idl3 == pytest.approx(1500.0, rel=0.01)
-    assert act3 == pytest.approx(3900.0, rel=0.01)    # 5400 - 1500 = 3900
+    assert idl3 == pytest.approx(1860.0, rel=0.01)
+    assert act3 == pytest.approx(3540.0, rel=0.01)    # 5400 - 1860 = 3540
     assert is_idle3 is False
     assert s.last_active_time == t3                   # updated to return time
 

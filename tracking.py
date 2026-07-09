@@ -28,6 +28,10 @@ DEFAULT_WEEKLY_TARGET_SECONDS = 40 * 3600  # 40 h
 DEFAULT_IDLE_THRESHOLD = 300              # 5 min
 DEFAULT_SAVE_INTERVAL_SECONDS = 3600    # 1 h
 
+# Minimum sustained active seconds required to consider a brief blip
+# after midnight or resume as real "first activity".
+MIN_FIRST_ACTIVITY_SECONDS = 30
+
 
 # ------------------------------------------------------------
 # PATHS
@@ -258,6 +262,15 @@ class SessionTracker:
         self.saved_total_session: float = 0.0
         self.saved_active_session: float = 0.0
         self.saved_idle_session: float = 0.0
+        self.last_was_idle: bool = False
+        # After reset, treat the session as if it were idle before, so the first
+        # non-idle tick in the new session is recognized as a transition (first activity).
+        self.previous_is_idle: Optional[bool] = True
+        # Time when a sustained non-idle period started (used to debounce brief
+        # input spikes that might otherwise mark first activity).
+        self.non_idle_start: Optional[datetime] = None
+        # Flag set when an idle period was just ended on the last tick.
+        self.idle_just_ended: bool = False
 
     # ── Runtime calculations ───────────────────────────────
 
@@ -277,7 +290,14 @@ class SessionTracker:
         #   idle just started  → record idle_start
         #   idle just ended    → finalise the completed period into total_idle_session
         if is_idle and self.idle_start is None:
-            self.idle_start = now
+            # The platform idle API returns seconds since last input — the
+            # true idle start time is therefore "now - idle_time". Use that
+            # so we don't silently credit the first idle interval as active.
+            try:
+                self.idle_start = now - timedelta(seconds=idle_time)
+            except Exception:
+                # Fallback: if something weird happens, fall back to now.
+                self.idle_start = now
         elif not is_idle and self.idle_start is not None:
             elapsed = (now - self.idle_start).total_seconds()
             self.total_idle_session += elapsed
@@ -288,11 +308,21 @@ class SessionTracker:
         # ── Track last active moment ─────────────────────────
         if not is_idle:
             self.last_active_time = now
+            # Track when a sustained active period begins (for debounce).
+            if getattr(self, "non_idle_start", None) is None:
+                self.non_idle_start = now
+        else:
+            # reset non-idle start on idle
+            setattr(self, "non_idle_start", None)
 
         # ── Compute current idle (completed + ongoing) ───────
         current_idle = self.total_idle_session
         if self.idle_start is not None:
             current_idle += (now - self.idle_start).total_seconds()
+
+        # Preserve the previous tick idle state for first-activity detection.
+        self.previous_is_idle = self.last_was_idle
+        self.last_was_idle = is_idle
 
         # ── Compute pre‑activity idle (excluded from reported) ──
         pre_activity = self.idle_before_first_activity
@@ -329,6 +359,11 @@ class SessionTracker:
         ``None`` otherwise.  The caller (the menu app) should save any
         remaining delta to the returned date and then call
         :meth:`reset()` to start the new day's accumulators fresh.
+        
+        First-activity detection rule:
+        - After midnight: first non-idle tick sets first_activity
+        - After idle: transition from idle→active sets first_activity
+        - On app launch: only set if truly soon after startup (< 5s)
         """
         now = datetime.now()
         prev_date = None
@@ -339,7 +374,39 @@ class SessionTracker:
             self.idle_before_first_activity = 0.0
 
         if self.first_activity_this_day is None and not is_idle:
-            self.first_activity_this_day = now
+            # Determine whether this non-idle tick should be treated as the
+            # user's "first activity" for the day. We require either:
+            #  - it's the first tick after a midnight rollover, or
+            #  - the user was previously idle and has been active for a
+            #    short sustained period (debounce brief input spikes), or
+            #  - the session just started (app launch) very recently.
+            is_new_day = prev_date is not None
+            transitioned_from_idle = self.previous_is_idle is True
+            very_recent_start = (now - self.start_time).total_seconds() < 5
+
+            non_idle_start = getattr(self, "non_idle_start", None)
+            sustained_active = (
+                non_idle_start is not None
+                and (now - non_idle_start).total_seconds() >= MIN_FIRST_ACTIVITY_SECONDS
+            )
+
+            # Priority rules for marking first activity:
+            # 1) If uninitialized, accept immediate.
+            # 2) If the app just started, accept immediate.
+            # 3) If this is an idle→active transition within the same day,
+            #    accept immediate (user returned from a break).
+            # 4) If this tick occurs just after a midnight rollover, require
+            #    either that the user was active across midnight or that the
+            #    active period has been sustained for a short time (debounce).
+            if self.previous_is_idle is None:
+                self.first_activity_this_day = now
+            elif very_recent_start:
+                self.first_activity_this_day = now
+            elif transitioned_from_idle and not is_new_day:
+                self.first_activity_this_day = now
+            elif is_new_day:
+                if self.previous_is_idle is False or sustained_active:
+                    self.first_activity_this_day = now
 
         self.last_tick_date = now.date()
         return prev_date
@@ -375,6 +442,8 @@ class SessionTracker:
         today_start_time = csv_day["start_time"]
         if not today_start_time and self.first_activity_this_day:
             today_start_time = self.first_activity_this_day.strftime("%H:%M:%S")
+        if not today_start_time:
+            today_start_time = "N/A"
 
         return {
             "date": date_str,
