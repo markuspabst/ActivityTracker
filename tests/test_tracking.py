@@ -10,6 +10,7 @@ from tracking import (
     format_delta,
     get_status_icon,
     hours,
+    MIN_FIRST_ACTIVITY_SECONDS,
 )
 
 # ============================================================
@@ -146,9 +147,11 @@ def test_on_tick_midnight_rollover_resets_first_activity():
 def test_on_tick_midnight_rollover_sets_first_activity_when_not_idle():
     s = make_session()
     with patch_now(FROZEN_DAY2):
+        # Simulate a sustained active period so debounce allows marking first activity
+        s.non_idle_start = FROZEN_DAY2 - timedelta(seconds=MIN_FIRST_ACTIVITY_SECONDS)
         result = s.on_tick(is_idle=False)
     assert result == FROZEN_DAY1.date()
-    assert s.first_activity_this_day == FROZEN_DAY2
+    assert s.first_activity_this_day == s.non_idle_start
 
 
 def test_on_tick_does_not_set_first_activity_after_resume_without_prior_idle():
@@ -165,8 +168,10 @@ def test_on_tick_sets_first_activity_after_idle_transition():
     s.last_was_idle = False
     s.previous_is_idle = True
     with patch_now(FROZEN_DAY1_1030):
+        # Simulate sustained active onset before the clearing tick
+        s.non_idle_start = FROZEN_DAY1_1030 - timedelta(seconds=MIN_FIRST_ACTIVITY_SECONDS)
         s.on_tick(is_idle=False)
-    assert s.first_activity_this_day == FROZEN_DAY1_1030
+    assert s.first_activity_this_day == s.non_idle_start
 
 
 def test_on_tick_midnight_rollover_resets_idle_before_first_activity():
@@ -742,10 +747,11 @@ def test_scenario_overnight_idle_before_first_activity():
     assert idle == 0.0
     assert is_idle is False
 
-    # Now simulate on_tick setting first_activity_this_day
+    # Now simulate on_tick setting first_activity_this_day after a sustained onset
     with patch_now(datetime(2026, 7, 1, 10, 0, 0)):
+        s.non_idle_start = datetime(2026, 7, 1, 10, 0, 0) - timedelta(seconds=MIN_FIRST_ACTIVITY_SECONDS)
         s.on_tick(is_idle=False)
-    assert s.first_activity_this_day == datetime(2026, 7, 1, 10, 0, 0)
+    assert s.first_activity_this_day == s.non_idle_start
 
     # ── 11:00 — user goes idle again ──
     s.idle_start = datetime(2026, 7, 1, 11, 5, 0)
@@ -860,16 +866,18 @@ def test_midnight_scenario_save_prev_day_then_reset():
     assert s.first_activity_this_day is None
     assert s.saved_total_session == 0.0
 
-    # -- Day 2 09:00: user becomes active --
+    # -- Day 2 09:00: user becomes active (sustained) --
     with patch_now(FROZEN_DAY2_0900):
+        s.non_idle_start = FROZEN_DAY2_0900 - timedelta(seconds=MIN_FIRST_ACTIVITY_SECONDS)
         s.on_tick(is_idle=False)
-    assert s.first_activity_this_day == FROZEN_DAY2_0900
+    assert s.first_activity_this_day == s.non_idle_start
 
     # Build report — start_time should show first activity of Day 2
     with patch_now(FROZEN_DAY2_0900):
         now2, total2, active2, idle2, _ = s.calculate_current_session(300, lambda: 0)
     report = s.build_report(now2, total2, active2, idle2, csv_data={})
-    assert report["start_time"] == "09:00:00"
+    # first activity was stamped at `non_idle_start` (onset), so display that
+    assert report["start_time"] == s.non_idle_start.strftime("%H:%M:%S")
 
 
 def test_unsaved_delta_consistency_after_midnight_without_first_activity():

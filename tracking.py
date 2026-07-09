@@ -292,12 +292,15 @@ class SessionTracker:
         if is_idle and self.idle_start is None:
             # The platform idle API returns seconds since last input — the
             # true idle start time is therefore "now - idle_time". Use that
-            # so we don't silently credit the first idle interval as active.
+            # but clamp it to the session start so we never record idle
+            # earlier than the session itself (which would inflate totals).
             try:
-                self.idle_start = now - timedelta(seconds=idle_time)
+                proposed = now - timedelta(seconds=idle_time)
+                # Clamp not before session start
+                self.idle_start = max(proposed, self.start_time)
             except Exception:
-                # Fallback: if something weird happens, fall back to now.
-                self.idle_start = now
+                # Fallback: ensure idle_start is at least session start.
+                self.idle_start = now if now >= self.start_time else self.start_time
         elif not is_idle and self.idle_start is not None:
             elapsed = (now - self.idle_start).total_seconds()
             self.total_idle_session += elapsed
@@ -390,23 +393,18 @@ class SessionTracker:
                 and (now - non_idle_start).total_seconds() >= MIN_FIRST_ACTIVITY_SECONDS
             )
 
-            # Priority rules for marking first activity:
-            # 1) If uninitialized, accept immediate.
-            # 2) If the app just started, accept immediate.
-            # 3) If this is an idle→active transition within the same day,
-            #    accept immediate (user returned from a break).
-            # 4) If this tick occurs just after a midnight rollover, require
-            #    either that the user was active across midnight or that the
-            #    active period has been sustained for a short time (debounce).
-            if self.previous_is_idle is None:
+            # Debounce logic:
+            # - Allow immediate first-activity if the app just started.
+            # - Otherwise require a sustained active period (>= MIN_FIRST_ACTIVITY_SECONDS)
+            #   when the tick is either right after midnight or when transitioning
+            #   from idle to active. Stamp the onset (`non_idle_start`) rather than
+            #   the clearing tick so the recorded start_time reflects when the user
+            #   actually became active.
+            if very_recent_start:
                 self.first_activity_this_day = now
-            elif very_recent_start:
-                self.first_activity_this_day = now
-            elif transitioned_from_idle and not is_new_day:
-                self.first_activity_this_day = now
-            elif is_new_day:
-                if self.previous_is_idle is False or sustained_active:
-                    self.first_activity_this_day = now
+            elif (is_new_day or transitioned_from_idle) and sustained_active:
+                # Use the onset of sustained activity as the first-activity timestamp
+                self.first_activity_this_day = non_idle_start
 
         self.last_tick_date = now.date()
         return prev_date
