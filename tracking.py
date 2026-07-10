@@ -548,6 +548,7 @@ def read_csv_data(force: bool = False) -> dict:
 
 def write_csv_data(data: dict) -> None:
     """Write the ``dict[date_str -> row_dict]`` back to CSV, sorted by date."""
+    global _csv_cache, _csv_cache_time
     if not DATA_DIR:
         return
     ensure_dir(DATA_DIR)
@@ -559,6 +560,9 @@ def write_csv_data(data: dict) -> None:
         writer.writeheader()
         for date_key in sorted(data.keys()):
             writer.writerow(data[date_key])
+
+    _csv_cache = data
+    _csv_cache_time = time.time()
 
 
 def get_day_from_csv(date_str: str, data: Optional[dict] = None) -> dict:

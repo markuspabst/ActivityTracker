@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import pytest
 from unittest.mock import patch
@@ -366,6 +367,62 @@ def test_build_report_merges_csv_and_unsaved_delta():
     assert report["total_seconds"] == 3600.0 + expected_dt
     assert report["end_time"] == now.strftime("%H:%M:%S")
     assert report["date"] == "2026-07-01"
+
+
+def test_write_csv_data_refreshes_cache(tmp_path):
+    import tracking as tracking_module
+
+    original_data_dir = tracking_module.DATA_DIR
+    original_csv_file = tracking_module.CSV_FILE
+    original_cache = tracking_module._csv_cache
+    original_cache_time = tracking_module._csv_cache_time
+
+    try:
+        tracking_module.DATA_DIR = str(tmp_path)
+        tracking_module.CSV_FILE = os.path.join(tracking_module.DATA_DIR, "activity_tracker_log.csv")
+        tracking_module.ensure_dir(tracking_module.DATA_DIR)
+
+        stale_data = {
+            "2026-07-01": {
+                "date": "2026-07-01",
+                "start_time": "",
+                "end_time": "",
+                "total_seconds": 0.0,
+                "active_seconds": 0.0,
+                "idle_seconds": 0.0,
+                "total_hours": 0.0,
+                "active_hours": 0.0,
+                "idle_hours": 0.0,
+                "last_updated": "",
+            }
+        }
+        tracking_module._csv_cache = stale_data
+        tracking_module._csv_cache_time = time.time()
+
+        fresh_data = {
+            "2026-07-01": {
+                "date": "2026-07-01",
+                "start_time": "09:00:00",
+                "end_time": "10:00:00",
+                "total_seconds": 3600.0,
+                "active_seconds": 3000.0,
+                "idle_seconds": 600.0,
+                "total_hours": 1.0,
+                "active_hours": 0.83,
+                "idle_hours": 0.17,
+                "last_updated": "2026-07-01 10:00:00",
+            }
+        }
+
+        tracking_module.write_csv_data(fresh_data)
+
+        assert tracking_module._csv_cache == fresh_data
+        assert tracking_module.read_csv_data() == fresh_data
+    finally:
+        tracking_module.DATA_DIR = original_data_dir
+        tracking_module.CSV_FILE = original_csv_file
+        tracking_module._csv_cache = original_cache
+        tracking_module._csv_cache_time = original_cache_time
 
 
 # ============================================================
