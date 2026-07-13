@@ -247,7 +247,11 @@ class SessionTracker:
     """
 
     def __init__(self) -> None:
+        self.is_locked = False
         self.reset()
+
+    def set_locked(self, is_locked: bool) -> None:
+        self.is_locked = is_locked
 
     def reset(self) -> None:
         """Start a fresh session (called at init and after midnight)."""
