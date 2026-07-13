@@ -62,6 +62,16 @@ class ActivityTrackerApp:
         while self._running:
             time.sleep(5)  # Update interval
             if self._running:
+                # If the screen is locked, we pause all tracking by skipping the
+                # update tick. The user must unlock for the session to resume.
+                if self.platform.is_screen_locked():
+                    if not self.session.is_locked:
+                        self.session.set_locked(True)
+                    continue
+
+                if self.session.is_locked:
+                    self.session.set_locked(False)
+                    self.session.reset() # Reset session on unlock
                 self.update()
 
     def update(self):

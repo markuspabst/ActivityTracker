@@ -109,6 +109,18 @@ class MacOSPlatform(PlatformABC):
 
     # ── Idle detection ──────────────────────────────────────
 
+    def is_screen_locked(self) -> bool:
+        """Check if the screen is locked."""
+        try:
+            import Quartz
+            session_info = Quartz.CGSessionCopyCurrentDictionary()
+            if session_info:
+                return session_info.get("CGSSessionScreenIsLocked", False)
+        except Exception:
+            # Fallback if Quartz is not available or fails
+            pass
+        return False
+
     def get_idle_time(self) -> float:
         now = time.time()
         if now - self._idle_cache["time"] < self.IDLE_CACHE_TTL:

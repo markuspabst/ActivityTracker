@@ -1,6 +1,10 @@
 # Install
 # pip install -r requirements.txt
 
+# Packaging / Build
+setuptools
+py2app
+
 # System Tray & Icon
 pystray
 Pillow

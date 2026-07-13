@@ -29,6 +29,11 @@ class PlatformABC(abc.ABC):
         """Seconds since last HID input event."""
         ...
 
+    @abc.abstractmethod
+    def is_screen_locked(self) -> bool:
+        """Check if the screen is locked."""
+        ...
+
     # ── App bundle / version info ───────────────────────────
 
     def get_app_bundle_path(self) -> Optional[str]:
@@ -177,6 +182,9 @@ class FallbackPlatform(PlatformABC):
         # No reliable cross-platform idle detection without dependencies
         self._idle_cache.update(time=now, value=0.0)
         return 0.0
+
+    def is_screen_locked(self) -> bool:
+        return False
 
     def get_bundle_version(self, fallback: str = "dev") -> str:
         return fallback
