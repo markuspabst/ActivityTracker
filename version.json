@@ -2,11 +2,6 @@
   "major": 1,
   "minor": 0,
   "patch": 1,
-<<<<<<< HEAD
-  "build": 165,
-  "build_date": "2026-07-09 11:30:48"
-=======
-  "build": 166,
-  "build_date": "2026-07-13 08:43:09"
->>>>>>> 2e006a4c7926c8d0beb041ff9db178f388df2c23
+  "build": 168,
+  "build_date": "2026-07-13 23:40:54"
 }
