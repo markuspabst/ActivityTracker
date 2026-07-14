@@ -38,5 +38,7 @@
   "QUIT": "Beenden",
   "SET_CUSTOM_VALUE": "Benutzerdefiniert...",
   "LANGUAGE": "Sprache",
-  "LANGUAGE_SYSTEM_DEFAULT": "Systemstandard"
+  "LANGUAGE_SYSTEM_DEFAULT": "Systemstandard",
+  "WEEK_ACTIVE": "Aktiv diese Woche: {value}",
+  "WEEK_IDLE": "Inaktiv diese Woche: {value}"
 }

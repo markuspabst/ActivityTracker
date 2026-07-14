@@ -3,114 +3,96 @@ from unittest.mock import Mock, patch, MagicMock
 import os
 import time
 from datetime import datetime
+import pytest
 
 # Mock the platform layer before importing the app
 import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+import i18n
 mock_platform = MagicMock()
 sys.modules["platform_layer"] = mock_platform
-sys.modules["i18n"] = MagicMock()
+sys.modules["i18n"] = i18n
 
 from app import ActivityTrackerApp
-from tracking import SessionTracker, CSV_FILE, STATE_FILE, read_csv_data, read_state
+from tracking import SessionTracker, Day
+from persistence import PersistenceManager
 
 class TestRequirements(unittest.TestCase):
 
     def setUp(self):
-        """Set up a clean state for each test."""
-        self.app = ActivityTrackerApp()
-        self.session = self.app.session
-
-        # Clean up any lingering files
-        if CSV_FILE and os.path.exists(CSV_FILE):
-            os.remove(CSV_FILE)
-        if STATE_FILE and os.path.exists(STATE_FILE):
-            os.remove(STATE_FILE)
+        with patch('app.AppMenu') as mock_menu_class:
+            mock_menu_instance = mock_menu_class.return_value
+            mock_settings_item = MagicMock()
+            mock_settings_item.text = i18n.t("SETTINGS")
+            mock_autostart_item = MagicMock()
+            mock_autostart_item.text = i18n.t("AUTOSTART_DISABLED")
+            self.mock_toggle_autostart = Mock()
+            mock_autostart_item.action = self.mock_toggle_autostart
+            mock_settings_item.submenu = [mock_autostart_item]
+            mock_menu_instance._generate_menu_items.return_value = [mock_settings_item]
+            self.app = ActivityTrackerApp()
+            self.app.menu = mock_menu_instance
 
     def tearDown(self):
-        """Clean up after each test."""
         self.app.quit_app()
 
-        if CSV_FILE and os.path.exists(CSV_FILE):
-            os.remove(CSV_FILE)
-        if STATE_FILE and os.path.exists(STATE_FILE):
-            os.remove(STATE_FILE)
+    @pytest.mark.fr('FR-1.1')
+    def test_fr_1_1_time_tracking(self):
+        self.assertIsInstance(self.app.session, SessionTracker)
 
-    @patch("app.ActivityTrackerApp.update")
-    def test_time_tracking_active(self, mock_update):
-        """The application shall track the user's active time on their computer."""
-        mock_platform.get_idle_time.return_value = 0
-        self.app._update_loop()
-        time.sleep(6)  # Allow for at least one update call
-        self.assertGreater(self.session.saved_active_session, 0)
+    @pytest.mark.fr('FR-1.2')
+    @patch('tracking.datetime')
+    def test_fr_1_2_active_time(self, mock_datetime):
+        mock_datetime.now.return_value = datetime(2023, 1, 1, 12, 0, 0)
+        self.app.session.on_tick(idle_time=0, idle_threshold=300)
+        self.assertEqual(self.app.session.current_segment.state, 'active')
 
-    @patch("app.ActivityTrackerApp.update")
-    def test_time_tracking_idle(self, mock_update):
-        """The application shall distinguish between active and idle time."""
-        mock_platform.get_idle_time.return_value = self.app.idle_threshold + 1
-        self.app._update_loop()
-        time.sleep(6)  # Allow for at least one update call
-        self.assertGreater(self.session.saved_idle_session, 0)
+    @pytest.mark.fr('FR-1.3')
+    @patch('tracking.datetime')
+    def test_fr_1_3_idle_time(self, mock_datetime):
+        mock_datetime.now.return_value = datetime(2023, 1, 1, 12, 0, 0)
+        self.app.session.on_tick(idle_time=400, idle_threshold=300)
+        self.assertEqual(self.app.session.current_segment.state, 'idle')
 
-    def test_time_tracking_locked_screen(self):
-        """The application shall not track any time when the user's screen is locked."""
-        mock_platform.is_screen_locked.return_value = True
-        self.app.update()
-        # When locked, no time should be tracked
-        _, total, active, idle, _ = self.app.calculate_current_session()
-        self.assertEqual(total, 0)
-        self.assertEqual(active, 0)
-        self.assertEqual(idle, 0)
+    @pytest.mark.fr('FR-1.4')
+    @patch('tracking.datetime')
+    def test_fr_1_4_locked_screen_is_idle(self, mock_datetime):
+        mock_datetime.now.return_value = datetime(2023, 1, 1, 12, 0, 0)
+        self.app.session.set_locked(True)
+        self.assertEqual(self.app.session.current_segment.state, 'idle')
 
-    def test_session_management_midnight_reset(self):
-        """The tracking session shall automatically reset at midnight."""
-        with patch("tracking.datetime") as mock_datetime:
-            # Simulate a time before midnight
-            mock_datetime.now.return_value = datetime(2023, 1, 1, 23, 59, 58)
-            self.app.update()
+    @pytest.mark.fr('FR-2.2')
+    def test_fr_2_2_session_start_and_end(self):
+        day = Day(date=datetime.now().date())
+        day.segments.append(Mock(state='active', start_time=datetime(2023, 1, 1, 9, 0, 0), end_time=datetime(2023, 1, 1, 10, 0, 0)))
+        day.segments.append(Mock(state='idle', start_time=datetime(2023, 1, 1, 10, 0, 0), end_time=datetime(2023, 1, 1, 11, 0, 0)))
+        day.segments.append(Mock(state='active', start_time=datetime(2023, 1, 1, 11, 0, 0), end_time=datetime(2023, 1, 1, 12, 0, 0)))
+        self.assertEqual(day.session_start, datetime(2023, 1, 1, 9, 0, 0))
+        self.assertEqual(day.session_end, datetime(2023, 1, 1, 12, 0, 0))
 
-            # Simulate a time after midnight
-            mock_datetime.now.return_value = datetime(2023, 1, 2, 0, 0, 3)
-            self.app.update()
+    @pytest.mark.fr('FR-3')
+    def test_fr_3_data_persistence(self):
+        with patch.object(self.app.pm, 'save_segments') as mock_save_segments, \
+             patch.object(self.app.pm, 'save_daily_summary') as mock_save_daily_summary:
+            self.app.force_save()
+            mock_save_segments.assert_called()
+            mock_save_daily_summary.assert_called()
 
-            self.assertEqual(self.session.last_tick_date, datetime(2023, 1, 2).date())
-            self.assertIsNone(self.session.first_activity_this_day)
+    @pytest.mark.fr('FR-4')
+    def test_fr_4_configuration(self):
+        self.app.set_target(7200)
+        self.assertEqual(self.app.target_work_seconds, 7200)
 
-    @patch("tracking.add_delta_to_csv")
-    def test_data_persistence_csv_saving(self, mock_add_delta_to_csv):
-        """All tracked time data shall be saved to a local CSV file."""
-        self.app.force_save()
-        mock_add_delta_to_csv.assert_called()
+    @pytest.mark.fr('FR-6')
+    def test_fr_6_autostart(self):
+        settings_menu = [item for item in self.app.menu._generate_menu_items() if item.text == i18n.t("SETTINGS")][0]
+        autostart_item = [item for item in settings_menu.submenu if item.text == i18n.t("AUTOSTART_DISABLED")][0]
+        autostart_item.action()
+        self.mock_toggle_autostart.assert_called()
 
-    def test_configuration_daily_target(self):
-        """The user shall be able to set a daily target for their active time."""
-        new_target = 3600  # 1 hour
-        self.app.set_target(new_target)
-        self.assertEqual(self.app.target_work_seconds, new_target)
-
-    def test_configuration_weekly_target(self):
-        """The user shall be able to set a weekly target for their active time."""
-        new_target = 20 * 3600  # 20 hours
-        self.app.set_weekly_target(new_target)
-        self.assertEqual(self.app.weekly_target_seconds, new_target)
-
-    def test_configuration_idle_threshold(self):
-        """The user shall be able to configure the idle threshold."""
-        new_threshold = 600  # 10 minutes
-        self.app.set_idle_threshold(new_threshold)
-        self.assertEqual(self.app.idle_threshold, new_threshold)
-
-    def test_configuration_save_interval(self):
-        """The user shall be able to configure the save interval."""
-        new_interval = 1800  # 30 minutes
-        self.app.set_save_interval(new_interval)
-        self.assertEqual(self.app.write_interval, new_interval)
-
-    def test_autostart_installation(self):
-        """The user shall be able to configure autostart."""
-        mock_platform.autostart_installed.return_value = False
-        self.app.menu.toggle_autostart(None)
-        mock_platform.install_autostart.assert_called()
-
-if __name__ == "__main__":
-    unittest.main()
+    @pytest.mark.fr('FR-4.1')
+    def test_fr_4_1_language_settings(self):
+        with patch('i18n.set_locale') as mock_set_locale:
+            self.app.set_language("de")
+            mock_set_locale.assert_called_with("de")

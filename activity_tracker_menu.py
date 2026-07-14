@@ -1,33 +1,29 @@
 
 from __future__ import annotations
-import functools
 from datetime import datetime, timedelta
 
-from PIL import Image, ImageDraw
 from pystray import Icon, Menu, MenuItem
 
 import i18n
 from platform_layer import get_platform
+from tray_icon import create_icon, get_status_icon
 from tracking import (
-    format_delta,
     format_hours,
-    get_current_week_dates,
-    get_status_icon,
-    read_csv_data,
-    get_day_from_csv,
-    get_weekly_seconds_from_csv,
-    get_configured_data_dir,
 )
-
 
 class AppMenu:
     def __init__(self, app_controller):
         self.app = app_controller
         self.platform = get_platform()
         self._last_status_icon = None
+        self._active_today_session = 0
+        self._idle_today_session = 0
+        self._session_start = None
+        self._total_weekly_active = 0
+        self._total_weekly_idle = 0
 
-        initial_icon = self._create_icon("🔴")
-        self.icon = Icon("ActivityTracker", initial_icon, "ActivityTracker", Menu(self._generate_menu_items))
+        # The icon is created here but will be updated immediately by the first UI update
+        self.icon = Icon("ActivityTracker", create_icon("🟡"), "ActivityTracker", Menu(self._generate_menu_items))
 
     def run(self):
         self.icon.run()
@@ -35,70 +31,51 @@ class AppMenu:
     def stop(self):
         self.icon.stop()
 
-    @functools.lru_cache(maxsize=8)
-    def _create_icon(self, emoji_char, size=64):
-        """Renders a colored circle icon for the menu bar."""
-        color_map = {"🔴": (255, 50, 50), "🟡": (255, 200, 30), "🟢": (50, 200, 50)}
-        color = color_map.get(emoji_char, (200, 200, 200))
-        img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(img)
-        margin = 3
-        draw.ellipse([margin, margin, size - margin, size - margin], fill=color + (255,))
-        return img
+    def update_ui(self, is_idle, active_today, active_week, weekly_target):
+        today_date = datetime.now().date()
+        today_data = self.app.session.days.get(today_date)
 
-    def update_ui(self, is_idle, active_today):
-        status_emoji = get_status_icon(is_idle, active_today, self.app.target_work_seconds)
+        self._active_today_session = today_data.active_minutes if today_data else 0
+        self._idle_today_session = today_data.idle_minutes if today_data else 0
+        self._session_start = today_data.session_start if today_data else None
+
+        week_start_date = today_date - timedelta(days=today_date.weekday())
+        weekly_active_from_csv, weekly_idle_from_csv = self.app.pm.read_daily_summaries_for_week(week_start_date)
+
+        weekly_active_session = 0
+        weekly_idle_session = 0
+        for i in range(7):
+            day_in_week = week_start_date + timedelta(days=i)
+            day_data = self.app.session.days.get(day_in_week)
+            if day_data:
+                weekly_active_session += day_data.active_minutes
+                weekly_idle_session += day_data.idle_minutes
+
+        self._total_weekly_active = weekly_active_from_csv + weekly_active_session
+        self._total_weekly_idle = weekly_idle_from_csv + weekly_idle_session
+
+        # Update icon status and title
+        status_emoji = get_status_icon(is_idle, active_today, self.app.target_work_seconds, active_week, weekly_target)
         if status_emoji != self._last_status_icon:
-            self.icon.icon = self._create_icon(status_emoji)
+            self.icon.icon = create_icon(status_emoji)
             self._last_status_icon = status_emoji
 
         self.icon.title = f"{format_hours(active_today)}"
         self.icon.update_menu()
 
     def _generate_menu_items(self):
-        # Main stats
-        now, total_session, active_session, idle_session, is_idle = self.app.calculate_current_session()
-        csv_data = read_csv_data()
-        report = self.app.session.build_report(now, total_session, active_session, idle_session, csv_data)
-
-        active_today = report["active_seconds"]
-        idle_today = report["idle_seconds"]
-        total_today = report["total_seconds"]
-        daily_overtime = active_today - self.app.target_work_seconds
-
-        weekly_from_csv = get_weekly_seconds_from_csv(data=csv_data)
-        _, delta_active, _ = self.app.session.calculate_unsaved_delta(total_session, active_session, idle_session)
-        weekly_total = weekly_from_csv + delta_active
-        weekly_overtime = weekly_total - self.app.weekly_target_seconds
-
-        yield MenuItem(i18n.t("MENU_START_TIME", value=report["start_time"]), None, enabled=False)
-        yield MenuItem(i18n.t("MENU_ACTIVE", value=format_hours(active_today)), None, enabled=False)
-        yield MenuItem(i18n.t("MENU_IDLE", value=format_hours(idle_today)), None, enabled=False)
-        yield MenuItem(i18n.t("MENU_TOTAL", value=format_hours(total_today)), None, enabled=False)
+        # These yields use the pre-calculated values from the last UI update
+        yield MenuItem(i18n.t("MENU_START_TIME", value=self._session_start.strftime("%H:%M") if self._session_start else "N/A"), None, enabled=False)
+        yield MenuItem(i18n.t("MENU_ACTIVE", value=format_hours(self._active_today_session * 60)), None, enabled=False)
+        yield MenuItem(i18n.t("MENU_IDLE", value=format_hours(self._idle_today_session * 60)), None, enabled=False)
         yield Menu.SEPARATOR
 
-        # Daily target
-        yield MenuItem(i18n.t("MENU_TODAY_TARGET", value=format_hours(self.app.target_work_seconds)), None, enabled=False)
-        overtime_key = "TODAY_OVERTIME_POS" if daily_overtime >= 0 else "TODAY_OVERTIME_NEG"
-        yield MenuItem(i18n.t(overtime_key, value=format_delta(daily_overtime)), None, enabled=False)
+        # Weekly Summary
+        yield MenuItem(i18n.t("WEEK_ACTIVE", value=format_hours(self._total_weekly_active * 60)), None, enabled=False)
+        yield MenuItem(i18n.t("WEEK_IDLE", value=format_hours(self._total_weekly_idle * 60)), None, enabled=False)
         yield Menu.SEPARATOR
 
-        # Weekly target
-        weekly_target_formatted = format_hours(self.app.weekly_target_seconds)
-        yield MenuItem(i18n.t("WEEK_TOTAL", value=format_hours(weekly_total), target=weekly_target_formatted), None, enabled=False)
-        weekly_overtime_key = "WEEK_OVERTIME_POS" if weekly_overtime >= 0 else "WEEK_OVERTIME_NEG"
-        yield MenuItem(i18n.t(weekly_overtime_key, value=format_delta(weekly_overtime)), None, enabled=False)
-        yield Menu.SEPARATOR
-
-        start_display = self.app.session.first_activity_this_day.strftime('%H:%M:%S') if self.app.session.first_activity_this_day else 'N/A'
-        yield MenuItem(i18n.t("MENU_START", value=start_display), None, enabled=False)
-        yield MenuItem(i18n.t("MENU_UPDATE", value=now.strftime('%H:%M:%S')), None, enabled=False)
-        yield MenuItem(i18n.t("MENU_SAVED", value=self.app.last_save_display), None, enabled=False)
-        yield Menu.SEPARATOR
-
-        # Settings submenu
         yield MenuItem(i18n.t("SETTINGS"), self._generate_settings_menu())
-        yield Menu.SEPARATOR
         yield MenuItem(i18n.t("FORCE_SAVE"), self.app.force_save)
         yield MenuItem(i18n.t("QUIT"), self.app.quit_app)
 
@@ -152,9 +129,9 @@ class AppMenu:
 
         # Data Folder
         data_folder_menu = Menu(
-            MenuItem(get_configured_data_dir(), None, enabled=False),
+            MenuItem(self.app.pm.get_data_dir(), None, enabled=False),
             Menu.SEPARATOR,
-            MenuItem(i18n.t("OPEN_DATA_FOLDER"), lambda: self.platform.open_file_manager(get_configured_data_dir())),
+            MenuItem(i18n.t("OPEN_DATA_FOLDER"), lambda: self.platform.open_file_manager(self.app.pm.get_data_dir())),
             MenuItem(i18n.t("SELECT_DATA_FOLDER"), self.app.select_data_folder, enabled=self.platform.supports_native_dialogs()),
             MenuItem(i18n.t("RESET_DATA_FOLDER"), self.app.reset_data_folder),
         )
@@ -164,7 +141,16 @@ class AppMenu:
         autostart_label = "AUTOSTART_ENABLED" if autostart_installed else "AUTOSTART_DISABLED"
 
 
+
+        # Language
+        lang_menu_items = []
+        lang_menu_items.append(MenuItem(i18n.t("LANGUAGE_SYSTEM_DEFAULT"), lambda *args: self.app.set_language(None), checked=lambda item: i18n._lang is None))
+        for code in i18n.available_locales():
+            lang_menu_items.append(MenuItem(code.upper(), (lambda c: lambda *args: self.app.set_language(c))(code), checked=lambda item, c=code: i18n._lang == c))
+
         return Menu(
+            MenuItem(i18n.t("LANGUAGE"), Menu(*lang_menu_items)),
+            Menu.SEPARATOR,
             MenuItem(i18n.t("DAILY_TARGET"), Menu(*target_menu_items)),
             MenuItem(i18n.t("WEEKLY_TARGET"), Menu(*weekly_target_menu_items)),
             MenuItem(i18n.t("IDLE_THRESHOLD"), Menu(*idle_menu_items)),
@@ -173,8 +159,6 @@ class AppMenu:
             MenuItem(i18n.t("DATA_FOLDER"), data_folder_menu),
             MenuItem(i18n.t(autostart_label), self._toggle_autostart, checked=lambda item: self.platform.autostart_installed()),
         )
-
-    # ── Autostart ─────────────────────────────────────────────
 
     def _toggle_autostart(self):
         """Toggle the launch-at-login autostart on/off."""
@@ -186,5 +170,3 @@ class AppMenu:
                 self.platform.install_autostart()
         except Exception as e:
             print(f"Autostart error: {e}")
-
-    

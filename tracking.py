@@ -7,15 +7,13 @@ It can be imported by the menu app, the dashboard generator, tests, etc.
 
 from __future__ import annotations
 
-import csv
 import json
 import os
-import time
-from datetime import datetime, timedelta
-from typing import Any, Optional
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, date
+from typing import Any, Optional, List, Dict
 
 import platformdirs
-
 
 # ------------------------------------------------------------
 # CONSTANTS
@@ -23,15 +21,10 @@ import platformdirs
 
 APP_NAME = "ActivityTracker"
 
-DEFAULT_TARGET_SECONDS = 8 * 3600        # 8 h
-DEFAULT_WEEKLY_TARGET_SECONDS = 40 * 3600  # 40 h
-DEFAULT_IDLE_THRESHOLD = 300              # 5 min
-DEFAULT_SAVE_INTERVAL_SECONDS = 3600    # 1 h
-
-# Minimum sustained active seconds required to consider a brief blip
-# after midnight or resume as real "first activity".
-MIN_FIRST_ACTIVITY_SECONDS = 30
-
+DEFAULT_TARGET_SECONDS = 8 * 3600
+DEFAULT_WEEKLY_TARGET_SECONDS = 40 * 3600
+DEFAULT_IDLE_THRESHOLD = 300
+DEFAULT_SAVE_INTERVAL_SECONDS = 3600
 
 # ------------------------------------------------------------
 # PATHS
@@ -40,138 +33,109 @@ MIN_FIRST_ACTIVITY_SECONDS = 30
 DEFAULT_BASE_DIR = platformdirs.user_data_dir(APP_NAME)
 CONFIG_DIR = platformdirs.user_config_dir(APP_NAME)
 CONFIG_FILE = os.path.join(CONFIG_DIR, "activity_tracker_config.json")
-
 DATA_DIR: Optional[str] = None
-CSV_FILE: Optional[str] = None
-STATE_FILE: Optional[str] = None
 
+# ------------------------------------------------------------
+# DATA CLASSES
+# ------------------------------------------------------------
+
+@dataclass
+class TimeSegment:
+    state: str  # 'active' or 'idle'
+    start_time: datetime
+    end_time: Optional[datetime] = None
+
+    @property
+    def duration_minutes(self) -> int:
+        if self.end_time is None:
+            return 0
+        return round((self.end_time - self.start_time).total_seconds() / 60)
+
+@dataclass
+class Day:
+    date: date
+    segments: List[TimeSegment] = field(default_factory=list)
+
+    @property
+    def active_minutes(self) -> int:
+        return sum(seg.duration_minutes for seg in self.segments if seg.state == 'active')
+
+    @property
+    def idle_minutes(self) -> int:
+        start = self.session_start
+        end = self.session_end
+        if not start or not end:
+            return 0
+        return sum(
+            seg.duration_minutes
+            for seg in self.segments
+            if seg.state == 'idle' and seg.start_time and seg.start_time >= start and seg.end_time and seg.end_time <= end
+        )
+
+    @property
+    def session_start(self) -> Optional[datetime]:
+        active_segments = [seg for seg in self.segments if seg.state == 'active']
+        if not active_segments:
+            return None
+        return min(seg.start_time for seg in active_segments)
+
+    @property
+    def session_end(self) -> Optional[datetime]:
+        active_segments = [seg for seg in self.segments if seg.state == 'active']
+        if not active_segments:
+            return None
+        active_segments_with_end = [seg for seg in active_segments if seg.end_time]
+        if not active_segments_with_end:
+            return None
+        return max(seg.end_time for seg in active_segments_with_end)
+
+    def total_active_seconds(self) -> float:
+        total = self.active_minutes * 60
+        if self.segments and self.segments[-1].state == 'active' and self.segments[-1].end_time is None:
+            total += (datetime.now() - self.segments[-1].start_time).total_seconds()
+        return total
 
 # ------------------------------------------------------------
 # CONFIG
 # ------------------------------------------------------------
 
 class AppConfig:
-    """Lightweight configuration."""
-
     def __init__(self) -> None:
-        self.target_seconds = DEFAULT_TARGET_SECONDS
-        self.weekly_target_seconds = DEFAULT_WEEKLY_TARGET_SECONDS
-        self.idle_threshold_seconds = DEFAULT_IDLE_THRESHOLD
-        self.save_interval_seconds = DEFAULT_SAVE_INTERVAL_SECONDS
+        pass
 
-    def validate(self) -> None:
-        self.target_seconds = max(3600, min(86400, self.target_seconds))
-        self.weekly_target_seconds = max(3600, min(168 * 3600, self.weekly_target_seconds))
-        self.idle_threshold_seconds = max(60, min(1800, self.idle_threshold_seconds))
-        self.save_interval_seconds = max(60, min(7200, self.save_interval_seconds))
-
-
-def _config_to_dict(cfg: AppConfig) -> dict:
-    return {
-        "target_seconds": cfg.target_seconds,
-        "weekly_target_seconds": cfg.weekly_target_seconds,
-        "idle_threshold_seconds": cfg.idle_threshold_seconds,
-        "save_interval_seconds": cfg.save_interval_seconds,
-    }
-
-
-def ensure_dir(path: str) -> None:
-    os.makedirs(path, exist_ok=True)
-
-
-_config_cache: Optional[dict] = None
-
-
-def load_config() -> dict:
-    """Load and validate configuration from file."""
-    global _config_cache
-    ensure_dir(CONFIG_DIR)
-    config = AppConfig()
-
-    if not os.path.isfile(CONFIG_FILE):
-        _config_cache = _config_to_dict(config)
-        return _config_cache
-
+def load_config():
+    if not os.path.exists(CONFIG_FILE):
+        return {}
     try:
-        with open(CONFIG_FILE, "r") as f:
-            config_data = json.load(f)
-            config.target_seconds = config_data.get("target_seconds", DEFAULT_TARGET_SECONDS)
-            config.weekly_target_seconds = config_data.get("weekly_target_seconds", DEFAULT_WEEKLY_TARGET_SECONDS)
-            config.idle_threshold_seconds = config_data.get("idle_threshold_seconds", DEFAULT_IDLE_THRESHOLD)
-            config.save_interval_seconds = config_data.get("save_interval_seconds", DEFAULT_SAVE_INTERVAL_SECONDS)
-            config.validate()
-            merged = _config_to_dict(config)
-            # Preserve extra keys from the stored config (e.g. data_dir, locale)
-            for k, v in config_data.items():
-                if k not in ("target_seconds", "weekly_target_seconds", "idle_threshold_seconds", "save_interval_seconds"):
-                    merged[k] = v
-            _config_cache = merged
-            return _config_cache
-    except Exception as e:
-        print(f"Warning: Invalid config, using defaults: {e}")
-        _config_cache = _config_to_dict(config)
-        return _config_cache
+        with open(CONFIG_FILE, 'r') as f:
+            return json.load(f)
+    except (IOError, json.JSONDecodeError):
+        return {}
 
+def save_config(config):
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(config, f, indent=2)
 
-def save_config(config: dict) -> None:
-    """Save configuration with validation."""
-    global _config_cache
-    ensure_dir(CONFIG_DIR)
+def get_config_value(key, default=None):
+    return load_config().get(key, default)
 
-    cfg = AppConfig()
-    cfg.target_seconds = config.get("target_seconds", DEFAULT_TARGET_SECONDS)
-    cfg.weekly_target_seconds = config.get("weekly_target_seconds", DEFAULT_WEEKLY_TARGET_SECONDS)
-    cfg.idle_threshold_seconds = config.get("idle_threshold_seconds", DEFAULT_IDLE_THRESHOLD)
-    cfg.save_interval_seconds = config.get("save_interval_seconds", DEFAULT_SAVE_INTERVAL_SECONDS)
-    cfg.validate()
-
-    # Start with validated core keys, then preserve extra keys (e.g. data_dir, locale)
-    merged = _config_to_dict(cfg)
-    for k, v in config.items():
-        if k not in merged:
-            merged[k] = v
-    _config_cache = merged
-    try:
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(_config_cache, f, indent=2)
-    except Exception as e:
-        print(f"Warning: Could not write config: {e}")
-
-
-def get_config_value(key: str, default: Any = None) -> Any:
-    config = load_config()
-    return config.get(key, default)
-
-
-def set_config_value(key: str, value: Any) -> None:
+def set_config_value(key, value):
     config = load_config()
     config[key] = value
     save_config(config)
 
+def get_configured_data_dir():
+    return get_config_value('data_dir', DEFAULT_BASE_DIR)
 
-def get_configured_data_dir() -> str:
-    config = load_config()
-    configured_dir = config.get("data_dir")
-    if configured_dir:
-        return os.path.expanduser(configured_dir)
-    return DEFAULT_BASE_DIR
-
-
-def set_data_dir(path: str) -> None:
-    global DATA_DIR, CSV_FILE, STATE_FILE, _csv_cache, _csv_cache_time
-    DATA_DIR = os.path.expanduser(path)
-    ensure_dir(DATA_DIR)
-    CSV_FILE = os.path.join(DATA_DIR, "activity_tracker_log.csv")
-    STATE_FILE = os.path.join(DATA_DIR, "activity_tracker_state.json")
-    # Invalidate caches so the next read picks up the new location
-    _csv_cache = None
-    _csv_cache_time = 0.0
+def set_data_dir(path):
+    global DATA_DIR
+    DATA_DIR = path
+    os.makedirs(DATA_DIR, exist_ok=True)
 
 
 def persist_data_dir(path: str) -> None:
-    config = load_config()
-    config["data_dir"] = os.path.expanduser(path)
-    save_config(config)
+    set_config_value("data_dir", os.path.expanduser(path))
 
 
 def reset_data_dir_to_default() -> None:
@@ -183,23 +147,153 @@ def reset_data_dir_to_default() -> None:
 
 
 # ------------------------------------------------------------
-# FORMATTING HELPERS
+# SESSION TRACKER
 # ------------------------------------------------------------
 
+class SessionTracker:
+    def __init__(self, persistence_manager) -> None:
+        self.pm = persistence_manager
+        self.days: Dict[date, Day] = {}
+        self.current_segment: Optional[TimeSegment] = None
+        self.is_locked = False
+
+    def on_tick(self, idle_time: float, idle_threshold: int):
+        now = datetime.now()
+        current_date = now.date()
+
+        if current_date not in self.days:
+            self.days[current_date] = Day(date=current_date)
+
+        is_idle_by_time = idle_time > idle_threshold
+        current_state = 'idle' if is_idle_by_time or self.is_locked else 'active'
+
+        if self.current_segment is None:
+            self.current_segment = TimeSegment(state=current_state, start_time=now)
+            self.days[current_date].segments.append(self.current_segment)
+        elif self.current_segment.state != current_state:
+            self.current_segment.end_time = now
+            self.current_segment = TimeSegment(state=current_state, start_time=now)
+            self.days[current_date].segments.append(self.current_segment)
+
+        if self.current_segment.start_time.date() != current_date:
+            midnight = datetime.combine(self.current_segment.start_time.date(), datetime.max.time())
+            self.current_segment.end_time = midnight
+
+            new_day_start = datetime.combine(current_date, datetime.min.time())
+            self.current_segment = TimeSegment(state=self.current_segment.state, start_time=new_day_start)
+            self.days[current_date].segments.append(self.current_segment)
+
+    def finalize_session(self):
+        if self.current_segment:
+            self.current_segment.end_time = datetime.now()
+        self.save_all_days()
+
+    def save_all_days(self):
+        if self.current_segment:
+            self.current_segment.end_time = datetime.now()
+        daily_summaries = {}
+        for day_date, day_obj in self.days.items():
+            if not day_obj.segments:
+                continue
+            sess_start = day_obj.session_start
+            sess_end = day_obj.session_end
+            daily_summaries[day_date] = {
+                "active_min": day_obj.active_minutes,
+                "idle_min": day_obj.idle_minutes,
+                "session_start": sess_start.strftime("%H:%M") if sess_start else "",
+                "session_end": sess_end.strftime("%H:%M") if sess_end else "",
+            }
+
+        self.pm.save_segments(self.days)
+        self.pm.save_daily_summary(daily_summaries)
+        self.days = {}
+
+    def recover_from_crash(self):
+        state_file = os.path.join(self.pm.get_data_dir(), "activity_tracker_state.json")
+        if not os.path.exists(state_file):
+            return
+
+        with open(state_file, 'r') as f:
+            try:
+                state = json.load(f)
+            except json.JSONDecodeError:
+                return # Ignore corrupt state file
+
+        if state.get("dirty"):
+            last_segment_info = state.get("current_segment")
+            if last_segment_info:
+                last_active_time_str = state.get("last_active_time")
+                if last_active_time_str:
+                    last_active_time = datetime.fromisoformat(last_active_time_str)
+                    segment_start_time = datetime.fromisoformat(last_segment_info["start_time"])
+                    segment_date = segment_start_time.date()
+
+                    if segment_date not in self.days:
+                        self.days[segment_date] = Day(date=segment_date)
+
+                    if last_active_time.date() != segment_date:
+                        end_of_day = datetime.combine(segment_date, datetime.max.time())
+                        recovered_segment = TimeSegment(
+                            state=last_segment_info["state"],
+                            start_time=segment_start_time,
+                            end_time=end_of_day
+                        )
+                    else:
+                         recovered_segment = TimeSegment(
+                            state=last_segment_info["state"],
+                            start_time=segment_start_time,
+                            end_time=last_active_time
+                        )
+
+                    self.days[segment_date].segments.append(recovered_segment)
+                    self.save_all_days()
+
+        self.mark_state_clean()
+
+    def write_state(self, dirty: bool = True):
+        state_file = os.path.join(self.pm.get_data_dir(), "activity_tracker_state.json")
+        last_active_times = [
+            seg.end_time
+            for day in self.days.values()
+            for seg in day.segments
+            if seg.state == 'active' and seg.end_time
+        ]
+        last_active = max(last_active_times) if last_active_times else None
+
+        current_segment_info = None
+        if self.current_segment:
+            current_segment_info = {
+                "state": self.current_segment.state,
+                "start_time": self.current_segment.start_time.isoformat()
+            }
+
+        state = {
+            "dirty": dirty,
+            "timestamp": datetime.now().isoformat(),
+            "current_segment": current_segment_info,
+            "last_active_time": last_active.isoformat() if last_active else None
+        }
+        with open(state_file, 'w') as f:
+            json.dump(state, f, indent=2)
+
+    def mark_state_clean(self):
+        self.write_state(dirty=False)
+
+    def set_locked(self, is_locked: bool):
+        self.is_locked = is_locked
+        self.on_tick(0, 0)
+
+# ------------------------------------------------------------
+# FORMATTING HELPERS
+# ------------------------------------------------------------
 def hours(seconds: float) -> float:
     return round(seconds / 3600, 2)
-
-
-def format_hours_decimal(seconds: float) -> str:
-    return f"{seconds / 3600:.2f} h"
-
 
 def format_hours(seconds: float) -> str:
     s = int(seconds)
     h = s // 3600
     m = (s % 3600) // 60
     return f"{h:02d}:{m:02d}"
-
 
 def format_delta(seconds: float) -> str:
     s = int(seconds)
@@ -210,521 +304,3 @@ def format_delta(seconds: float) -> str:
     icon = "✅" if sign == "+" else "⚠️"
     return f"{sign}{h:02d}:{m:02d} {icon}"
 
-
-def format_delta_decimal(seconds: float) -> str:
-    value = seconds / 3600
-    sign = "+" if value >= 0 else ""
-    icon = "✅" if value >= 0 else "⚠️"
-    return f"{sign}{value:.2f} h {icon}"
-
-
-def parse_datetime(value: Optional[str]) -> Optional[datetime]:
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value)
-    except (ValueError, TypeError):
-        return None
-
-
-def get_status_icon(is_idle: bool, active_today: float, target_work_seconds: int) -> str:
-    if is_idle:
-        return "🔴"
-    if active_today < target_work_seconds:
-        return "🟡"
-    return "🟢"
-
-
-# ------------------------------------------------------------
-# SESSION TRACKER
-# ------------------------------------------------------------
-
-class SessionTracker:
-    """Tracks the current session's time, idle, and unsaved deltas.
-
-    This is pure data logic — no UI, no platform code.  The caller
-    (the menu app) is responsible for scheduling periodic saves.
-    """
-
-    def __init__(self) -> None:
-        self.is_locked = False
-        self.reset()
-
-    def set_locked(self, is_locked: bool) -> None:
-        self.is_locked = is_locked
-
-    def reset(self) -> None:
-        """Start a fresh session (called at init and after midnight)."""
-        now = datetime.now()
-        self.start_time: datetime = now
-        self.last_tick_date = now.date()
-        self.first_activity_this_day: Optional[datetime] = None
-        self.last_active_time: Optional[datetime] = None
-        self.total_idle_session: float = 0.0
-        self.idle_start: Optional[datetime] = None
-        self.idle_before_first_activity: float = 0.0
-        self.saved_total_session: float = 0.0
-        self.saved_active_session: float = 0.0
-        self.saved_idle_session: float = 0.0
-        self.last_was_idle: bool = False
-        # After reset, treat the session as if it were idle before, so the first
-        # non-idle tick in the new session is recognized as a transition (first activity).
-        self.previous_is_idle: Optional[bool] = True
-        # Time when a sustained non-idle period started (used to debounce brief
-        # input spikes that might otherwise mark first activity).
-        self.non_idle_start: Optional[datetime] = None
-        # Flag set when an idle period was just ended on the last tick.
-        self.idle_just_ended: bool = False
-
-    # ── Runtime calculations ───────────────────────────────
-
-    def calculate_current_session(
-        self, idle_threshold: int, get_idle_time_fn
-    ) -> tuple:
-        """Return (now, total_session, active_session, idle_session, is_idle).
-
-        ``idle_session`` excludes idle time that occurred before the first
-        activity of the day (e.g. overnight before the user wakes up).
-        """
-        now = datetime.now()
-        idle_time = get_idle_time_fn()
-        is_idle = idle_time > idle_threshold
-
-        # ── Track idle transitions ───────────────────────────
-        #   idle just started  → record idle_start
-        #   idle just ended    → finalise the completed period into total_idle_session
-        if is_idle and self.idle_start is None:
-            # The platform idle API returns seconds since last input — the
-            # true idle start time is therefore "now - idle_time". Use that
-            # but clamp it to the session start so we never record idle
-            # earlier than the session itself (which would inflate totals).
-            try:
-                proposed = now - timedelta(seconds=idle_time)
-                # Clamp not before session start
-                self.idle_start = max(proposed, self.start_time)
-            except Exception:
-                # Fallback: ensure idle_start is at least session start.
-                self.idle_start = now if now >= self.start_time else self.start_time
-        elif not is_idle and self.idle_start is not None:
-            elapsed = (now - self.idle_start).total_seconds()
-            self.total_idle_session += elapsed
-            if self.first_activity_this_day is None:
-                self.idle_before_first_activity += elapsed
-            self.idle_start = None
-
-        # ── Track last active moment ─────────────────────────
-        if not is_idle:
-            self.last_active_time = now
-            # Track when a sustained active period begins (for debounce).
-            if getattr(self, "non_idle_start", None) is None:
-                self.non_idle_start = now
-        else:
-            # reset non-idle start on idle
-            setattr(self, "non_idle_start", None)
-
-        # ── Compute current idle (completed + ongoing) ───────
-        current_idle = self.total_idle_session
-        if self.idle_start is not None:
-            current_idle += (now - self.idle_start).total_seconds()
-
-        # Preserve the previous tick idle state for first-activity detection.
-        self.previous_is_idle = self.last_was_idle
-        self.last_was_idle = is_idle
-
-        # ── Compute pre‑activity idle (excluded from reported) ──
-        pre_activity = self.idle_before_first_activity
-        if self.idle_start is not None and self.first_activity_this_day is None:
-            pre_activity += (now - self.idle_start).total_seconds()
-
-        # ── Derive time segments ─────────────────────────────
-        total_session = (now - self.start_time).total_seconds()
-        active_session = max(total_session - current_idle, 0)
-        reported_idle = max(current_idle - pre_activity, 0)
-
-        return now, total_session, active_session, reported_idle, is_idle
-
-    def calculate_unsaved_delta(
-        self, total_session: float, active_session: float, idle_session: float
-    ) -> tuple:
-        """Return (delta_total, delta_active, delta_idle) since last save.
-
-        *delta_total* is derived from (active + idle) rather than
-        *total_session* so that the CSV invariant
-        ``total == active + idle`` stays correct even before the first
-        activity of the day (when pre-activity idle is excluded from the
-        reported values).
-        """
-        delta_active = max(active_session - self.saved_active_session, 0)
-        delta_idle = max(idle_session - self.saved_idle_session, 0)
-        delta_total = delta_active + delta_idle
-        return delta_total, delta_active, delta_idle
-
-    def on_tick(self, is_idle: bool) -> Optional[datetime.date]:
-        """Handle midnight rollover and first activity detection.
-
-        Returns the previous date if a new day was first detected,
-        ``None`` otherwise.  The caller (the menu app) should save any
-        remaining delta to the returned date and then call
-        :meth:`reset()` to start the new day's accumulators fresh.
-        
-        First-activity detection rule:
-        - After midnight: first non-idle tick sets first_activity
-        - After idle: transition from idle→active sets first_activity
-        - On app launch: only set if truly soon after startup (< 5s)
-        """
-        now = datetime.now()
-        prev_date = None
-
-        if now.date() > self.last_tick_date:
-            prev_date = self.last_tick_date
-            self.first_activity_this_day = None
-            self.idle_before_first_activity = 0.0
-
-        if self.first_activity_this_day is None and not is_idle:
-            # Determine whether this non-idle tick should be treated as the
-            # user's "first activity" for the day. We require either:
-            #  - it's the first tick after a midnight rollover, or
-            #  - the user was previously idle and has been active for a
-            #    short sustained period (debounce brief input spikes), or
-            #  - the session just started (app launch) very recently.
-            is_new_day = prev_date is not None
-            transitioned_from_idle = self.previous_is_idle is True
-            very_recent_start = (now - self.start_time).total_seconds() < 5
-
-            non_idle_start = getattr(self, "non_idle_start", None)
-            sustained_active = (
-                non_idle_start is not None
-                and (now - non_idle_start).total_seconds() >= MIN_FIRST_ACTIVITY_SECONDS
-            )
-
-            # Debounce logic:
-            # - Allow immediate first-activity if the app just started.
-            # - Otherwise require a sustained active period (>= MIN_FIRST_ACTIVITY_SECONDS)
-            #   when the tick is either right after midnight or when transitioning
-            #   from idle to active. Stamp the onset (`non_idle_start`) rather than
-            #   the clearing tick so the recorded start_time reflects when the user
-            #   actually became active.
-            if very_recent_start:
-                self.first_activity_this_day = now
-            elif (is_new_day or transitioned_from_idle) and sustained_active:
-                # Use the onset of sustained activity as the first-activity timestamp
-                self.first_activity_this_day = non_idle_start
-
-        self.last_tick_date = now.date()
-        return prev_date
-
-    def mark_saved(
-        self,
-        total_session: float,
-        active_session: float,
-        idle_session: float,
-    ) -> None:
-        """Update saved-watermark counters after a successful CSV write."""
-        self.saved_total_session = total_session
-        self.saved_active_session = active_session
-        self.saved_idle_session = idle_session
-
-    # ── Report building ────────────────────────────────────
-
-    def build_report(
-        self,
-        now: datetime,
-        total_session: float,
-        active_session: float,
-        idle_session: float,
-        csv_data: Optional[dict] = None,
-    ) -> dict:
-        """Combine CSV + unsaved delta into a single report dict."""
-        date_str = now.date().isoformat()
-        csv_day = get_day_from_csv(date_str, csv_data)
-        delta_total, delta_active, delta_idle = self.calculate_unsaved_delta(
-            total_session, active_session, idle_session,
-        )
-
-        today_start_time = csv_day["start_time"]
-        if not today_start_time and self.first_activity_this_day:
-            today_start_time = self.first_activity_this_day.strftime("%H:%M:%S")
-        if not today_start_time:
-            today_start_time = "N/A"
-
-        return {
-            "date": date_str,
-            "total_seconds": csv_day["total_seconds"] + delta_total,
-            "active_seconds": csv_day["active_seconds"] + delta_active,
-            "idle_seconds": csv_day["idle_seconds"] + delta_idle,
-            "start_time": today_start_time,
-            "end_time": (self.last_active_time or now).strftime("%H:%M:%S"),
-            "last_updated": csv_day["last_updated"],
-        }
-
-    # ── State persistence ──────────────────────────────────
-
-    def write_state(
-        self,
-        now: datetime,
-        total_session: float,
-        active_session: float,
-        idle_session: float,
-        dirty: bool = True,
-    ) -> None:
-        state = {
-            "dirty": dirty,
-            "date": now.date().isoformat(),
-            "session_start": self.start_time.isoformat(),
-            "last_seen": now.isoformat(),
-            "last_active_time": self.last_active_time.isoformat() if self.last_active_time else None,
-            "total_session": round(total_session, 0),
-            "active_session": round(active_session, 0),
-            "idle_session": round(idle_session, 0),
-            "saved_total_session": round(self.saved_total_session, 0),
-            "saved_active_session": round(self.saved_active_session, 0),
-            "saved_idle_session": round(self.saved_idle_session, 0),
-            "is_idle": idle_session != 0,
-            "data_dir": DATA_DIR,
-            "csv_file": CSV_FILE,
-            "state_file": STATE_FILE,
-        }
-        write_state(state)
-
-
-# ------------------------------------------------------------
-# CSV HANDLING
-# ------------------------------------------------------------
-
-CSV_FIELDS = [
-    "date",
-    "start_time",
-    "end_time",
-    "total_seconds",
-    "active_seconds",
-    "idle_seconds",
-    "total_hours",
-    "active_hours",
-    "idle_hours",
-    "last_updated",
-]
-
-# Template for an empty CSV day row (used when a date has no data yet).
-EMPTY_DAY_DICT: dict = {
-    "date": "",
-    "start_time": "",
-    "end_time": "",
-    "total_seconds": 0.0,
-    "active_seconds": 0.0,
-    "idle_seconds": 0.0,
-    "total_hours": 0.0,
-    "active_hours": 0.0,
-    "idle_hours": 0.0,
-    "last_updated": "",
-}
-
-_csv_cache: Optional[dict] = None
-_csv_cache_time: float = 0.0
-CSV_CACHE_TTL: float = 10.0
-
-
-def read_csv_data(force: bool = False) -> dict:
-    """Read the daily CSV into a ``dict[date_str -> row_dict]``."""
-    global _csv_cache, _csv_cache_time
-
-    if not force and _csv_cache is not None and (time.time() - _csv_cache_time) < CSV_CACHE_TTL:
-        return _csv_cache
-
-    _csv_cache = {}
-    if not CSV_FILE or not os.path.isfile(CSV_FILE):
-        _csv_cache_time = time.time()
-        return _csv_cache
-
-    try:
-        with open(CSV_FILE, "r", newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                date = row.get("date")
-                if date:
-                    _csv_cache[date] = row
-    except (csv.Error, UnicodeDecodeError, IOError) as e:
-        print(f"Warning: CSV reading error: {e}. Using empty data.")
-        _csv_cache = {}
-
-    _csv_cache_time = time.time()
-    return _csv_cache
-
-
-def write_csv_data(data: dict) -> None:
-    """Write the ``dict[date_str -> row_dict]`` back to CSV, sorted by date."""
-    global _csv_cache, _csv_cache_time
-    if not DATA_DIR:
-        return
-    ensure_dir(DATA_DIR)
-    if not CSV_FILE:
-        return
-
-    with open(CSV_FILE, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
-        writer.writeheader()
-        for date_key in sorted(data.keys()):
-            writer.writerow(data[date_key])
-
-    _csv_cache = data
-    _csv_cache_time = time.time()
-
-
-def get_day_from_csv(date_str: str, data: Optional[dict] = None) -> dict:
-    if data is None:
-        data = read_csv_data()
-
-    if date_str not in data:
-        return dict(EMPTY_DAY_DICT, date=date_str)
-
-    row = data[date_str]
-    return {
-        "date": row.get("date", date_str),
-        "start_time": row.get("start_time", ""),
-        "end_time": row.get("end_time", ""),
-        "total_seconds": float(row.get("total_seconds", 0) or 0),
-        "active_seconds": float(row.get("active_seconds", 0) or 0),
-        "idle_seconds": float(row.get("idle_seconds", 0) or 0),
-        "total_hours": float(row.get("total_hours", 0) or 0),
-        "active_hours": float(row.get("active_hours", 0) or 0),
-        "idle_hours": float(row.get("idle_hours", 0) or 0),
-        "last_updated": row.get("last_updated", ""),
-    }
-
-
-def add_delta_to_csv(
-    first_activity_time: Optional[datetime],
-    date_str: str,
-    start_time: datetime,
-    end_time: datetime,
-    delta_total: float,
-    delta_active: float,
-    delta_idle: float,
-) -> None:
-    """Accumulate a time delta into the CSV for the given date."""
-    if delta_total <= 0:
-        return
-
-    data = read_csv_data()
-    existing = get_day_from_csv(date_str, data)
-
-    # Pick start_time: prefer existing CSV value → first activity → session start
-    csv_start_time = (
-        existing["start_time"]
-        or (first_activity_time.strftime("%H:%M:%S") if first_activity_time else None)
-        or start_time.strftime("%H:%M:%S")
-    )
-
-    new_total = existing["total_seconds"] + delta_total
-    new_active = existing["active_seconds"] + delta_active
-    new_idle = existing["idle_seconds"] + delta_idle
-
-    data[date_str] = {
-        "date": date_str,
-        "start_time": csv_start_time,
-        "end_time": end_time.strftime("%H:%M:%S"),
-        "total_seconds": round(new_total, 0),
-        "active_seconds": round(new_active, 0),
-        "idle_seconds": round(new_idle, 0),
-        "total_hours": hours(new_total),
-        "active_hours": hours(new_active),
-        "idle_hours": hours(new_idle),
-        "last_updated": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-    }
-
-    write_csv_data(data)
-
-
-def get_current_week_dates() -> list[str]:
-    today = datetime.now().date()
-    monday = today - timedelta(days=today.weekday())
-    return [(monday + timedelta(days=i)).isoformat() for i in range(7)]
-
-
-def get_weekly_seconds_from_csv(data: Optional[dict] = None) -> float:
-    if data is None:
-        data = read_csv_data()
-    total = 0.0
-    for day in get_current_week_dates():
-        if day in data:
-            total += float(data[day].get("active_seconds", 0) or 0)
-    return total
-
-
-# ------------------------------------------------------------
-# STATE HANDLING / SESSION RECOVERY
-# ------------------------------------------------------------
-
-def read_state() -> Optional[dict]:
-    if not STATE_FILE or not os.path.isfile(STATE_FILE):
-        return None
-    try:
-        with open(STATE_FILE, "r") as f:
-            return json.load(f)
-    except Exception:
-        return None
-
-
-def write_state(state: dict) -> None:
-    if not DATA_DIR:
-        return
-    ensure_dir(DATA_DIR)
-    if not STATE_FILE:
-        return
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f, indent=2)
-
-
-def mark_state_clean() -> None:
-    state = read_state()
-    if not state:
-        return
-    state["dirty"] = False
-    state["cleaned_at"] = datetime.now().isoformat()
-    write_state(state)
-
-
-def recover_previous_session_if_needed() -> Optional[dict]:
-    """If the previous session ended dirty, save unsaved delta and return info."""
-    state = read_state()
-    if not state:
-        return None
-    if not state.get("dirty", False):
-        return None
-
-    try:
-        date_str = state["date"]
-        start_time = parse_datetime(state["session_start"])
-        last_seen = parse_datetime(state["last_seen"])
-
-        # Use the stored last_active_time if available — it is more
-        # accurate than last_seen (which could be well into an idle
-        # period or after a midnight rollover).
-        last_active = parse_datetime(state.get("last_active_time"))
-        end_time = last_active or last_seen
-
-        total_session = float(state.get("total_session", 0))
-        active_session = float(state.get("active_session", 0))
-        idle_session = float(state.get("idle_session", 0))
-
-        saved_total = float(state.get("saved_total_session", 0))
-        saved_active = float(state.get("saved_active_session", 0))
-        saved_idle = float(state.get("saved_idle_session", 0))
-
-        delta_active = max(active_session - saved_active, 0)
-        delta_idle = max(idle_session - saved_idle, 0)
-        delta_total = delta_active + delta_idle
-
-        if start_time and end_time and delta_total > 0:
-            add_delta_to_csv(None, date_str, start_time, end_time, delta_total, delta_active, delta_idle)
-
-        state["dirty"] = False
-        state["recovered_at"] = datetime.now().isoformat()
-        write_state(state)
-
-        return {
-            "date": date_str,
-            "recovered_seconds": delta_total,
-            "last_active": end_time.strftime("%Y-%m-%d %H:%M:%S") if end_time else "",
-        }
-    except Exception as e:
-        return {"error": str(e)}
