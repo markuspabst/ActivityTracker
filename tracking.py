@@ -62,7 +62,15 @@ class Day:
 
     @property
     def idle_minutes(self) -> int:
-        return sum(seg.duration_minutes for seg in self.segments if seg.state == 'idle')
+        start = self.session_start
+        end = self.session_end
+        if not start or not end:
+            return 0
+        return sum(
+            seg.duration_minutes
+            for seg in self.segments
+            if seg.state == 'idle' and seg.start_time and seg.start_time >= start and seg.end_time and seg.end_time <= end
+        )
 
     @property
     def session_start(self) -> Optional[datetime]:
@@ -80,6 +88,12 @@ class Day:
         if not active_segments_with_end:
             return None
         return max(seg.end_time for seg in active_segments_with_end)
+
+    def total_active_seconds(self) -> float:
+        total = self.active_minutes * 60
+        if self.segments and self.segments[-1].state == 'active' and self.segments[-1].end_time is None:
+            total += (datetime.now() - self.segments[-1].start_time).total_seconds()
+        return total
 
 # ------------------------------------------------------------
 # CONFIG
@@ -195,7 +209,7 @@ class SessionTracker:
         self.days = {}
 
     def recover_from_crash(self):
-        state_file = os.path.join(self.pm._get_data_dir(), "activity_tracker_state.json")
+        state_file = os.path.join(self.pm.get_data_dir(), "activity_tracker_state.json")
         if not os.path.exists(state_file):
             return
 
@@ -237,7 +251,7 @@ class SessionTracker:
         self.mark_state_clean()
 
     def write_state(self, dirty: bool = True):
-        state_file = os.path.join(self.pm._get_data_dir(), "activity_tracker_state.json")
+        state_file = os.path.join(self.pm.get_data_dir(), "activity_tracker_state.json")
         last_active_times = [
             seg.end_time
             for day in self.days.values()
@@ -281,9 +295,12 @@ def format_hours(seconds: float) -> str:
     m = (s % 3600) // 60
     return f"{h:02d}:{m:02d}"
 
-def get_status_icon(is_idle: bool, active_today: float, target_work_seconds: int) -> str:
-    if is_idle:
-        return "🔴"
-    if active_today < target_work_seconds:
-        return "🟡"
-    return "🟢"
+def format_delta(seconds: float) -> str:
+    s = int(seconds)
+    sign = "+" if s >= 0 else "-"
+    s = abs(s)
+    h = s // 3600
+    m = (s % 3600) // 60
+    icon = "✅" if sign == "+" else "⚠️"
+    return f"{sign}{h:02d}:{m:02d} {icon}"
+

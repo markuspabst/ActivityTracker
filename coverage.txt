@@ -1,0 +1,70 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.2, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/markus/Develop/ActivityTracker
+configfile: pytest.ini
+plugins: cov-7.1.0
+collected 20 items
+
+tests/test_requirements.py .........                                     [ 45%]
+tests/test_scenarios.py ..                                               [ 55%]
+tests/test_tracking.py ...F....F                                         [100%]
+
+=================================== FAILURES ===================================
+________________________ test_day_total_active_seconds _________________________
+
+    def test_day_total_active_seconds():
+        d = Day(date=date(2026, 7, 1))
+        # Add a completed segment
+        d.segments.append(TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=datetime(2026, 7, 1, 9, 30, 0)))
+        # Add an ongoing segment
+        with patch_now(datetime(2026, 7, 1, 10, 0, 0)):
+            d.segments.append(TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 45, 0)))
+            # 30 mins (completed) + 15 mins (ongoing) = 45 mins = 2700 seconds
+            assert d.total_active_seconds() == 2700
+    
+        d = Day(date=date(2026, 7, 1))
+        d.segments.append(TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=datetime(2026, 7, 1, 9, 30, 0)))
+        d.segments.append(TimeSegment(state='idle', start_time=datetime(2026, 7, 1, 9, 30, 0), end_time=datetime(2026, 7, 1, 9, 45, 0)))
+        assert d.active_minutes == 30
+>       assert d.idle_minutes == 15
+E       AssertionError: assert 0 == 15
+E        +  where 0 = Day(date=datetime.date(2026, 7, 1), segments=[TimeSegment(state='active', start_time=datetime.datetime(2026, 7, 1, 9, ...Segment(state='idle', start_time=datetime.datetime(2026, 7, 1, 9, 30), end_time=datetime.datetime(2026, 7, 1, 9, 45))]).idle_minutes
+
+tests/test_tracking.py:78: AssertionError
+_____________________________ test_crash_recovery ______________________________
+
+temp_data_dir = PosixPath('/private/var/folders/g5/v8nzxfd9505c8k3vp4ppnq9c0000gn/T/pytest-of-markus/pytest-15/test_crash_recovery0')
+
+    def test_crash_recovery(temp_data_dir):
+        state_file = temp_data_dir / "activity_tracker_state.json"
+        state = {
+            "dirty": True,
+            "current_segment": {"state": "active", "start_time": "2026-07-01T10:00:00"},
+            "last_active_time": "2026-07-01T10:30:00"
+        }
+        with open(state_file, 'w') as f:
+            json.dump(state, f)
+    
+        pm = PersistenceManager(lambda: str(temp_data_dir))
+        s = make_session(pm)
+        s.recover_from_crash()
+    
+>       assert len(s.days[date(2026, 7, 1)].segments) == 1
+                   ^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: datetime.date(2026, 7, 1)
+
+tests/test_tracking.py:158: KeyError
+================================ tests coverage ================================
+_______________ coverage: platform darwin, python 3.14.2-final-0 _______________
+
+Name             Stmts   Miss  Cover
+------------------------------------
+app.py              91     44    52%
+persistence.py     102     10    90%
+tracking.py        199     29    85%
+------------------------------------
+TOTAL              392     83    79%
+=========================== short test summary info ============================
+FAILED tests/test_tracking.py::test_day_total_active_seconds - AssertionError...
+FAILED tests/test_tracking.py::test_crash_recovery - KeyError: datetime.date(...
+========================= 2 failed, 18 passed in 0.20s =========================

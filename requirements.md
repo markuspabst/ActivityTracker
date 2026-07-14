@@ -6,14 +6,19 @@ A macOS menu-bar application that logs working time based on computer usage. Tim
 
 ### FR-1 Time Tracking
 - **FR-1.1** The application shall continuously track working time and classify it into two states: **Active** and **Idle**.
+  - *Tested by: `test_fr_1_1_time_tracking`*
 - **FR-1.2** The application shall classify time as **Active** when user input (keyboard/mouse/trackpad) is detected.
+  - *Tested by: `test_fr_1_2_active_time`*
 - **FR-1.3** The application shall classify time as **Idle** when no user input has occurred for a configurable inactivity threshold (see FR-4.2).
+  - *Tested by: `test_fr_1_3_idle_time`*
 - **FR-1.4** The application shall classify time as **Idle** whenever the screen is locked, regardless of the inactivity threshold.
+  - *Tested by: `test_fr_1_4_locked_screen_is_idle`*
 - **FR-1.5** The application shall classify the entire duration of a **system sleep** interval as **Idle**, consistent with locked-screen handling (FR-1.4).
 
 ### FR-2 Session Management
 - **FR-2.1** The application shall track each day as a continuous sequence of segments, each classified as **Active** or **Idle** (per FR-1). Locked-screen and system-sleep intervals shall always be recorded as Idle.
 - **FR-2.2** The **session start** for a day shall be the start timestamp of the first Active segment of that day (local time); the **session end** shall be the end timestamp of the last Active segment of that day.
+  - *Tested by: `test_fr_2_2_session_start_and_end`*
 - **FR-2.3** Idle time shall be counted only within the daily working window (between session start and session end); time outside this window is untracked.
 - **FR-2.4** All segments (Active and Idle) shall be bounded by the calendar day. Any segment open at the day boundary shall be closed at end-of-day, modeled and written as **24:00 (local time)** in the HH:MM log; a new segment of the same state shall be opened at **00:00 (local time)** for the new day. No segment shall span more than one date.
 - **FR-2.5** The application shall recover unsaved segment data from a previous run if it did not shut down correctly.
@@ -21,6 +26,7 @@ A macOS menu-bar application that logs working time based on computer usage. Tim
 
 ### FR-3 Data Persistence
 - **FR-3.1** All tracked time data shall be saved to local CSV files.
+  - *Tested by: `test_fr_3_data_persistence`*
 - **FR-3.2** The application shall maintain a **segment-level log** (one row per Active/Idle segment) using the schema: `date (YYYY-MM-DD), state, start (HH:MM), end (HH:MM), duration_min`.
 - **FR-3.3** The application shall maintain a **daily-summary log** (one row per day) in a **separate file**, using the schema: `date (YYYY-MM-DD), active_min, idle_min, session_start (HH:MM), session_end (HH:MM)`.
 - **FR-3.4** Data shall be saved automatically at user-configurable intervals (see FR-4.3).
@@ -32,6 +38,7 @@ A macOS menu-bar application that logs working time based on computer usage. Tim
 
 ### FR-4 Configuration
 - **FR-4.1** The user shall be able to set **daily** and **weekly** targets for active time.
+  - *Tested by: `test_fr_4_configuration`*
 - **FR-4.2** The user shall be able to configure the inactivity duration that qualifies as **idle**.
 - **FR-4.3** The user shall be able to configure the auto-save interval.
 - **FR-4.4** The user shall be able to specify the directory where the data files are stored.
@@ -51,10 +58,16 @@ A macOS menu-bar application that logs working time based on computer usage. Tim
 
 ### FR-6 Autostart
 - **FR-6.1** The user shall be able to configure the application to launch automatically on system startup (macOS Login Items).
+  - *Tested by: `test_fr_6_autostart`*
 
 ### FR-7 Permissions (macOS)
 - **FR-7.1** The application shall request the macOS **Accessibility / Input Monitoring** permission required for global input detection.
 - **FR-7.2** If permission is denied, the application shall notify the user and disable tracking gracefully (no crash, no silent failure).
+
+### FR-8 Localization
+- **FR-8.1** The application shall support multiple user-facing languages.
+  - *Tested by: `test_fr_4_1_language_settings`*
+- **FR-8.2** All visible UI text, status messages, and notifications shall be provided through a localization mechanism that allows additional languages to be added without code changes.
 
 ## Non-Functional Requirements
 
@@ -83,5 +96,5 @@ A macOS menu-bar application that logs working time based on computer usage. Tim
 - **Removed** old FR-2.1 (start-threshold); dropped proposed FR-4.5 → resolves C-1.
 - **Reworked FR-2**: segment-stream model, derived session start/end, Option-A idle bounding, unconditional 24:00 midnight cut, plus new **FR-2.6** (finalize orphaned segment at startup, last-Active timestamp).
 - **Added** FR-3.6 (UTF-8/header/per-year rotation), FR-3.7 (omit empty days), FR-3.8, FR-3.9 → resolves C-2, C-3.
-- **Added** FR-7 (permissions), NFR-4 (privacy), NFR-5 (integrity) → closes top gaps.
+- **Added** FR-7 (permissions), FR-8 (localization), NFR-4 (privacy), NFR-5 (integrity) → closes top gaps.
 - **Fixed** FR-5.3(a) reference (FR-2.1 → FR-2.2).

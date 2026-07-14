@@ -1,7 +1,8 @@
 from __future__ import annotations
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
+import sys
 
 import i18n
 from platform_layer import get_platform
@@ -17,6 +18,7 @@ from tracking import (
 )
 from persistence import PersistenceManager
 from activity_tracker_menu import AppMenu
+from single_instance import SingleInstanceLock
 
 class ActivityTrackerApp:
     def __init__(self):
@@ -68,11 +70,21 @@ class ActivityTrackerApp:
     def update_ui(self):
         today = datetime.now().date()
         current_day_data = self.session.days.get(today)
-
-        active_today = current_day_data.active_minutes * 60 if current_day_data else 0
+        active_today = current_day_data.total_active_seconds() if current_day_data else 0
         is_idle = self.session.current_segment.state == 'idle' if self.session.current_segment else False
 
-        self.menu.update_ui(is_idle, active_today)
+        week_start_date = today - timedelta(days=today.weekday())
+        weekly_active_from_csv, _ = self.pm.read_daily_summaries_for_week(week_start_date)
+        weekly_active_session = 0
+        for i in range(7):
+            day_in_week = week_start_date + timedelta(days=i)
+            day_data = self.session.days.get(day_in_week)
+            if day_data:
+                weekly_active_session += day_data.active_minutes
+
+        total_weekly_active = (weekly_active_from_csv + weekly_active_session) * 60
+
+        self.menu.update_ui(is_idle, active_today, total_weekly_active, self.weekly_target_seconds)
 
     def quit_app(self):
         self._running = False
@@ -84,7 +96,25 @@ class ActivityTrackerApp:
         self.session.save_all_days()
         self.last_write_time = time.time()
 
-    # ... methods for setting config values remain the same ...
+    def set_target(self, seconds):
+        self.target_work_seconds = int(seconds)
+        set_config_value("target_seconds", int(seconds))
+
+    def set_weekly_target(self, seconds):
+        self.weekly_target_seconds = int(seconds)
+        set_config_value("weekly_target_seconds", int(seconds))
+
+    def set_idle_threshold(self, seconds):
+        self.idle_threshold = int(seconds)
+        set_config_value("idle_threshold_seconds", int(seconds))
+
+    def set_save_interval(self, seconds):
+        self.write_interval = int(seconds)
+        set_config_value("save_interval_seconds", int(seconds))
+
+    def set_language(self, code):
+        set_config_value("locale", code)
+        i18n.set_locale(code)
 
     def select_data_folder(self):
         folder = self.platform.choose_folder_dialog(prompt=i18n.t("SELECT_DATA_FOLDER"))
@@ -94,14 +124,25 @@ class ActivityTrackerApp:
         self.session.mark_state_clean()
         set_data_dir(folder)
         persist_data_dir(folder)
-        # No session reset needed, as data is now managed by date
 
     def reset_data_folder(self):
         self.force_save()
         self.session.mark_state_clean()
         reset_data_dir_to_default()
+""
 
 if __name__ == "__main__":
+    # 1. Acquire single-instance lock
+    instance_lock = SingleInstanceLock()
+    if not instance_lock.acquire():
+        platform = get_platform()
+        platform.show_alert(
+            "ActivityTracker is already running.",
+            "Another instance of the application is already active. Please check your menu bar."
+        )
+        sys.exit(1)
+
+    # 2. Set up data directory and run the app
     set_data_dir(get_configured_data_dir())
     app = ActivityTrackerApp()
     app.run()
