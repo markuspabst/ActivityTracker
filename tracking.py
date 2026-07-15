@@ -69,7 +69,7 @@ class Day:
         return sum(
             seg.duration_minutes
             for seg in self.segments
-            if seg.state == 'idle' and seg.start_time and seg.start_time >= start and seg.end_time and seg.end_time <= end
+            if seg.state == 'idle' and seg.start_time and seg.start_time > start and seg.start_time < end
         )
 
     @property
@@ -222,14 +222,17 @@ class SessionTracker:
         if state.get("dirty"):
             last_segment_info = state.get("current_segment")
             if last_segment_info:
+                # Always recover the current segment, regardless of last_active_time
+                segment_start_time = datetime.fromisoformat(last_segment_info["start_time"])
+                segment_date = segment_start_time.date()
+
+                if segment_date not in self.days:
+                    self.days[segment_date] = Day(date=segment_date)
+
+                # Handle both cases: with and without last_active_time
                 last_active_time_str = state.get("last_active_time")
                 if last_active_time_str:
                     last_active_time = datetime.fromisoformat(last_active_time_str)
-                    segment_start_time = datetime.fromisoformat(last_segment_info["start_time"])
-                    segment_date = segment_start_time.date()
-
-                    if segment_date not in self.days:
-                        self.days[segment_date] = Day(date=segment_date)
 
                     if last_active_time.date() != segment_date:
                         end_of_day = datetime.combine(segment_date, datetime.max.time())
@@ -239,14 +242,40 @@ class SessionTracker:
                             end_time=end_of_day
                         )
                     else:
-                         recovered_segment = TimeSegment(
+                        recovered_segment = TimeSegment(
                             state=last_segment_info["state"],
                             start_time=segment_start_time,
                             end_time=last_active_time
                         )
 
+                    # Add the recovered segment and save historical data
                     self.days[segment_date].segments.append(recovered_segment)
-                    self.save_all_days()
+
+                    # Save the recovered data without clearing memory (don't use save_all_days)
+                    daily_summaries = {}
+                    day_obj = self.days[segment_date]
+                    if day_obj.segments:
+                        sess_start = day_obj.session_start
+                        sess_end = day_obj.session_end
+                        daily_summaries[segment_date] = {
+                            "active_min": day_obj.active_minutes,
+                            "idle_min": day_obj.idle_minutes,
+                            "session_start": sess_start.strftime("%H:%M") if sess_start else "",
+                            "session_end": sess_end.strftime("%H:%M") if sess_end else "",
+                        }
+
+                    self.pm.save_segments({segment_date: day_obj})
+                    self.pm.save_daily_summary(daily_summaries)
+                else:
+                    # No last_active_time means the segment is still ongoing
+                    # Just restore it to memory without saving
+                    recovered_segment = TimeSegment(
+                        state=last_segment_info["state"],
+                        start_time=segment_start_time,
+                        end_time=None
+                    )
+                    self.days[segment_date].segments.append(recovered_segment)
+                    # Don't save ongoing segments - they're still in progress
 
         self.mark_state_clean()
 

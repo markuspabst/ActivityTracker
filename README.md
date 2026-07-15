@@ -52,14 +52,15 @@ The app runs as a **menu bar-only app (no Dock icon)** via `LSUIElement`.
 ## 2. Features
 
 -   **Time Tracking:** Tracks active, idle, and total time per day. Each day's tracking starts fresh after the first keyboard/mouse activity.
--   **Live Menu Bar:** Shows a status icon (🔊 target met, 🟡 below target, 🔴 idle) and live time display.
--   **Daily & Weekly Targets:** Set and monitor daily and weekly work goals.
+-   **Live Menu Bar:** Shows a status icon (🟢 target met, 🟡 below target, 🔴 idle) and live time display with session start time and accumulating active time.
+-   **Daily & Weekly Targets:** Set and monitor daily and weekly work goals. The status icon will turn green if either goal is met.
 -   **Persistence:**
     -   **CSV:** Stores daily logs with per-day start/end times in `activity_tracker_log.csv`.
     -   **JSON State:** Ensures crash-safe recovery with `activity_tracker_state.json`.
     -   **JSON Config:** Saves user settings in `activity_tracker_config.json`.
 -   **Midnight-safe:** Session resets at midnight — each day gets its own `start_time` and clean counters, even if the app runs continuously.
 -   **End Time from Last Activity:** The CSV `end_time` reflects the last moment of activity, not the save timestamp — idle time after the last activity is excluded.
+-   **Crash Recovery:** Robustly recovers ongoing tracking sessions after abnormal termination.
 -   **Customizable Data Folder:** Change the storage location from the Settings menu.
 -   **Autostart:** Automatically starts on login.
 -   **Productivity Dashboard:** Generates an HTML report with productivity insights.
@@ -73,6 +74,7 @@ The app runs as a **menu bar-only app (no Dock icon)** via `LSUIElement`.
 |---|---|---|
 | App Controller | Core application logic, event loop, save scheduling | `app.py` (`ActivityTrackerApp`) |
 | Session Tracker | Pure data model: computes active/idle/total, tracks idle transitions, detects midnight rollover | `tracking.py` (`SessionTracker`) |
+| Tray Icon | Generates the tray icon image and determines its color based on work goals | `tray_icon.py` |
 | Menu UI | Displays metrics, targets, and settings | `activity_tracker_menu.py` (`AppMenu`) |
 | Idle detection | Native Quartz idle API (falls back to `ioreg`) | `platform_layer/*.py` (`get_idle_time()`) |
 | CSV storage | Long-term daily persistence (stdlib `csv`) | `tracking.py` (`read_csv_data()` / `add_delta_to_csv()`) |

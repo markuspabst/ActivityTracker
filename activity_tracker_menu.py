@@ -35,24 +35,26 @@ class AppMenu:
         today_date = datetime.now().date()
         today_data = self.app.session.days.get(today_date)
 
-        self._active_today_session = today_data.active_minutes if today_data else 0
+        # Use the correctly calculated active_today value passed from app.py
+        self._active_today_session = active_today
         self._idle_today_session = today_data.idle_minutes if today_data else 0
         self._session_start = today_data.session_start if today_data else None
 
-        week_start_date = today_date - timedelta(days=today_date.weekday())
-        weekly_active_from_csv, weekly_idle_from_csv = self.app.pm.read_daily_summaries_for_week(week_start_date)
+        # Store the pre-calculated weekly active time passed from app.py (already in seconds)
+        self._total_weekly_active = active_week
 
-        weekly_active_session = 0
+        # Calculate weekly idle time in the same way (convert minutes to seconds)
+        week_start_date = today_date - timedelta(days=today_date.weekday())
+        _, weekly_idle_from_csv = self.app.pm.read_daily_summaries_for_week(week_start_date)
+
         weekly_idle_session = 0
         for i in range(7):
             day_in_week = week_start_date + timedelta(days=i)
             day_data = self.app.session.days.get(day_in_week)
             if day_data:
-                weekly_active_session += day_data.active_minutes
                 weekly_idle_session += day_data.idle_minutes
 
-        self._total_weekly_active = weekly_active_from_csv + weekly_active_session
-        self._total_weekly_idle = weekly_idle_from_csv + weekly_idle_session
+        self._total_weekly_idle = (weekly_idle_from_csv + weekly_idle_session) * 60
 
         # Update icon status and title
         status_emoji = get_status_icon(is_idle, active_today, self.app.target_work_seconds, active_week, weekly_target)
@@ -66,13 +68,13 @@ class AppMenu:
     def _generate_menu_items(self):
         # These yields use the pre-calculated values from the last UI update
         yield MenuItem(i18n.t("MENU_START_TIME", value=self._session_start.strftime("%H:%M") if self._session_start else "N/A"), None, enabled=False)
-        yield MenuItem(i18n.t("MENU_ACTIVE", value=format_hours(self._active_today_session * 60)), None, enabled=False)
+        yield MenuItem(i18n.t("MENU_ACTIVE", value=format_hours(self._active_today_session)), None, enabled=False)
         yield MenuItem(i18n.t("MENU_IDLE", value=format_hours(self._idle_today_session * 60)), None, enabled=False)
         yield Menu.SEPARATOR
 
         # Weekly Summary
-        yield MenuItem(i18n.t("WEEK_ACTIVE", value=format_hours(self._total_weekly_active * 60)), None, enabled=False)
-        yield MenuItem(i18n.t("WEEK_IDLE", value=format_hours(self._total_weekly_idle * 60)), None, enabled=False)
+        yield MenuItem(i18n.t("WEEK_ACTIVE", value=format_hours(self._total_weekly_active)), None, enabled=False)
+        yield MenuItem(i18n.t("WEEK_IDLE", value=format_hours(self._total_weekly_idle)), None, enabled=False)
         yield Menu.SEPARATOR
 
         yield MenuItem(i18n.t("SETTINGS"), self._generate_settings_menu())
