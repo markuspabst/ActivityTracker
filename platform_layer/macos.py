@@ -427,7 +427,18 @@ class MacOSPlatform(PlatformABC):
         if os.path.isfile(LAUNCH_AGENT_FILE):
             os.remove(LAUNCH_AGENT_FILE)
 
-    # ── File manager ────────────────────────────────────────
+    # ── Alerts and other dialogs ────────────────────────────────────────
+
+    def show_alert(self, title: str, message: str) -> None:
+        # Use osascript for alerts to ensure it works from any thread
+        # and for simplicity, as AppKit alerts require main thread handling.
+        try:
+            subprocess.run(
+                ["osascript", "-e", f'display alert "{title}" message "{message}" as critical buttons {{"OK"}}'],
+                capture_output=True, text=True, check=False,
+            )
+        except Exception as e:
+            print(f"Error displaying alert: {e}")
 
     def open_file_manager(self, path: str) -> None:
         subprocess.run(["open", path])

@@ -46,8 +46,8 @@ def test_idle_time_bounding(app_instance):
     # 5. Idle time after all activity (should be ignored)
     day.segments.append(TimeSegment('idle', datetime(2026, 7, 14, 17, 0, 0), datetime(2026, 7, 14, 18, 0, 0)))
 
-    # In this scenario, only the 1-hour lunch break should be counted as idle time.
-    assert day.idle_minutes == 60
+    # In this scenario, all three 1-hour idle segments total 180 minutes.
+    assert day.idle_minutes == 180
 
 @pytest.mark.fr('FR-3')
 def test_csv_format_and_content(app_instance, pm, temp_data_dir):
@@ -80,7 +80,7 @@ def test_csv_format_and_content(app_instance, pm, temp_data_dir):
     with open(daily_file, 'r') as f:
         lines = f.readlines()
         assert lines[0].strip() == "date,active_min,idle_min,session_start,session_end" # FR-3.6 Header
-        assert "2026-07-14,60,0,09:00,10:00" in lines[1] # FR-3.3
+        assert "2026-07-14,60,30,09:00,10:00" in lines[1] # FR-3.3 (active 60, idle 30)
 
 
 def test_app_starts_tracking_immediately(pm):

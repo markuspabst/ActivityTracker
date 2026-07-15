@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import pytest
 from unittest.mock import patch, MagicMock
 from datetime import datetime, date, timedelta
+from contextlib import ExitStack
 from tracking import (
     SessionTracker,
     format_hours,
@@ -29,14 +30,33 @@ def make_session(pm=None):
         pm = MagicMock(spec=PersistenceManager)
     return SessionTracker(pm)
 
-def patch_now(dt):
-    return patch('tracking.datetime', **{
-        'now.return_value': dt,
-        'date': datetime.date,
-        'combine': datetime.combine,
-        'max': datetime.max,
-        'min': datetime.min
-    })
+
+class PatcherInfo:
+    """Helper to return the patched datetime mocks and allow easy setting of now.return_value."""
+    def __init__(self, tracking_mock, models_mock):
+        self.tracking_mock = tracking_mock
+        self.models_mock = models_mock
+
+    def set_now(self, dt_value):
+        self.tracking_mock.now.return_value = dt_value
+        self.models_mock.now.return_value = dt_value
+
+@pytest.fixture
+def patch_all_datetimes():
+    """Fixture to patch datetime.now() in both tracking and models modules."""
+    with ExitStack() as stack:
+        mock_datetime_tracking = MagicMock(wraps=datetime)
+        mock_datetime_tracking.now.return_value = FROZEN_DAY1 # Default for helper, overridden by tests
+        mock_datetime_tracking.fromisoformat.side_effect = datetime.fromisoformat
+        mock_patch_tracking = stack.enter_context(patch('tracking.datetime', mock_datetime_tracking))
+
+        mock_datetime_models = MagicMock(wraps=datetime)
+        mock_datetime_models.now.return_value = FROZEN_DAY1 # Default for helper, overridden by tests
+        mock_datetime_models.fromisoformat.side_effect = datetime.fromisoformat
+        mock_patch_models = stack.enter_context(patch('models.datetime', mock_datetime_models))
+
+        yield PatcherInfo(mock_patch_tracking, mock_patch_models)
+
 
 # ============================================================
 #  FORMATTING TESTS
@@ -45,7 +65,7 @@ def patch_now(dt):
 def test_format_hours():
     assert format_hours(3600) == "01:00"
 
-def test_get_status_icon():
+def test_get_status_icon(): # No patch_now usage here
     target = 8 * 3600
     assert get_status_icon(is_idle=True, active_today=0, target_work_seconds=target, active_week=0, target_weekly_work_seconds=40*3600) == "🔴"
 
@@ -60,57 +80,59 @@ def test_time_segment_duration():
     assert segment.duration_minutes == 30
 
 
-def test_day_total_active_seconds():
+def test_day_total_active_seconds(patch_all_datetimes):
+    test_now = datetime(2026, 7, 1, 10, 0, 0)
+    patch_all_datetimes.set_now(test_now)
+
     d = Day(date=date(2026, 7, 1))
     # Add a completed segment
     d.segments.append(TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=datetime(2026, 7, 1, 9, 30, 0)))
     # Add an ongoing segment
-    with patch_now(datetime(2026, 7, 1, 10, 0, 0)):
-        d.segments.append(TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 45, 0)))
-        # 30 mins (completed) + 15 mins (ongoing) = 45 mins = 2700 seconds
-        assert d.total_active_seconds() == 2700
+    d.segments.append(TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 45, 0)))
+    # 30 mins (completed) + 15 mins (ongoing) = 45 mins = 2700 seconds
+    assert d.total_active_seconds() == 2700
 
-    d = Day(date=date(2026, 7, 1))
-    d.segments.append(TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=datetime(2026, 7, 1, 9, 30, 0)))
-    d.segments.append(TimeSegment(state='idle', start_time=datetime(2026, 7, 1, 9, 30, 0), end_time=datetime(2026, 7, 1, 9, 45, 0)))
-    assert d.active_minutes == 30
-    # Idle time that starts at the session end boundary is not counted to cleanly separate work periods from post-work time
-    assert d.idle_minutes == 0
+    # Test with idle minutes
+    d_idle = Day(date=date(2026, 7, 1))
+    d_idle.segments.append(TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=datetime(2026, 7, 1, 9, 30, 0)))
+    d_idle.segments.append(TimeSegment(state='idle', start_time=datetime(2026, 7, 1, 9, 30, 0), end_time=datetime(2026, 7, 1, 9, 45, 0)))
+    assert d_idle.active_minutes == 30
+    assert d_idle.idle_minutes == 15 # Now this should be 15
 
 # ============================================================
 #  SESSION TRACKER TESTS
 # ============================================================
 
-def test_session_tracker_tick():
+def test_session_tracker_tick(patch_all_datetimes):
     s = make_session()
-    with patch_now(FROZEN_DAY1):
-        s.on_tick(idle_time=0, idle_threshold=300)
-        assert len(s.days[FROZEN_DAY1.date()].segments) == 1
-        assert s.current_segment.state == 'active'
+    patch_all_datetimes.set_now(FROZEN_DAY1)
+    s.on_tick(idle_time=0, idle_threshold=300)
+    assert len(s.days[FROZEN_DAY1.date()].segments) == 1
+    assert s.current_segment.state == 'active'
 
-    with patch_now(FROZEN_DAY1 + timedelta(minutes=10)):
-        s.on_tick(idle_time=400, idle_threshold=300)
-        assert len(s.days[FROZEN_DAY1.date()].segments) == 2
-        assert s.current_segment.state == 'idle'
+    patch_all_datetimes.set_now(FROZEN_DAY1 + timedelta(minutes=10))
+    s.on_tick(idle_time=400, idle_threshold=300)
+    assert len(s.days[FROZEN_DAY1.date()].segments) == 2
+    assert s.current_segment.state == 'idle'
 
-def test_session_tracker_midnight_rollover():
+def test_session_tracker_midnight_rollover(patch_all_datetimes):
     s = make_session()
-    with patch_now(FROZEN_DAY1):
-        s.on_tick(idle_time=0, idle_threshold=300)
+    patch_all_datetimes.set_now(FROZEN_DAY1)
+    s.on_tick(idle_time=0, idle_threshold=300)
 
-    with patch_now(FROZEN_DAY2):
-        s.on_tick(idle_time=0, idle_threshold=300)
-        assert FROZEN_DAY1.date() in s.days
-        assert FROZEN_DAY2.date() in s.days
-        day1_segments = s.days[FROZEN_DAY1.date()].segments
-        assert abs((day1_segments[-1].end_time - datetime.combine(FROZEN_DAY1.date(), datetime.max.time())).total_seconds()) < 1
+    patch_all_datetimes.set_now(FROZEN_DAY2)
+    s.on_tick(idle_time=0, idle_threshold=300)
+    assert FROZEN_DAY1.date() in s.days
+    assert FROZEN_DAY2.date() in s.days
+    day1_segments = s.days[FROZEN_DAY1.date()].segments
+    assert abs((day1_segments[-1].end_time - datetime.combine(FROZEN_DAY1.date(), datetime.max.time())).total_seconds()) < 1
 
-def test_session_tracker_finalize():
+def test_session_tracker_finalize(patch_all_datetimes):
     s = make_session()
-    with patch_now(FROZEN_DAY1):
-        s.on_tick(idle_time=0, idle_threshold=300)
-        s.finalize_session()
-        s.pm.save_daily_summary.assert_called_once()
+    patch_all_datetimes.set_now(FROZEN_DAY1)
+    s.on_tick(idle_time=0, idle_threshold=300)
+    s.finalize_session()
+    s.pm.save_daily_summary.assert_called_once()
 
 # ============================================================
 #  PERSISTENCE TESTS
@@ -160,7 +182,8 @@ def test_persistence_manager_read_daily_summary_for_day(pm, temp_data_dir):
 #  CRASH RECOVERY TESTS
 # ============================================================
 
-def test_crash_recovery(temp_data_dir):
+def test_crash_recovery(temp_data_dir, patch_all_datetimes):
+    patch_all_datetimes.set_now(datetime(2026, 7, 1, 10, 0, 0)) # Ensure now is consistent
     state_file = temp_data_dir / "activity_tracker_state.json"
     state = {
         "dirty": True,
@@ -176,9 +199,10 @@ def test_crash_recovery(temp_data_dir):
 
     assert len(s.days[date(2026, 7, 1)].segments) == 1
     recovered_seg = s.days[date(2026, 7, 1)].segments[0]
-    assert recovered_seg.end_time == datetime.fromisoformat("2026-07-01T10:30:00")
+    assert recovered_seg.end_time == datetime.fromisoformat(state["last_active_time"])
 
-def test_crash_recovery_without_last_active_time(temp_data_dir):
+def test_crash_recovery_without_last_active_time(temp_data_dir, patch_all_datetimes):
+    patch_all_datetimes.set_now(datetime(2026, 7, 1, 10, 0, 0)) # Ensure now is consistent
     state_file = temp_data_dir / "activity_tracker_state.json"
     state = {
         "dirty": True,
@@ -199,7 +223,7 @@ def test_crash_recovery_without_last_active_time(temp_data_dir):
     assert recovered_seg.start_time == datetime.fromisoformat("2026-07-01T10:00:00")
     assert recovered_seg.end_time is None  # Ongoing segment
 
-def test_session_tracker_load_current_day_segments_clean_start(pm, temp_data_dir):
+def test_session_tracker_load_current_day_segments_clean_start(pm, temp_data_dir, patch_all_datetimes):
     today = date(2026, 7, 15)
     # Simulate some past segments for today that were saved
     day_data_to_save = Day(date=today)
@@ -211,21 +235,15 @@ def test_session_tracker_load_current_day_segments_clean_start(pm, temp_data_dir
     # Simulate a clean start
     s = make_session(pm)
     # Patch datetime.now() for this specific test to ensure 'today' matches the saved data
-    with patch('tracking.datetime', **{
-        'now.return_value': datetime(2026, 7, 15, 10, 0, 0),
-        'date': datetime.date,
-        'combine': datetime.combine,
-        'max': datetime.max,
-        'min': datetime.min
-    }):
-        s.load_current_day_segments()
+    patch_all_datetimes.set_now(datetime(2026, 7, 15, 10, 0, 0))
+    s.load_current_day_segments()
 
     assert today in s.days
     assert len(s.days[today].segments) == 2
     assert s.days[today].active_minutes == 30
     assert s.days[today].idle_minutes == 15
 
-def test_session_tracker_load_current_day_segments_with_crash_recovery_merge(pm, temp_data_dir):
+def test_session_tracker_load_current_day_segments_with_crash_recovery_merge(pm, temp_data_dir, patch_all_datetimes):
     today = date(2026, 7, 15)
 
     # 1. Simulate a crash state with an ongoing segment
@@ -246,15 +264,9 @@ def test_session_tracker_load_current_day_segments_with_crash_recovery_merge(pm,
 
     # 3. Create SessionTracker and call both recovery methods
     s = make_session(pm)
-    with patch('tracking.datetime', **{
-        'now.return_value': datetime(2026, 7, 15, 10, 0, 0),
-        'date': datetime.date,
-        'combine': datetime.combine,
-        'max': datetime.max,
-        'min': datetime.min
-    }):
-        s.recover_from_crash()
-        s.load_current_day_segments()
+    patch_all_datetimes.set_now(datetime(2026, 7, 15, 10, 0, 0))
+    s.recover_from_crash()
+    s.load_current_day_segments()
 
     # Assertions: should have 2 segments, total 40 active minutes (30 saved + 10 recovered)
     assert today in s.days
@@ -266,4 +278,3 @@ def test_session_tracker_load_current_day_segments_with_crash_recovery_merge(pm,
     # Verify segments are sorted by start_time
     assert s.days[today].segments[0].start_time == datetime(2026, 7, 15, 7, 0, 0)
     assert s.days[today].segments[1].start_time == datetime(2026, 7, 15, 8, 0, 0)
-

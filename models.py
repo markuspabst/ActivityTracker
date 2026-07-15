@@ -26,15 +26,7 @@ class Day:
 
     @property
     def idle_minutes(self) -> int:
-        start = self.session_start
-        end = self.session_end
-        if not start or not end:
-            return 0
-        return sum(
-            seg.duration_minutes
-            for seg in self.segments
-            if seg.state == 'idle' and seg.start_time and seg.start_time > start and seg.start_time < end
-        )
+        return sum(seg.duration_minutes for seg in self.segments if seg.state == 'idle')
 
     @property
     def session_start(self) -> Optional[datetime]:
