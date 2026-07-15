@@ -206,7 +206,11 @@ class SessionTracker:
 
         self.pm.save_segments(self.days)
         self.pm.save_daily_summary(daily_summaries)
-        self.days = {}
+        current_date = datetime.now().date()
+        if current_date in self.days:
+            self.days = {current_date: self.days[current_date]}
+        else:
+            self.days = {}
 
     def recover_from_crash(self):
         state_file = os.path.join(self.pm.get_data_dir(), "activity_tracker_state.json")
