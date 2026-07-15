@@ -33,7 +33,8 @@ class PersistenceManager:
                 segments_by_year[year] = {}
             for segment in day_data.segments:
                 if segment.start_time:
-                    key = (day.strftime("%Y-%m-%d"), segment.start_time.strftime("%H:%M"))
+                    # Use unique key based on date and start timestamp
+                    key = (day.strftime("%Y-%m-%d"), segment.start_time.strftime("%H:%M:%S"))
                     segments_by_year[year][key] = {
                         "date": day.strftime("%Y-%m-%d"),
                         "state": segment.state,

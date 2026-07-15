@@ -10,10 +10,18 @@ class TimeSegment:
     end_time: Optional[datetime] = None
 
     @property
+    def duration_seconds(self) -> float:
+        """Calculate duration in seconds (float) for precise tracking."""
+        if self.end_time is None:
+            return 0.0
+        return (self.end_time - self.start_time).total_seconds()
+
+    @property
     def duration_minutes(self) -> int:
+        """Calculate duration in whole minutes, always floored."""
         if self.end_time is None:
             return 0
-        return round((self.end_time - self.start_time).total_seconds() / 60)
+        return int((self.end_time - self.start_time).total_seconds() / 60)
 
 @dataclass
 class Day:
@@ -22,11 +30,25 @@ class Day:
 
     @property
     def active_minutes(self) -> int:
-        return sum(seg.duration_minutes for seg in self.segments if seg.state == 'active')
+        """Calculate total active minutes, always floored."""
+        total = sum(seg.duration_minutes for seg in self.segments if seg.state == 'active')
+
+        # Add floored time elapsed for the last segment if it's an ongoing active segment
+        if self.segments and self.segments[-1].state == 'active' and self.segments[-1].end_time is None:
+            total += int((datetime.now() - self.segments[-1].start_time).total_seconds() / 60)
+
+        return total
 
     @property
     def idle_minutes(self) -> int:
-        return sum(seg.duration_minutes for seg in self.segments if seg.state == 'idle')
+        """Calculate total idle minutes, always floored."""
+        total = sum(seg.duration_minutes for seg in self.segments if seg.state == 'idle')
+
+        # Add floored time elapsed for the last segment if it's an ongoing idle segment
+        if self.segments and self.segments[-1].state == 'idle' and self.segments[-1].end_time is None:
+            total += int((datetime.now() - self.segments[-1].start_time).total_seconds() / 60)
+
+        return total
 
     @property
     def session_start(self) -> Optional[datetime]:
@@ -46,7 +68,11 @@ class Day:
         return max(seg.end_time for seg in active_segments_with_end)
 
     def total_active_seconds(self) -> float:
-        total = self.active_minutes * 60
+        """Calculate total active seconds precisely, including ongoing segment."""
+        total = float(sum(seg.duration_seconds for seg in self.segments if seg.state == 'active'))
+
+        # Add precise time elapsed for ongoing active segment
         if self.segments and self.segments[-1].state == 'active' and self.segments[-1].end_time is None:
             total += (datetime.now() - self.segments[-1].start_time).total_seconds()
+
         return total

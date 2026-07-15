@@ -95,7 +95,9 @@ class SessionTracker:
         self.is_locked = False
 
     def on_tick(self, idle_time: float, idle_threshold: int):
-        now = datetime.now()
+        """Process a tick with consistent timestamp handling."""
+        # Use timestamps without microseconds for consistent rounding
+        now = datetime.now().replace(microsecond=0)
         current_date = now.date()
 
         if current_date not in self.days:
@@ -108,26 +110,36 @@ class SessionTracker:
             self.current_segment = TimeSegment(state=current_state, start_time=now)
             self.days[current_date].segments.append(self.current_segment)
         elif self.current_segment.state != current_state:
-            self.current_segment.end_time = max(self.current_segment.start_time, now)
+            # Ensure end_time is always >= start_time
+            end_time = self.current_segment.start_time if now < self.current_segment.start_time else now
+            self.current_segment.end_time = end_time
             self.current_segment = TimeSegment(state=current_state, start_time=now)
             self.days[current_date].segments.append(self.current_segment)
 
         if self.current_segment.start_time.date() != current_date:
+            # Round midnight to the exact start of the day
             midnight = datetime.combine(self.current_segment.start_time.date(), datetime.max.time())
+            midnight = midnight.replace(microsecond=0)
             self.current_segment.end_time = midnight
 
             new_day_start = datetime.combine(current_date, datetime.min.time())
+            new_day_start = new_day_start.replace(microsecond=0)
             self.current_segment = TimeSegment(state=self.current_segment.state, start_time=new_day_start)
             self.days[current_date].segments.append(self.current_segment)
 
+            # Save data for the previous day when midnight crosses
+            self.save_all_days()
+
     def finalize_session(self):
         if self.current_segment and self.current_segment.end_time is None:
-            self.current_segment.end_time = max(self.current_segment.start_time, datetime.now())
+            now = datetime.now().replace(microsecond=0)
+            self.current_segment.end_time = self.current_segment.start_time if now < self.current_segment.start_time else now
         self.save_all_days()
 
     def save_all_days(self):
         if self.current_segment and self.current_segment.end_time is None:
-            self.current_segment.end_time = max(self.current_segment.start_time, datetime.now())
+            now = datetime.now().replace(microsecond=0)
+            self.current_segment.end_time = self.current_segment.start_time if now < self.current_segment.start_time else now
         daily_summaries = {}
         for day_date, day_obj in self.days.items():
             if not day_obj.segments:
