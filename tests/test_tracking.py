@@ -12,9 +12,9 @@ from tracking import (
     Day,
     format_hours,
     format_delta,
-    get_status_icon,
     hours,
 )
+from tray_icon import get_status_icon
 from persistence import PersistenceManager
 
 # ============================================================
@@ -48,7 +48,7 @@ def test_format_hours():
 
 def test_get_status_icon():
     target = 8 * 3600
-    assert get_status_icon(is_idle=True, active_today=0, target_work_seconds=target) == "🔴"
+    assert get_status_icon(is_idle=True, active_today=0, target_work_seconds=target, active_week=0, target_weekly_work_seconds=40*3600) == "🔴"
 
 # ============================================================
 #  MODEL TESTS
@@ -75,7 +75,8 @@ def test_day_total_active_seconds():
     d.segments.append(TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=datetime(2026, 7, 1, 9, 30, 0)))
     d.segments.append(TimeSegment(state='idle', start_time=datetime(2026, 7, 1, 9, 30, 0), end_time=datetime(2026, 7, 1, 9, 45, 0)))
     assert d.active_minutes == 30
-    assert d.idle_minutes == 15
+    # Idle time that starts at the session end boundary is not counted to cleanly separate work periods from post-work time
+    assert d.idle_minutes == 0
 
 # ============================================================
 #  SESSION TRACKER TESTS
@@ -158,3 +159,24 @@ def test_crash_recovery(temp_data_dir):
     assert len(s.days[date(2026, 7, 1)].segments) == 1
     recovered_seg = s.days[date(2026, 7, 1)].segments[0]
     assert recovered_seg.end_time == datetime.fromisoformat("2026-07-01T10:30:00")
+
+def test_crash_recovery_without_last_active_time(temp_data_dir):
+    state_file = temp_data_dir / "activity_tracker_state.json"
+    state = {
+        "dirty": True,
+        "current_segment": {"state": "active", "start_time": "2026-07-01T10:00:00"},
+        "last_active_time": None
+    }
+    with open(state_file, 'w') as f:
+        json.dump(state, f)
+
+    pm = PersistenceManager(lambda: str(temp_data_dir))
+    s = make_session(pm)
+    s.recover_from_crash()
+
+    # Should recover the ongoing segment even with null last_active_time
+    assert len(s.days[date(2026, 7, 1)].segments) == 1
+    recovered_seg = s.days[date(2026, 7, 1)].segments[0]
+    assert recovered_seg.state == 'active'
+    assert recovered_seg.start_time == datetime.fromisoformat("2026-07-01T10:00:00")
+    assert recovered_seg.end_time is None  # Ongoing segment
