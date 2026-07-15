@@ -10,8 +10,6 @@ from contextlib import ExitStack
 from tracking import (
     SessionTracker,
     format_hours,
-    format_delta,
-    hours,
 )
 from models import TimeSegment, Day
 from tray_icon import get_status_icon
@@ -64,6 +62,10 @@ def patch_all_datetimes():
 
 def test_format_hours():
     assert format_hours(3600) == "01:00"
+
+# ============================================================
+#  STATUS ICON TESTS
+# ============================================================
 
 def test_get_status_icon(): # No patch_now usage here
     target = 8 * 3600

@@ -40,10 +40,6 @@ DATA_DIR: Optional[str] = None
 # CONFIG
 # ------------------------------------------------------------
 
-class AppConfig:
-    def __init__(self) -> None:
-        pass
-
 def load_config():
     if not os.path.exists(CONFIG_FILE):
         return {}
@@ -280,21 +276,9 @@ class SessionTracker:
 # ------------------------------------------------------------
 # FORMATTING HELPERS
 # ------------------------------------------------------------
-def hours(seconds: float) -> float:
-    return round(seconds / 3600, 2)
-
 def format_hours(seconds: float) -> str:
     s = int(seconds)
     h = s // 3600
     m = (s % 3600) // 60
     return f"{h:02d}:{m:02d}"
-
-def format_delta(seconds: float) -> str:
-    s = int(seconds)
-    sign = "+" if s >= 0 else "-"
-    s = abs(s)
-    h = s // 3600
-    m = (s % 3600) // 60
-    icon = "✅" if sign == "+" else "⚠️"
-    return f"{sign}{h:02d}:{m:02d} {icon}"
 
