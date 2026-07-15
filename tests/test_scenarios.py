@@ -82,3 +82,18 @@ def test_csv_format_and_content(app_instance, pm, temp_data_dir):
         assert lines[0].strip() == "date,active_min,idle_min,session_start,session_end" # FR-3.6 Header
         assert "2026-07-14,60,0,09:00,10:00" in lines[1] # FR-3.3
 
+
+def test_app_starts_tracking_immediately(pm):
+    with patch('app.AppMenu') as mock_appmenu, patch('app.threading.Thread') as mock_thread, patch.object(ActivityTrackerApp, 'update') as mock_update:
+        mock_menu = mock_appmenu.return_value
+        mock_menu.run.return_value = None
+        thread_obj = MagicMock()
+        mock_thread.return_value = thread_obj
+
+        app = ActivityTrackerApp()
+        app.run()
+
+        mock_update.assert_called_once()
+        thread_obj.start.assert_called_once()
+        mock_menu.run.assert_called_once()
+

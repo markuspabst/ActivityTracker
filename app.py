@@ -43,6 +43,7 @@ class ActivityTrackerApp:
         self.menu = AppMenu(self)
         self._updater = threading.Thread(target=self._update_loop, daemon=True)
         self._updater.start()
+        self.update()
         self.menu.run()
 
     def _update_loop(self):
