@@ -29,6 +29,7 @@ class ActivityTrackerApp:
         self.pm = PersistenceManager(get_configured_data_dir)
         self.session = SessionTracker(self.pm)
         self.session.recover_from_crash()
+        self.session.load_current_day_segments()
 
         self.target_work_seconds = int(get_config_value("target_seconds", 8 * 3600))
         self.weekly_target_seconds = int(get_config_value("weekly_target_seconds", 40 * 3600))
@@ -75,15 +76,21 @@ class ActivityTrackerApp:
         is_idle = self.session.current_segment.state == 'idle' if self.session.current_segment else False
 
         week_start_date = today - timedelta(days=today.weekday())
-        weekly_active_from_csv, _ = self.pm.read_daily_summaries_for_week(week_start_date)
-        weekly_active_session = 0
+        current_week_active_total_minutes = 0
+
         for i in range(7):
             day_in_week = week_start_date + timedelta(days=i)
-            day_data = self.session.days.get(day_in_week)
-            if day_data:
-                weekly_active_session += day_data.active_minutes
+            if day_in_week < today:
+                # For past days in the week, read summary from CSV
+                active_minutes_for_day, _ = self.pm.read_daily_summary_for_day(day_in_week)
+                current_week_active_total_minutes += active_minutes_for_day
+            elif day_in_week == today:
+                # For today, use the current in-memory data
+                if current_day_data:
+                    current_week_active_total_minutes += (current_day_data.total_active_seconds() / 60)
+            # Future days (day_in_week > today) will contribute 0, which is correct
 
-        total_weekly_active = (weekly_active_from_csv + weekly_active_session) * 60
+        total_weekly_active = current_week_active_total_minutes * 60
 
         self.menu.update_ui(is_idle, active_today, total_weekly_active, self.weekly_target_seconds)
 

@@ -2,7 +2,8 @@ import csv
 import os
 from datetime import datetime, date, timedelta
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
+from models import TimeSegment
 
 # Define constants for file names and formats
 SEGMENTS_LOG_PREFIX = "segments"
@@ -150,3 +151,58 @@ class PersistenceManager:
 
     def get_data_dir(self):
         return self._get_data_dir()
+
+    def read_daily_summary_for_day(self, target_date: date) -> tuple[int, int]:
+        """
+        Reads the daily summary for a specific date from the CSV file.
+        """
+        path = self.get_log_file_path(DAILY_SUMMARY_LOG_PREFIX, target_date.year)
+
+        if not os.path.exists(path):
+            return 0, 0
+
+        try:
+            with open(path, "r", newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    try:
+                        row_date = datetime.strptime(row["date"], "%Y-%m-%d").date()
+                        if row_date == target_date:
+                            active_minutes = int(row.get("active_min", 0) or 0)
+                            idle_minutes = int(row.get("idle_min", 0) or 0)
+                            return active_minutes, idle_minutes
+                    except (ValueError, TypeError):
+                        continue
+        except (IOError, csv.Error):
+            pass
+
+        return 0, 0
+
+    def read_segments_for_day(self, target_date: date) -> List[TimeSegment]:
+        """
+        Reads segments from the CSV file for a specific date.
+        """
+        segments: List[TimeSegment] = []
+        path = self.get_log_file_path(SEGMENTS_LOG_PREFIX, target_date.year)
+
+        if not os.path.exists(path):
+            return segments
+
+        try:
+            with open(path, "r", newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    try:
+                        row_date = datetime.strptime(row['date'], "%Y-%m-%d").date()
+                        if row_date == target_date:
+                            start_time = datetime.strptime(f"{row['date']} {row['start']}", "%Y-%m-%d %H:%M")
+                            end_time = None
+                            if row['end']:
+                                end_time = datetime.strptime(f"{row['date']} {row['end']}", "%Y-%m-%d %H:%M")
+                            segments.append(TimeSegment(state=row['state'], start_time=start_time, end_time=end_time))
+                    except (ValueError, TypeError):
+                        continue
+        except (IOError, csv.Error):
+            pass # If file is corrupt or empty, return empty segments
+
+        return segments

@@ -10,8 +10,8 @@ The app runs as a **menu bar-only app (no Dock icon)** via `LSUIElement`.
 
 ### Prerequisites
 
-- **macOS**
-- **Python 3.14**
+-   **macOS**
+-   **Python 3.14**
 
 ### Installation
 
@@ -51,16 +51,16 @@ The app runs as a **menu bar-only app (no Dock icon)** via `LSUIElement`.
 
 ## 2. Features
 
--   **Time Tracking:** Tracks active, idle, and total time per day. Each day's tracking starts fresh after the first keyboard/mouse activity.
+-   **Time Tracking:** Tracks active, idle, and total time per day, with segments loaded on startup for continuous tracking.
 -   **Live Menu Bar:** Shows a status icon (🟢 target met, 🟡 below target, 🔴 idle) and live time display with session start time and accumulating active time.
 -   **Daily & Weekly Targets:** Set and monitor daily and weekly work goals. The status icon will turn green if either goal is met.
 -   **Persistence:**
-    -   **CSV:** Stores daily logs with per-day start/end times in `activity_tracker_log.csv`.
-    -   **JSON State:** Ensures crash-safe recovery with `activity_tracker_state.json`.
-    -   **JSON Config:** Saves user settings in `activity_tracker_config.json`.
--   **Midnight-safe:** Session resets at midnight — each day gets its own `start_time` and clean counters, even if the app runs continuously.
--   **End Time from Last Activity:** The CSV `end_time` reflects the last moment of activity, not the save timestamp — idle time after the last activity is excluded.
--   **Crash Recovery:** Robustly recovers ongoing tracking sessions after abnormal termination.
+    -   **CSV:** Stores detailed time segments in `segments-{year}.csv` and daily summaries in `daily-{year}.csv` (rotated annually).
+    -   **JSON State:** Ensures crash-safe recovery of ongoing sessions with `activity_tracker_state.json`.
+    -   **JSON Config:** Saves user settings and preferences in `activity_tracker_config.json`.
+-   **Midnight-safe:** Sessions reset at midnight, providing clean counters for each new day.
+-   **Accurate Segment End Times:** `end_time` for segments reflects the last moment of activity, preventing idle time after activity from being counted into active duration.
+-   **Robust Session Recovery:** Recovers ongoing tracking sessions after abnormal termination, and loads all previously saved segments for the current day on clean restarts.
 -   **Customizable Data Folder:** Change the storage location from the Settings menu.
 -   **Autostart:** Automatically starts on login.
 -   **Productivity Dashboard:** Generates an HTML report with productivity insights.
@@ -74,49 +74,71 @@ The app runs as a **menu bar-only app (no Dock icon)** via `LSUIElement`.
 |---|---|---|
 | App Controller | Core application logic, event loop, save scheduling | `app.py` (`ActivityTrackerApp`) |
 | Session Tracker | Pure data model: computes active/idle/total, tracks idle transitions, detects midnight rollover | `tracking.py` (`SessionTracker`) |
+| Data Models | `TimeSegment` and `Day` dataclasses for representing tracking data | `models.py` (`TimeSegment`, `Day`) |
 | Tray Icon | Generates the tray icon image and determines its color based on work goals | `tray_icon.py` |
 | Menu UI | Displays metrics, targets, and settings | `activity_tracker_menu.py` (`AppMenu`) |
 | Idle detection | Native Quartz idle API (falls back to `ioreg`) | `platform_layer/*.py` (`get_idle_time()`) |
-| CSV storage | Long-term daily persistence (stdlib `csv`) | `tracking.py` (`read_csv_data()` / `add_delta_to_csv()`) |
-| State file | Crash-safe recovery of unsaved time | `tracking.py` (`read_state()` / `recover_previous_session_if_needed()`) |
+| CSV Persistence | Long-term daily persistence of segments and summaries in CSV files (`segments-{year}.csv`, `daily-{year}.csv`) | `persistence.py` (`PersistenceManager`) |
+| State file | Crash-safe recovery of ongoing unsaved session data | `tracking.py` (`write_state()`, `recover_from_crash()`) |
 | Config | User preferences, cached validated values | `tracking.py` (`AppConfig`, `load_config()` / `save_config()`) |
 | LaunchAgent | Autostart via `launchctl` | `platform_layer/*.py` (`install_autostart()` / `uninstall_autostart()`) |
 | i18n | Locale-aware UI strings | `i18n.py`, `locales/*.json` |
 | Dashboard | HTML productivity report | `scripts/generate_dashboard.py` |
 
-### Data flow (per tick, every 5 s)
+### Data flow (per tick, every 5 s)
 
 ```
-platform_layer.get_idle_time()  ─┐
-                                 ├─→  SessionTracker.calculate_current_session()
-SessionTracker.on_tick(is_idle)  ─┘    →  active / idle / total / is_idle
-                                          │
-                                          ├─→  app._do_save_delta()  →  CSV (every WRITE_INTERVAL)
-                                          │
-                                          └─→  menu.update_ui()      →  tray icon & tooltip
+[UI TICK (every 5s)]
+  ┌─────────────────────────────────┐
+  │ `AppController.update()`        │
+  ├─ `platform_layer.get_idle_time()`
+  ├─→ `SessionTracker.on_tick(idle_time, idle_threshold)`
+  │    (Updates `self.session.days` and `self.current_segment`)
+  │
+  ├─ `SessionTracker.save_all_days()` (if `write_interval` met)
+  │    (Triggers `PersistenceManager.save_segments()` and `save_daily_summary()`)
+  │      → `segments-{year}.csv`, `daily-{year}.csv`
+  │
+  ├─ `SessionTracker.write_state(dirty=True)`
+  │    → `activity_tracker_state.json` (stores last segment info for crash recovery)
+  │
+  └─→ `AppController.update_ui()`
+       ├─ (Reads from `self.session.days` for current day's active/idle)
+       ├─ (Calls `PersistenceManager.read_daily_summary_for_day()` for past days in week)
+       └─→ `AppMenu.update_ui()` (updates tray icon and menu entries)
 ```
 
 ### Timing Constants
 
 | Constant | Default | Meaning |
 |---|---|---|
-| Tick interval (hard-coded) | 5 s | UI + state refresh interval |
-| `DEFAULT_SAVE_INTERVAL_SECONDS` | 3600 s | CSV auto-save interval (user-configurable) |
-| `DEFAULT_IDLE_THRESHOLD` | 300 s | Considered idle after 5 min of no input (user-configurable) |
+| Tick interval (hard-coded) | 5 s | UI + state refresh interval |
+| `DEFAULT_SAVE_INTERVAL_SECONDS` | 3600 s | CSV auto-save interval (user-configurable) |
+| `DEFAULT_IDLE_THRESHOLD` | 300 s | Considered idle after 5 min of no input (user-configurable) |
 
-### CSV structure (`activity_tracker_log.csv`)
+### CSV structure
 
-Each row stores the aggregate for one date:
+**`segments-{year}.csv` (e.g., `segments-2026.csv`)**
+Each row represents a continuous time segment (active or idle):
 
 | Column | Description |
 |---|---|
-| `date` | Calendar date (ISO‑8601) |
-| `start_time` | First activity of that day |
-| `end_time` | Last moment of activity (not save time) |
-| `total_seconds` | Total elapsed time (active + idle) |
-| `active_seconds` | Time with keyboard/mouse input |
-| `idle_seconds` | Time idle (idle before first activity is excluded) |
-| `total_hours` / `active_hours` / `idle_hours` | Same as seconds, in decimal hours |
+| `date` | Calendar date (YYYY-MM-DD) |
+| `state` | Segment type (`active` or `idle`) |
+| `start` | Segment start time (HH:MM) |
+| `end` | Segment end time (HH:MM) |
+| `duration_min` | Duration of the segment in minutes |
+
+**`daily-{year}.csv` (e.g., `daily-2026.csv`)**
+Each row stores the aggregated summary for one day:
+
+| Column | Description |
+|---|---|
+| `date` | Calendar date (YYYY-MM-DD) |
+| `active_min` | Total active minutes for the day |
+| `idle_min` | Total idle minutes for the day |
+| `session_start` | Start time of the first active segment for the day (HH:MM) |
+| `session_end` | End time of the last active segment for the day (HH:MM) |
 
 ---
 

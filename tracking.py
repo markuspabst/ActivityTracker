@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta, date
+from datetime import datetime, date, timedelta
 from typing import Any, Optional, List, Dict
+from persistence import PersistenceManager
+from models import TimeSegment, Day
 
 import platformdirs
 
@@ -34,66 +35,6 @@ DEFAULT_BASE_DIR = platformdirs.user_data_dir(APP_NAME)
 CONFIG_DIR = platformdirs.user_config_dir(APP_NAME)
 CONFIG_FILE = os.path.join(CONFIG_DIR, "activity_tracker_config.json")
 DATA_DIR: Optional[str] = None
-
-# ------------------------------------------------------------
-# DATA CLASSES
-# ------------------------------------------------------------
-
-@dataclass
-class TimeSegment:
-    state: str  # 'active' or 'idle'
-    start_time: datetime
-    end_time: Optional[datetime] = None
-
-    @property
-    def duration_minutes(self) -> int:
-        if self.end_time is None:
-            return 0
-        return round((self.end_time - self.start_time).total_seconds() / 60)
-
-@dataclass
-class Day:
-    date: date
-    segments: List[TimeSegment] = field(default_factory=list)
-
-    @property
-    def active_minutes(self) -> int:
-        return sum(seg.duration_minutes for seg in self.segments if seg.state == 'active')
-
-    @property
-    def idle_minutes(self) -> int:
-        start = self.session_start
-        end = self.session_end
-        if not start or not end:
-            return 0
-        return sum(
-            seg.duration_minutes
-            for seg in self.segments
-            if seg.state == 'idle' and seg.start_time and seg.start_time > start and seg.start_time < end
-        )
-
-    @property
-    def session_start(self) -> Optional[datetime]:
-        active_segments = [seg for seg in self.segments if seg.state == 'active']
-        if not active_segments:
-            return None
-        return min(seg.start_time for seg in active_segments)
-
-    @property
-    def session_end(self) -> Optional[datetime]:
-        active_segments = [seg for seg in self.segments if seg.state == 'active']
-        if not active_segments:
-            return None
-        active_segments_with_end = [seg for seg in active_segments if seg.end_time]
-        if not active_segments_with_end:
-            return None
-        return max(seg.end_time for seg in active_segments_with_end)
-
-    def total_active_seconds(self) -> float:
-        total = self.active_minutes * 60
-        if self.segments and self.segments[-1].state == 'active' and self.segments[-1].end_time is None:
-            total += (datetime.now() - self.segments[-1].start_time).total_seconds()
-        return total
 
 # ------------------------------------------------------------
 # CONFIG
@@ -151,7 +92,7 @@ def reset_data_dir_to_default() -> None:
 # ------------------------------------------------------------
 
 class SessionTracker:
-    def __init__(self, persistence_manager) -> None:
+    def __init__(self, persistence_manager: PersistenceManager) -> None:
         self.pm = persistence_manager
         self.days: Dict[date, Day] = {}
         self.current_segment: Optional[TimeSegment] = None
@@ -171,7 +112,7 @@ class SessionTracker:
             self.current_segment = TimeSegment(state=current_state, start_time=now)
             self.days[current_date].segments.append(self.current_segment)
         elif self.current_segment.state != current_state:
-            self.current_segment.end_time = now
+            self.current_segment.end_time = max(self.current_segment.start_time, now)
             self.current_segment = TimeSegment(state=current_state, start_time=now)
             self.days[current_date].segments.append(self.current_segment)
 
@@ -184,13 +125,13 @@ class SessionTracker:
             self.days[current_date].segments.append(self.current_segment)
 
     def finalize_session(self):
-        if self.current_segment:
-            self.current_segment.end_time = datetime.now()
+        if self.current_segment and self.current_segment.end_time is None:
+            self.current_segment.end_time = max(self.current_segment.start_time, datetime.now())
         self.save_all_days()
 
     def save_all_days(self):
-        if self.current_segment:
-            self.current_segment.end_time = datetime.now()
+        if self.current_segment and self.current_segment.end_time is None:
+            self.current_segment.end_time = max(self.current_segment.start_time, datetime.now())
         daily_summaries = {}
         for day_date, day_obj in self.days.items():
             if not day_obj.segments:
@@ -282,6 +223,26 @@ class SessionTracker:
                     # Don't save ongoing segments - they're still in progress
 
         self.mark_state_clean()
+
+    def load_current_day_segments(self):
+        """
+        Loads all segments for the current day from CSV into memory (self.days).
+        This is called on startup to ensure historical data for today is present.
+        """
+        today = datetime.now().date()
+        segments_for_today = self.pm.read_segments_for_day(today)
+
+        if segments_for_today:
+            if today not in self.days:
+                self.days[today] = Day(date=today)
+            # Append only new segments to avoid duplicates if recover_from_crash already added some
+            existing_segment_start_times = {seg.start_time for seg in self.days[today].segments}
+            for segment in segments_for_today:
+                if segment.start_time not in existing_segment_start_times:
+                    self.days[today].segments.append(segment)
+
+            # Re-sort segments by start_time to maintain order
+            self.days[today].segments.sort(key=lambda seg: seg.start_time)
 
     def write_state(self, dirty: bool = True):
         state_file = os.path.join(self.pm.get_data_dir(), "activity_tracker_state.json")

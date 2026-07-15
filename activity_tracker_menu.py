@@ -40,21 +40,24 @@ class AppMenu:
         self._idle_today_session = today_data.idle_minutes if today_data else 0
         self._session_start = today_data.session_start if today_data else None
 
-        # Store the pre-calculated weekly active time passed from app.py (already in seconds)
         self._total_weekly_active = active_week
 
-        # Calculate weekly idle time in the same way (convert minutes to seconds)
+        # Calculate weekly idle time, avoiding double-counting
         week_start_date = today_date - timedelta(days=today_date.weekday())
-        _, weekly_idle_from_csv = self.app.pm.read_daily_summaries_for_week(week_start_date)
-
-        weekly_idle_session = 0
+        current_week_idle_total_minutes = 0
         for i in range(7):
             day_in_week = week_start_date + timedelta(days=i)
-            day_data = self.app.session.days.get(day_in_week)
-            if day_data:
-                weekly_idle_session += day_data.idle_minutes
+            if day_in_week < today_date:
+                # For past days in the week, read idle summary from CSV
+                _, idle_minutes_for_day = self.app.pm.read_daily_summary_for_day(day_in_week)
+                current_week_idle_total_minutes += idle_minutes_for_day
+            elif day_in_week == today_date:
+                # For today, use the current in-memory data
+                if today_data:
+                    current_week_idle_total_minutes += today_data.idle_minutes
+            # Future days (day_in_week > today_date) will contribute 0, which is correct
 
-        self._total_weekly_idle = (weekly_idle_from_csv + weekly_idle_session) * 60
+        self._total_weekly_idle = current_week_idle_total_minutes * 60
 
         # Update icon status and title
         status_emoji = get_status_icon(is_idle, active_today, self.app.target_work_seconds, active_week, weekly_target)

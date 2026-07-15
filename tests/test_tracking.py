@@ -8,12 +8,11 @@ from unittest.mock import patch, MagicMock
 from datetime import datetime, date, timedelta
 from tracking import (
     SessionTracker,
-    TimeSegment,
-    Day,
     format_hours,
     format_delta,
     hours,
 )
+from models import TimeSegment, Day
 from tray_icon import get_status_icon
 from persistence import PersistenceManager
 
@@ -138,6 +137,25 @@ def test_persistence_manager_save_and_read(pm, temp_data_dir):
     assert active == 30
     assert idle == 0
 
+def test_persistence_manager_read_daily_summary_for_day(pm, temp_data_dir):
+    test_date = date(2026, 7, 1)
+    d = Day(date=test_date)
+    d.segments.append(TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=datetime(2026, 7, 1, 9, 30, 0)))
+    d.segments.append(TimeSegment(state='idle', start_time=datetime(2026, 7, 1, 9, 30, 0), end_time=datetime(2026, 7, 1, 9, 40, 0)))
+
+    daily_summary = {
+        "active_min": d.active_minutes,
+        "idle_min": d.idle_minutes,
+        "session_start": "09:00",
+        "session_end": "09:40",
+    }
+
+    pm.save_daily_summary({test_date: daily_summary})
+
+    active, idle = pm.read_daily_summary_for_day(test_date)
+    assert active == d.active_minutes
+    assert idle == d.idle_minutes
+
 # ============================================================
 #  CRASH RECOVERY TESTS
 # ============================================================
@@ -180,3 +198,72 @@ def test_crash_recovery_without_last_active_time(temp_data_dir):
     assert recovered_seg.state == 'active'
     assert recovered_seg.start_time == datetime.fromisoformat("2026-07-01T10:00:00")
     assert recovered_seg.end_time is None  # Ongoing segment
+
+def test_session_tracker_load_current_day_segments_clean_start(pm, temp_data_dir):
+    today = date(2026, 7, 15)
+    # Simulate some past segments for today that were saved
+    day_data_to_save = Day(date=today)
+    day_data_to_save.segments.append(TimeSegment(state='active', start_time=datetime(2026, 7, 15, 9, 0, 0), end_time=datetime(2026, 7, 15, 9, 30, 0)))
+    day_data_to_save.segments.append(TimeSegment(state='idle', start_time=datetime(2026, 7, 15, 9, 30, 0), end_time=datetime(2026, 7, 15, 9, 45, 0)))
+    pm.save_segments({today: day_data_to_save})
+    pm.save_daily_summary({today: {"active_min": day_data_to_save.active_minutes, "idle_min": day_data_to_save.idle_minutes, "session_start": "", "session_end": ""}})
+
+    # Simulate a clean start
+    s = make_session(pm)
+    # Patch datetime.now() for this specific test to ensure 'today' matches the saved data
+    with patch('tracking.datetime', **{
+        'now.return_value': datetime(2026, 7, 15, 10, 0, 0),
+        'date': datetime.date,
+        'combine': datetime.combine,
+        'max': datetime.max,
+        'min': datetime.min
+    }):
+        s.load_current_day_segments()
+
+    assert today in s.days
+    assert len(s.days[today].segments) == 2
+    assert s.days[today].active_minutes == 30
+    assert s.days[today].idle_minutes == 15
+
+def test_session_tracker_load_current_day_segments_with_crash_recovery_merge(pm, temp_data_dir):
+    today = date(2026, 7, 15)
+
+    # 1. Simulate a crash state with an ongoing segment
+    state_file = temp_data_dir / "activity_tracker_state.json"
+    state = {
+        "dirty": True,
+        "current_segment": {"state": "active", "start_time": "2026-07-15T08:00:00"},
+        "last_active_time": "2026-07-15T08:10:00" # 10 mins active
+    }
+    with open(state_file, 'w') as f:
+        json.dump(state, f)
+
+    # 2. Simulate some previously saved segments for today
+    day_data_to_save = Day(date=today)
+    day_data_to_save.segments.append(TimeSegment(state='active', start_time=datetime(2026, 7, 15, 7, 0, 0), end_time=datetime(2026, 7, 15, 7, 30, 0))) # 30 mins active
+    pm.save_segments({today: day_data_to_save})
+    pm.save_daily_summary({today: {"active_min": 30, "idle_min": 0, "session_start": "", "session_end": ""}})
+
+    # 3. Create SessionTracker and call both recovery methods
+    s = make_session(pm)
+    with patch('tracking.datetime', **{
+        'now.return_value': datetime(2026, 7, 15, 10, 0, 0),
+        'date': datetime.date,
+        'combine': datetime.combine,
+        'max': datetime.max,
+        'min': datetime.min
+    }):
+        s.recover_from_crash()
+        s.load_current_day_segments()
+
+    # Assertions: should have 2 segments, total 40 active minutes (30 saved + 10 recovered)
+    assert today in s.days
+    # Expect 2 segments: 1 from CSV, 1 from crash recovery
+    assert len(s.days[today].segments) == 2
+    assert s.days[today].active_minutes == 40
+    assert s.days[today].idle_minutes == 0 # No idle in this scenario
+
+    # Verify segments are sorted by start_time
+    assert s.days[today].segments[0].start_time == datetime(2026, 7, 15, 7, 0, 0)
+    assert s.days[today].segments[1].start_time == datetime(2026, 7, 15, 8, 0, 0)
+
