@@ -33,14 +33,16 @@ class PersistenceManager:
                 segments_by_year[year] = {}
             for segment in day_data.segments:
                 if segment.start_time:
-                    # Use unique key based on date and start timestamp
-                    key = (day.strftime("%Y-%m-%d"), segment.start_time.strftime("%H:%M:%S"))
-                    segments_by_year[year][key] = {
+                    # Use unique key based on full timestamp for internal dictionary
+                    internal_key = (day.strftime("%Y-%m-%d"), segment.start_time.strftime("%H:%M:%S"))
+                    segments_by_year[year][internal_key] = {
                         "date": day.strftime("%Y-%m-%d"),
                         "state": segment.state,
                         "start": segment.start_time.strftime("%H:%M"),
                         "end": segment.end_time.strftime("%H:%M") if segment.end_time else "",
                         "duration_min": segment.duration_minutes,
+                        # Also track duration in seconds for ongoing segments
+                        "duration_min_full": round((segment.end_time - segment.start_time).total_seconds() / 60) if segment.end_time else 0,
                     }
 
         # For each affected year, read-merge-write
@@ -53,22 +55,34 @@ class PersistenceManager:
                     with open(path, "r", newline="", encoding="utf-8") as f:
                         reader = csv.DictReader(f)
                         for row in reader:
-                            key = (row['date'], row['start'])
-                            existing_data[key] = row
+                            existing_data[row['date']] = row
                 except (IOError, csv.Error):
                     pass # If file is corrupt or empty, we'll overwrite it
 
-            # Merge new data, overwriting duplicates
-            existing_data.update(new_segments)
+            # Merge new data
+            for internal_key, data in new_segments.items():
+                date_str = data['date']
+                existing_data[date_str] = {
+                    **existing_data.get(date_str, {}),
+                    **data
+                }
 
-            # Write back sorted by date and start time
+            # Write back sorted by date
             if existing_data:
-                sorted_keys = sorted(existing_data.keys())
+                sorted_dates = sorted(existing_data.keys())
                 with open(path, "w", newline="", encoding="utf-8") as f:
                     writer = csv.DictWriter(f, fieldnames=["date", "state", "start", "end", "duration_min"])
                     writer.writeheader()
-                    for key in sorted_keys:
-                        writer.writerow(existing_data[key])
+                    for date_key in sorted_dates:
+                        row = existing_data[date_key]
+                        # Write only date rows (overwrite with latest values)
+                        writer.writerow({
+                            "date": row['date'],
+                            "state": row['state'],
+                            "start": row['start'],
+                            "end": row['end'],
+                            "duration_min": row['duration_min'],
+                        })
 
     def save_daily_summary(self, daily_summaries: Dict[date, Dict]):
         """Saves daily summary data to a CSV file, rotated by year."""

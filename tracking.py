@@ -115,6 +115,7 @@ class SessionTracker:
             self.current_segment.end_time = end_time
             self.current_segment = TimeSegment(state=current_state, start_time=now)
             self.days[current_date].segments.append(self.current_segment)
+        # else: state hasn't changed, continue with existing segment (end_time will be set on save)
 
         if self.current_segment.start_time.date() != current_date:
             # Round midnight to the exact start of the day

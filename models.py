@@ -20,7 +20,8 @@ class TimeSegment:
     def duration_minutes(self) -> int:
         """Calculate duration in whole minutes, always floored."""
         if self.end_time is None:
-            return 0
+            # For ongoing segments, calculate from start_time to now
+            return int((datetime.now() - self.start_time).total_seconds() / 60)
         return int((self.end_time - self.start_time).total_seconds() / 60)
 
 @dataclass
@@ -31,24 +32,12 @@ class Day:
     @property
     def active_minutes(self) -> int:
         """Calculate total active minutes, always floored."""
-        total = sum(seg.duration_minutes for seg in self.segments if seg.state == 'active')
-
-        # Add floored time elapsed for the last segment if it's an ongoing active segment
-        if self.segments and self.segments[-1].state == 'active' and self.segments[-1].end_time is None:
-            total += int((datetime.now() - self.segments[-1].start_time).total_seconds() / 60)
-
-        return total
+        return sum(seg.duration_minutes for seg in self.segments if seg.state == 'active')
 
     @property
     def idle_minutes(self) -> int:
         """Calculate total idle minutes, always floored."""
-        total = sum(seg.duration_minutes for seg in self.segments if seg.state == 'idle')
-
-        # Add floored time elapsed for the last segment if it's an ongoing idle segment
-        if self.segments and self.segments[-1].state == 'idle' and self.segments[-1].end_time is None:
-            total += int((datetime.now() - self.segments[-1].start_time).total_seconds() / 60)
-
-        return total
+        return sum(seg.duration_minutes for seg in self.segments if seg.state == 'idle')
 
     @property
     def session_start(self) -> Optional[datetime]:
