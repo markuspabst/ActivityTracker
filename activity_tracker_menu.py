@@ -81,7 +81,6 @@ class AppMenu:
         yield Menu.SEPARATOR
 
         yield MenuItem(i18n.t("SETTINGS"), self._generate_settings_menu())
-        yield MenuItem(i18n.t("FORCE_SAVE"), self.app.force_save)
         yield MenuItem(i18n.t("QUIT"), self.app.quit_app)
 
     def _generate_settings_menu(self):
@@ -159,10 +158,13 @@ class AppMenu:
             MenuItem(i18n.t("DAILY_TARGET"), Menu(*target_menu_items)),
             MenuItem(i18n.t("WEEKLY_TARGET"), Menu(*weekly_target_menu_items)),
             MenuItem(i18n.t("IDLE_THRESHOLD"), Menu(*idle_menu_items)),
-            MenuItem(i18n.t("SAVE_INTERVAL"), Menu(*save_interval_menu_items)),
             Menu.SEPARATOR,
             MenuItem(i18n.t("DATA_FOLDER"), data_folder_menu),
-            MenuItem(i18n.t(autostart_label), self._toggle_autostart, checked=lambda item: self.platform.autostart_installed()),
+            MenuItem(i18n.t("SAVE_INTERVAL"), Menu(*save_interval_menu_items)),
+            MenuItem(i18n.t("FORCE_SAVE"), self.app.force_save),
+            Menu.SEPARATOR,
+            MenuItem(i18n.t(autostart_label), self._toggle_autostart, checked=lambda item: self.platform.autostart_installed())
+            
         )
 
     def _toggle_autostart(self):
