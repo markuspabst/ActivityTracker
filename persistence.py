@@ -62,7 +62,7 @@ class PersistenceManager:
         current_time = time.time()
 
         # Check cache validity
-        if path in _file_cache and current_time - _cache_expiration.get(path, 0) < _CACHE_TTL:
+        if path in _file_cache and current_time - _cache_expiration.get(path, 0) < _cache_ttl:
             return _file_cache[path]
 
         # Read and cache
@@ -213,7 +213,7 @@ class PersistenceManager:
 
         # Check cache
         if (_weekly_cache[0] == week_start_date and
-            current_time - _weekly_cache[3] < _CACHE_TTL):
+            current_time - _weekly_cache[3] < _cache_ttl):
             return _weekly_cache[1], _weekly_cache[2]
 
         # Read fresh data
