@@ -41,5 +41,11 @@
   "LANGUAGE_SYSTEM_DEFAULT": "Systemstandard",
   "WEEK_ACTIVE": "Aktiv diese Woche: {value}",
   "WEEK_IDLE": "Inaktiv diese Woche: {value}",
-  "OPTIMIZE_CSV": "CSV optimieren"
+  "OPTIMIZE_CSV": "CSV optimieren",
+  "OPTIMIZE_SUCCESS": "CSV-Optimierung abgeschlossen",
+  "OPTIMIZE_SUCCESS_MSG": "{original} Segmente auf {merged} reduziert. Vermindert um {reduced} Segmente.",
+  "OPTIMIZE_ERROR_NO_FILE": "Optimierung fehlgeschlagen",
+  "OPTIMIZE_ERROR_NO_FILE_MSG": "Keine Aktivitätsdaten-Datei gefunden.",
+  "OPTIMIZE_EMPTY": "Nichts zu optimieren",
+  "OPTIMIZE_EMPTY_MSG": "Keine Segmente in der CSV-Datei gefunden."
 }

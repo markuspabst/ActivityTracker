@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from datetime import datetime, date, timedelta
 from typing import Any, Optional, List, Dict, Tuple
 from persistence import PersistenceManager
@@ -173,13 +172,6 @@ class SessionTracker:
             self.days = {current_date: Day(date=current_date, segments=updated_segments)}
         else:
             self.days = {}
-
-    def recover_from_crash(self):
-        """
-        Load previously saved segments from CSV for the current day.
-        The JSON state file is no longer used - all data is in CSV.
-        """
-        pass  # No longer needed - data is loaded from CSV during initialization
 
     def load_current_day_segments(self):
         """

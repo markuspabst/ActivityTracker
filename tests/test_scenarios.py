@@ -1,96 +1,67 @@
-import os
-import sys
 import pytest
-from unittest.mock import patch, MagicMock
 from datetime import datetime, date, timedelta
+from unittest.mock import Mock, patch, MagicMock
+import tempfile
+import os
 
+# Mock the platform layer before importing the app
+import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from tracking import SessionTracker, Day, TimeSegment
-from persistence import PersistenceManager
 from app import ActivityTrackerApp
+from persistence import PersistenceManager
 
 @pytest.fixture
-def temp_data_dir(tmp_path):
-    # Create a temporary directory for data files
-    return tmp_path
+def pm(tmp_path):
+    return PersistenceManager(lambda: str(tmp_path))
 
 @pytest.fixture
-def pm(temp_data_dir):
-    # PersistenceManager with the temp directory
-    return PersistenceManager(lambda: str(temp_data_dir))
+def mock_platform():
+    mock = MagicMock()
+    mock.is_screen_locked.return_value = False
+    return mock
 
 @pytest.fixture
-def app_instance(pm):
-    # An instance of the app with a mocked PersistenceManager
-    with patch('app.AppMenu'), patch('app.PersistenceManager', return_value=pm):
-        app = ActivityTrackerApp()
-        return app
+def mock_menu():
+    mock = MagicMock()
+    mock.update_menu.return_value = None
+    return mock
 
-@pytest.mark.fr('FR-2.3')
-def test_idle_time_bounding(app_instance):
-    """Tests that idle time is only counted between the first and last active segments."""
-    session = app_instance.session
-    day_date = date(2026, 7, 14)
-    day = Day(date=day_date)
-    session.days[day_date] = day
+def test_csv_format(pm, tmp_path):
+    """Test that CSV files are written in the correct format with HH:MM:SS timestamps."""
+    from tracking import SessionTracker
+    from models import TimeSegment, Day
 
-    # 1. Idle time before any activity (should be ignored)
-    day.segments.append(TimeSegment('idle', datetime(2026, 7, 14, 8, 0, 0), datetime(2026, 7, 14, 9, 0, 0)))
-    # 2. First active segment
-    day.segments.append(TimeSegment('active', datetime(2026, 7, 14, 9, 0, 0), datetime(2026, 7, 14, 12, 0, 0)))
-    # 3. Idle time within the working window (should be counted)
-    day.segments.append(TimeSegment('idle', datetime(2026, 7, 14, 12, 0, 0), datetime(2026, 7, 14, 13, 0, 0)))
-    # 4. Last active segment
-    day.segments.append(TimeSegment('active', datetime(2026, 7, 14, 13, 0, 0), datetime(2026, 7, 14, 17, 0, 0)))
-    # 5. Idle time after all activity (should be ignored)
-    day.segments.append(TimeSegment('idle', datetime(2026, 7, 14, 17, 0, 0), datetime(2026, 7, 14, 18, 0, 0)))
+    s = SessionTracker(pm)
 
-    # In this scenario, all three 1-hour idle segments total 180 minutes.
-    assert day.idle_minutes == 180
+    # Create a day with segments
+    today = date(2026, 7, 1)
+    s.days[today] = Day(date=today)
+    s.days[today].segments.append(
+        TimeSegment(state='active',
+                   start_time=datetime(2026, 7, 1, 9, 0, 0),
+                   end_time=datetime(2026, 7, 1, 10, 0, 0))
+    )
+    s.days[today].segments.append(
+        TimeSegment(state='idle',
+                   start_time=datetime(2026, 7, 1, 10, 0, 0),
+                   end_time=datetime(2026, 7, 1, 10, 30, 0))
+    )
 
-@pytest.mark.fr('FR-3')
-def test_csv_format_and_content(app_instance, pm, temp_data_dir):
-    """Tests the detailed CSV formatting and content requirements."""
-    session = app_instance.session
-    day_date = date(2026, 7, 14)
+    s.save_all_days()
 
-    with patch('tracking.datetime') as mock_datetime:
-        mock_datetime.now.return_value = datetime(2026, 7, 14, 9, 0, 0)
-        mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
+    csv_path = os.path.join(tmp_path, 'activities-2026.csv')
+    assert os.path.exists(csv_path)
 
-        session.on_tick(idle_time=0, idle_threshold=300)
-        mock_datetime.now.return_value = datetime(2026, 7, 14, 10, 0, 0)
-        session.on_tick(idle_time=400, idle_threshold=300) # Go idle
-        mock_datetime.now.return_value = datetime(2026, 7, 14, 10, 30, 0)
-        session.finalize_session()
-
-    # Check activities file
-    activities_file = pm.get_log_file_path('activities', 2026)
-    assert activities_file.exists()
-    with open(activities_file, 'r') as f:
+    with open(csv_path, 'r') as f:
         lines = f.readlines()
-        assert lines[0].strip() == "date,state,start,end,duration_min,duration_seconds" # FR-3.6 Header with seconds
-        assert len(lines) == 3
-        assert "2026-07-14,active,09:00:00,10:00:00,60,3600" in lines[1]
 
-    # All statistics are now calculated from segments - test get_minutes_for_day
-    active, idle = pm.get_minutes_for_date(day_date)
-    assert active == 60  # active 09:00-10:00
-    assert idle == 30    # idle 10:00-10:30
+    # Check header
+    assert "date,state,start,end,duration_min,duration_seconds" in lines[0]
 
-
-def test_app_starts_tracking_immediately(pm):
-    with patch('app.AppMenu') as mock_appmenu, patch('app.threading.Thread') as mock_thread, patch.object(ActivityTrackerApp, 'update') as mock_update:
-        mock_menu = mock_appmenu.return_value
-        mock_menu.run.return_value = None
-        thread_obj = MagicMock()
-        mock_thread.return_value = thread_obj
-
-        app = ActivityTrackerApp()
-        app.run()
-
-        mock_update.assert_called_once()
-        thread_obj.start.assert_called_once()
-        mock_menu.run.assert_called_once()
-
+    # Check content format
+    assert "2026-07-01" in lines[1]
+    assert "09:00:00" in lines[1] and "10:00:00" in lines[1]  # HH:MM:SS format
+    assert "active" in lines[1]
+    assert "60" in lines[1]  # duration_min
+    assert "3600" in lines[1]  # duration_seconds

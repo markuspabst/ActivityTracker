@@ -16,6 +16,7 @@ from tracking import (
     reset_data_dir_to_default,
     get_configured_data_dir,
 )
+from models import TimeSegment
 from persistence import PersistenceManager
 from activity_tracker_menu import AppMenu
 from single_instance import SingleInstanceLock
@@ -28,7 +29,6 @@ class ActivityTrackerApp:
         self.platform = get_platform()
         self.pm = PersistenceManager(get_configured_data_dir)
         self.session = SessionTracker(self.pm)
-        self.session.recover_from_crash()
         self.session.load_current_day_segments()
 
         self.target_work_seconds = int(get_config_value("target_seconds", 8 * 3600))
@@ -76,7 +76,7 @@ class ActivityTrackerApp:
 
         week_start_date = today - timedelta(days=today.weekday())
         # Get weekly total from CSV
-        weekly_active_minutes, weekly_idle_minutes = self.pm.get_weekly_minutes_cached(week_start_date)
+        weekly_active_minutes, weekly_idle_minutes = self.pm.get_weekly_minutes(week_start_date)
         weekly_idle_minutes_csv = weekly_idle_minutes
 
         # Include today's ongoing segment (which may not be in CSV yet)
@@ -137,13 +137,110 @@ class ActivityTrackerApp:
     def reset_data_folder(self):
         self.force_save()
         reset_data_dir_to_default()
-""
+
+    def optimize_csv(self):
+        """Merge consecutive same-state segments with small gaps in CSV file."""
+        import csv
+        from datetime import datetime, date
+        from tracking import get_config_value
+
+        today = datetime.now().date()
+        segments_file = self.pm.get_log_file_path('activities', today.year)
+
+        if not os.path.exists(segments_file):
+            self.platform.show_alert(
+                i18n.t("OPTIMIZE_ERROR_NO_FILE"),
+                i18n.t("OPTIMIZE_ERROR_NO_FILE_MSG")
+            )
+            return
+
+        # Get idle threshold from config (default 300 sec)
+        idle_threshold = get_config_value("idle_threshold_seconds", 300)
+
+        # Read all segments from the year file
+        all_segments = []
+        original_count = 0
+        with open(segments_file, "r", newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                original_count += 1
+                try:
+                    parts = row['start'].split(':')
+                    start_dt = datetime(int(row['date'][:4]), int(row['date'][5:7]),
+                                      int(row['date'][8:10]),
+                                      int(parts[0]), int(parts[1]),
+                                      int(parts[2]) if len(parts) > 2 else 0)
+
+                    end_dt = None
+                    if row['end']:
+                        parts = row['end'].split(':')
+                        end_dt = datetime(int(row['date'][:4]), int(row['date'][5:7]),
+                                        int(row['date'][8:10]),
+                                        int(parts[0]), int(parts[1]),
+                                        int(parts[2]) if len(parts) > 2 else 0)
+
+                    all_segments.append(TimeSegment(
+                        state=row['state'],
+                        start_time=start_dt,
+                        end_time=end_dt
+                    ))
+                except (ValueError, TypeError):
+                    continue
+
+        if not all_segments:
+            self.platform.show_alert(
+                i18n.t("OPTIMIZE_EMPTY"),
+                i18n.t("OPTIMIZE_EMPTY_MSG")
+            )
+            return
+
+        # Merge segments
+        merged_segments = self.pm.merge_segments_to_save(all_segments, int(idle_threshold))
+        merged_count = len(merged_segments)
+        reduced_count = original_count - merged_count
+
+        # Write merged segments back to CSV
+        with open(segments_file, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=["date", "state", "start", "end", "duration_min", "duration_seconds"])
+            writer.writeheader()
+            for seg in merged_segments:
+                writer.writerow({
+                    "date": seg.start_time.strftime("%Y-%m-%d"),
+                    "state": seg.state,
+                    "start": seg.start_time.strftime("%H:%M:%S"),
+                    "end": seg.end_time.strftime("%H:%M:%S") if seg.end_time else "",
+                    "duration_min": seg.duration_minutes,
+                    "duration_seconds": int((seg.end_time - seg.start_time).total_seconds()) if seg.end_time else 0,
+                })
+
+        # Reload segments into memory
+        self.session.load_current_day_segments()
+
+        # Show success message with optimization results
+        msg = i18n.t("OPTIMIZE_SUCCESS_MSG").format(
+            original=original_count,
+            merged=merged_count,
+            reduced=reduced_count
+        )
+        success_msg = i18n.t("OPTIMIZE_SUCCESS")
+
+        # Bring app to front to ensure alert is visible
+        import time
+        time.sleep(0.1)  # Brief delay to ensure file write completes
+        self.platform.bring_app_to_front()
+
+        print(f"Optimization complete: {success_msg} - {msg}")
+        print(f"  Original: {original_count}, Merged: {merged_count}, Reduced: {reduced_count}")
+
+        # Show alert with brief delay
+        time.sleep(0.1)  # Brief delay before showing alert
+        self.platform.show_alert(success_msg, msg)
 
 if __name__ == "__main__":
     # 1. Acquire single-instance lock
     instance_lock = SingleInstanceLock()
     if not instance_lock.acquire():
-        platform = get_platform()
+        platform = PlatformABC()  # Use the platform for the alert
         platform.show_alert(
             "ActivityTracker is already running.",
             "Another instance of the application is already active. Please check your menu bar."
