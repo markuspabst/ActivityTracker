@@ -70,9 +70,9 @@ def test_csv_format_and_content(app_instance, pm, temp_data_dir):
     assert activities_file.exists()
     with open(activities_file, 'r') as f:
         lines = f.readlines()
-        assert lines[0].strip() == "date,state,start,end,duration_min" # FR-3.6 Header
+        assert lines[0].strip() == "date,state,start,end,duration_min,duration_seconds" # FR-3.6 Header with seconds
         assert len(lines) == 3
-        assert "2026-07-14,active,09:00,10:00,60" in lines[1]
+        assert "2026-07-14,active,09:00:00,10:00:00,60,3600" in lines[1]
 
     # All statistics are now calculated from segments - test get_minutes_for_day
     active, idle = pm.get_minutes_for_date(day_date)

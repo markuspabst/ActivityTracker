@@ -138,13 +138,32 @@ class SessionTracker:
         self.save_all_days()
 
     def save_all_days(self):
-        if self.current_segment and self.current_segment.end_time is None:
-            now = datetime.now().replace(microsecond=0)
-            self.current_segment.end_time = self.current_segment.start_time if now < self.current_segment.start_time else now
+        # Set end_time for all ongoing segments using current time
+        # This ensures we save accurate duration data
+        now = datetime.now().replace(microsecond=0)
+        for day_obj in self.days.values():
+            for seg in day_obj.segments:
+                if seg.end_time is None:
+                    seg.end_time = now
+
         self.pm.save_segments(self.days)
+
+        # Reset end_time for the current segment so it remains ongoing
+        if self.current_segment:
+            self.current_segment.end_time = None
+
+        # Clear completed segments but keep the current ongoing segment in memory
         current_date = datetime.now().date()
-        if current_date in self.days:
-            self.days = {current_date: self.days[current_date]}
+
+        if current_date in self.days and self.current_segment:
+            # Create a new Day object with only the current active segment (in progress)
+            # The segment keeps its start_time but end_time should be None for ongoing tracking
+            new_segment = TimeSegment(
+                state=self.current_segment.state,
+                start_time=self.current_segment.start_time,
+                end_time=None  # Keep it ongoing
+            )
+            self.days = {current_date: Day(date=current_date, segments=[new_segment])}
         else:
             self.days = {}
 

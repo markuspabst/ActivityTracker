@@ -74,9 +74,10 @@ class PersistenceManager:
                     segments_by_year[year].append({
                         "date": day.strftime("%Y-%m-%d"),
                         "state": segment.state,
-                        "start": segment.start_time.strftime("%H:%M"),
-                        "end": segment.end_time.strftime("%H:%M") if segment.end_time else "",
+                        "start": segment.start_time.strftime("%H:%M:%S"),
+                        "end": segment.end_time.strftime("%H:%M:%S") if segment.end_time else "",
                         "duration_min": segment.duration_minutes,
+                        "duration_seconds": int((segment.end_time - segment.start_time).total_seconds()) if segment.end_time else 0,
                     })
 
         # Write each year's segments
@@ -88,13 +89,19 @@ class PersistenceManager:
             if os.path.exists(path):
                 file_str = str(path)
                 if self._needs_refresh(file_str):
-                    existing_segments = {f"{row['date']} {row['start']}": row
-                                        for row in self._read_csv_cached(file_str)}
+                    for row in self._read_csv_cached(file_str):
+                        # Ensure duration_seconds field exists for old files
+                        if "duration_seconds" not in row:
+                            row["duration_seconds"] = row.get("duration_min", 0) * 60
+                        existing_segments[f"{row['date']} {row['start']}"] = row
                 else:
-                    existing_segments = {f"{row['date']} {row['start']}": row
-                                        for row in _file_cache.get(file_str, [])}
+                    for row in _file_cache.get(file_str, []):
+                        if "duration_seconds" not in row:
+                            row["duration_seconds"] = row.get("duration_min", 0) * 60
+                        existing_segments[f"{row['date']} {row['start']}"] = row
 
             # Merge new segments (newer overwrites older for same start time)
+            # Ensure all fields including duration_seconds are present
             for seg in new_segments:
                 key = f"{seg['date']} {seg['start']}"
                 existing_segments[key] = seg
@@ -102,7 +109,7 @@ class PersistenceManager:
             # Write sorted
             sorted_keys = sorted(existing_segments.keys())
             with open(path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=["date", "state", "start", "end", "duration_min"])
+                writer = csv.DictWriter(f, fieldnames=["date", "state", "start", "end", "duration_min", "duration_seconds"])
                 writer.writeheader()
                 for key in sorted_keys:
                     writer.writerow(existing_segments[key])
@@ -233,13 +240,13 @@ class PersistenceManager:
                         try:
                             parts = row['start'].split(':')
                             start_dt = datetime(target_date.year, target_date.month, target_date.day,
-                                              int(parts[0]), int(parts[1]))
+                                              int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 0)
 
                             end_dt = None
                             if row['end']:
                                 parts = row['end'].split(':')
                                 end_dt = datetime(target_date.year, target_date.month, target_date.day,
-                                                int(parts[0]), int(parts[1]))
+                                                int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 0)
 
                             segments.append(TimeSegment(state=row['state'], start_time=start_dt, end_time=end_dt))
                         except (ValueError, TypeError):
