@@ -124,6 +124,7 @@ class AppMenu:
             MenuItem(i18n.t("OPEN_DATA_FOLDER"), lambda: self.platform.open_file_manager(self.app.pm.get_data_dir())),
             MenuItem(i18n.t("SELECT_DATA_FOLDER"), self.app.select_data_folder, enabled=self.platform.supports_native_dialogs()),
             MenuItem(i18n.t("RESET_DATA_FOLDER"), self.app.reset_data_folder),
+            MenuItem(i18n.t("OPTIMIZE_CSV"), self.app.optimize_csv),
         )
 
         # Autostart

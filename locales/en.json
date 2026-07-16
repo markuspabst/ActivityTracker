@@ -40,5 +40,6 @@
   "LANGUAGE": "Language",
   "LANGUAGE_SYSTEM_DEFAULT": "System Default",
   "WEEK_ACTIVE": "Active this week: {value}",
-  "WEEK_IDLE": "Idle this week: {value}"
+  "WEEK_IDLE": "Idle this week: {value}",
+  "OPTIMIZE_CSV": "Optimize CSV"
 }
