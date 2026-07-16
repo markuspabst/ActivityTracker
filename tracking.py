@@ -156,14 +156,21 @@ class SessionTracker:
         current_date = datetime.now().date()
 
         if current_date in self.days and self.current_segment:
-            # Create a new Day object with only the current active segment (in progress)
-            # The segment keeps its start_time but end_time should be None for ongoing tracking
-            new_segment = TimeSegment(
-                state=self.current_segment.state,
-                start_time=self.current_segment.start_time,
-                end_time=None  # Keep it ongoing
-            )
-            self.days = {current_date: Day(date=current_date, segments=[new_segment])}
+            # Keep ALL segments but reset end_time for the current ongoing segment
+            # This preserves historical data for today while allowing the current segment to continue
+            updated_segments = []
+            for seg in self.days[current_date].segments:
+                if seg.start_time == self.current_segment.start_time:
+                    # This is the current segment - reset end_time for continued tracking
+                    updated_segments.append(TimeSegment(
+                        state=seg.state,
+                        start_time=seg.start_time,
+                        end_time=None
+                    ))
+                else:
+                    # Keep historical segments as-is
+                    updated_segments.append(seg)
+            self.days = {current_date: Day(date=current_date, segments=updated_segments)}
         else:
             self.days = {}
 
@@ -178,6 +185,7 @@ class SessionTracker:
         """
         Loads all segments for the current day from CSV into memory (self.days).
         This is called on startup to ensure historical data for today is present.
+        Also sets current_segment to the last ongoing segment if any.
         """
         today = datetime.now().date()
         segments_for_today = self.pm.read_segments_for_day(today)
@@ -193,6 +201,12 @@ class SessionTracker:
 
             # Re-sort segments by start_time to maintain order
             self.days[today].segments.sort(key=lambda seg: seg.start_time)
+
+            # Set current_segment to the last segment if it's still ongoing (end_time is None)
+            if self.days[today].segments:
+                last_segment = self.days[today].segments[-1]
+                if last_segment.end_time is None:
+                    self.current_segment = last_segment
 
     def set_locked(self, is_locked: bool):
         self.is_locked = is_locked
