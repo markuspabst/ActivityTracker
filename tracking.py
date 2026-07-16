@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from datetime import datetime, date, timedelta
-from typing import Any, Optional, List, Dict
+from typing import Any, Optional, List, Dict, Tuple
 from persistence import PersistenceManager
 from models import TimeSegment, Day
 
@@ -96,7 +97,6 @@ class SessionTracker:
 
     def on_tick(self, idle_time: float, idle_threshold: int):
         """Process a tick with consistent timestamp handling."""
-        # Use timestamps without microseconds for consistent rounding
         now = datetime.now().replace(microsecond=0)
         current_date = now.date()
 

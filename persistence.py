@@ -12,12 +12,42 @@ CONFIG_FILE_NAME = "activity_tracker_config.json"
 # Cache for frequently accessed data
 _file_cache: Dict[str, List[Dict]] = {}
 _cache_expiration: Dict[str, float] = {}
-_CACHE_TTL = 5.0  # seconds
+_cache_ttl: float = 3600.0  # 1 hour default, can be overridden
+
+# Weekly cache to avoid repeated reads - stores (week_start, active_min, idle_min, cache_time)
+_weekly_cache: Tuple[Optional[date], int, int, float] = (None, 0, 0, 0)
+
+# Module-level cache getter/setter functions for consistency
+def get_cache_ttl() -> float:
+    """Get current cache TTL."""
+    return _cache_ttl
+
+def set_cache_ttl(seconds: float):
+    """Set cache TTL to match save interval."""
+    global _cache_ttl
+    _cache_ttl = seconds
 
 class PersistenceManager:
     def __init__(self, data_dir_fn):
         self._get_data_dir = data_dir_fn
         self._path_cache: Dict[str, str] = {}
+
+    def get_weekly_minutes_cached(self, week_start_date: date) -> Tuple[int, int]:
+        """Get weekly minutes with caching to avoid repeated CSV reads."""
+        global _weekly_cache
+        current_time = time.time()
+
+        # Check cache
+        if (_weekly_cache[0] == week_start_date and
+            current_time - _weekly_cache[3] < _cache_ttl):
+            return _weekly_cache[1], _weekly_cache[2]
+
+        # Read fresh data
+        active, idle = self.get_weekly_minutes(week_start_date)
+
+        # Update cache
+        _weekly_cache = (week_start_date, active, idle, current_time)
+        return active, idle
 
     def get_log_file_path(self, prefix: str, year: int) -> Path:
         """Gets the path for a log file for a given year. Uses path cache."""
@@ -50,7 +80,7 @@ class PersistenceManager:
         """Check if cached data is stale."""
         import time
         current_time = time.time()
-        return current_time - _cache_expiration.get(path, 0) >= _CACHE_TTL
+        return current_time - _cache_expiration.get(path, 0) >= _cache_ttl
 
     def _invalidate_cache(self, path: str):
         """Invalidate cache for a specific file."""
@@ -171,6 +201,27 @@ class PersistenceManager:
         except (IOError, csv.Error):
             pass
         return False
+
+    def get_weekly_minutes_cached(self, week_start_date: date) -> Tuple[int, int]:
+        """
+        Get weekly minutes with caching to avoid repeated CSV reads.
+        Cache duration: 60 seconds
+        """
+        global _weekly_cache
+        import time
+        current_time = time.time()
+
+        # Check cache
+        if (_weekly_cache[0] == week_start_date and
+            current_time - _weekly_cache[3] < _CACHE_TTL):
+            return _weekly_cache[1], _weekly_cache[2]
+
+        # Read fresh data
+        active, idle = self.get_weekly_minutes(week_start_date)
+
+        # Update cache
+        _weekly_cache = (week_start_date, active, idle, current_time)
+        return active, idle
 
     def get_weekly_minutes(self, week_start_date: date) -> Tuple[int, int]:
         """

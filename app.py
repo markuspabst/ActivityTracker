@@ -76,7 +76,7 @@ class ActivityTrackerApp:
 
         week_start_date = today - timedelta(days=today.weekday())
         # Get weekly total from CSV
-        weekly_active_minutes, weekly_idle_minutes = self.pm.get_weekly_minutes(week_start_date)
+        weekly_active_minutes, weekly_idle_minutes = self.pm.get_weekly_minutes_cached(week_start_date)
         weekly_idle_minutes_csv = weekly_idle_minutes
 
         # Include today's ongoing segment (which may not be in CSV yet)
@@ -118,6 +118,9 @@ class ActivityTrackerApp:
     def set_save_interval(self, seconds):
         self.write_interval = int(seconds)
         set_config_value("save_interval_seconds", int(seconds))
+        # Update cache TTL to match save interval for consistent data
+        from persistence import set_cache_ttl
+        set_cache_ttl(float(seconds))
 
     def set_language(self, code):
         set_config_value("locale", code)
