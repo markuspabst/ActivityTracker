@@ -54,7 +54,6 @@ OPTIONS = {
 
 
 DATA_FILES = [
-    ("scripts", ("scripts/generate_dashboard.py",)),
     ("locales", ("locales/en.json", "locales/de.json"))
 ]
 

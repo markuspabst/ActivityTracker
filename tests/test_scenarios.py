@@ -65,22 +65,19 @@ def test_csv_format_and_content(app_instance, pm, temp_data_dir):
         mock_datetime.now.return_value = datetime(2026, 7, 14, 10, 30, 0)
         session.finalize_session()
 
-    # Check segments file
-    segments_file = pm.get_log_file_path('segments', 2026)
-    assert segments_file.exists()
-    with open(segments_file, 'r') as f:
+    # Check activities file
+    activities_file = pm.get_log_file_path('activities', 2026)
+    assert activities_file.exists()
+    with open(activities_file, 'r') as f:
         lines = f.readlines()
         assert lines[0].strip() == "date,state,start,end,duration_min" # FR-3.6 Header
         assert len(lines) == 3
         assert "2026-07-14,active,09:00,10:00,60" in lines[1]
 
-    # Check daily summary file
-    daily_file = pm.get_log_file_path('daily', 2026)
-    assert daily_file.exists()
-    with open(daily_file, 'r') as f:
-        lines = f.readlines()
-        assert lines[0].strip() == "date,active_min,idle_min,session_start,session_end" # FR-3.6 Header
-        assert "2026-07-14,60,30,09:00,10:00" in lines[1] # FR-3.3 (active 60, idle 30)
+    # All statistics are now calculated from segments - test get_minutes_for_day
+    active, idle = pm.get_minutes_for_date(day_date)
+    assert active == 60  # active 09:00-10:00
+    assert idle == 30    # idle 10:00-10:30
 
 
 def test_app_starts_tracking_immediately(pm):

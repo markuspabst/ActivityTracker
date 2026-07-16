@@ -73,11 +73,10 @@ class TestRequirements(unittest.TestCase):
 
     @pytest.mark.fr('FR-3')
     def test_fr_3_data_persistence(self):
-        with patch.object(self.app.pm, 'save_segments') as mock_save_segments, \
-             patch.object(self.app.pm, 'save_daily_summary') as mock_save_daily_summary:
+        with patch.object(self.app.pm, 'save_segments') as mock_save_segments:
             self.app.force_save()
             mock_save_segments.assert_called()
-            mock_save_daily_summary.assert_called()
+            # No longer saves separate daily summary
 
     @pytest.mark.fr('FR-4')
     def test_fr_4_configuration(self):

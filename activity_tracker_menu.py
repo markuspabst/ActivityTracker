@@ -31,33 +31,19 @@ class AppMenu:
     def stop(self):
         self.icon.stop()
 
-    def update_ui(self, is_idle, active_today, active_week, weekly_target):
+    def update_ui(self, is_idle, active_today, active_week, weekly_target, weekly_idle_week=None):
         today_date = datetime.now().date()
         today_data = self.app.session.days.get(today_date)
 
-        # Use the correctly calculated active_today value passed from app.py
+        # Use the correctly calculated active_today value passed from app.py (already in seconds)
         self._active_today_session = active_today
-        self._idle_today_session = today_data.idle_minutes if today_data else 0
+        # Convert idle_minutes to seconds to match active_today units
+        self._idle_today_session = (today_data.idle_minutes * 60) if today_data else 0
         self._session_start = today_data.session_start if today_data else None
 
+        # Use pre-calculated weekly values from app.py (includes ongoing segments)
         self._total_weekly_active = active_week
-
-        # Calculate weekly idle time, avoiding double-counting
-        week_start_date = today_date - timedelta(days=today_date.weekday())
-        current_week_idle_total_minutes = 0
-        for i in range(7):
-            day_in_week = week_start_date + timedelta(days=i)
-            if day_in_week < today_date:
-                # For past days in the week, read idle summary from CSV
-                _, idle_minutes_for_day = self.app.pm.read_daily_summary_for_day(day_in_week)
-                current_week_idle_total_minutes += idle_minutes_for_day
-            elif day_in_week == today_date:
-                # For today, use the current in-memory data
-                if today_data:
-                    current_week_idle_total_minutes += today_data.idle_minutes
-            # Future days (day_in_week > today_date) will contribute 0, which is correct
-
-        self._total_weekly_idle = current_week_idle_total_minutes * 60
+        self._total_weekly_idle = weekly_idle_week if weekly_idle_week is not None else 0
 
         # Update icon status and title
         status_emoji = get_status_icon(is_idle, active_today, self.app.target_work_seconds, active_week, weekly_target)
@@ -72,7 +58,7 @@ class AppMenu:
         # These yields use the pre-calculated values from the last UI update
         yield MenuItem(i18n.t("MENU_START_TIME", value=self._session_start.strftime("%H:%M") if self._session_start else "N/A"), None, enabled=False)
         yield MenuItem(i18n.t("MENU_ACTIVE", value=format_hours(self._active_today_session)), None, enabled=False)
-        yield MenuItem(i18n.t("MENU_IDLE", value=format_hours(self._idle_today_session * 60)), None, enabled=False)
+        yield MenuItem(i18n.t("MENU_IDLE", value=format_hours(self._idle_today_session)), None, enabled=False)
         yield Menu.SEPARATOR
 
         # Weekly Summary

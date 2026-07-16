@@ -66,7 +66,6 @@ class ActivityTrackerApp:
             self.session.save_all_days()
             self.last_write_time = time.time()
 
-        self.session.write_state(dirty=True)
         self.update_ui()
 
     def update_ui(self):
@@ -76,28 +75,28 @@ class ActivityTrackerApp:
         is_idle = self.session.current_segment.state == 'idle' if self.session.current_segment else False
 
         week_start_date = today - timedelta(days=today.weekday())
-        current_week_active_total_minutes = 0
+        # Get weekly total from CSV
+        weekly_active_minutes, weekly_idle_minutes = self.pm.get_weekly_minutes(week_start_date)
+        weekly_idle_minutes_csv = weekly_idle_minutes
 
-        for i in range(7):
-            day_in_week = week_start_date + timedelta(days=i)
-            if day_in_week < today:
-                # For past days in the week, read summary from CSV
-                active_minutes_for_day, _ = self.pm.read_daily_summary_for_day(day_in_week)
-                current_week_active_total_minutes += active_minutes_for_day
-            elif day_in_week == today:
-                # For today, use the current in-memory data
-                if current_day_data:
-                    current_week_active_total_minutes += (current_day_data.total_active_seconds() / 60)
-            # Future days (day_in_week > today) will contribute 0, which is correct
+        # Include today's ongoing segment (which may not be in CSV yet)
+        # The difference between in-memory total and CSV total is the ongoing time
+        today_csv_active, today_csv_idle = self.pm.get_minutes_for_date(today)
 
-        total_weekly_active = current_week_active_total_minutes * 60
+        # Calculate ongoing time for both active and idle
+        active_ongoing_seconds = active_today - (today_csv_active * 60)
+        idle_ongoing_minutes = (current_day_data.idle_minutes if current_day_data else 0) - today_csv_idle
+        idle_ongoing_seconds = idle_ongoing_minutes * 60
 
-        self.menu.update_ui(is_idle, active_today, total_weekly_active, self.weekly_target_seconds)
+        # Add ongoing seconds to weekly totals
+        total_weekly_active = (weekly_active_minutes * 60) + active_ongoing_seconds
+        total_weekly_idle = (weekly_idle_minutes_csv * 60) + idle_ongoing_seconds
+
+        self.menu.update_ui(is_idle, active_today, total_weekly_active, self.weekly_target_seconds, total_weekly_idle)
 
     def quit_app(self):
         self._running = False
         self.session.finalize_session()
-        self.session.mark_state_clean()
         self.menu.stop()
 
     def force_save(self):
@@ -129,13 +128,11 @@ class ActivityTrackerApp:
         if not folder:
             return
         self.force_save()
-        self.session.mark_state_clean()
         set_data_dir(folder)
         persist_data_dir(folder)
 
     def reset_data_folder(self):
         self.force_save()
-        self.session.mark_state_clean()
         reset_data_dir_to_default()
 ""
 

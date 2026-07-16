@@ -141,21 +141,7 @@ class SessionTracker:
         if self.current_segment and self.current_segment.end_time is None:
             now = datetime.now().replace(microsecond=0)
             self.current_segment.end_time = self.current_segment.start_time if now < self.current_segment.start_time else now
-        daily_summaries = {}
-        for day_date, day_obj in self.days.items():
-            if not day_obj.segments:
-                continue
-            sess_start = day_obj.session_start
-            sess_end = day_obj.session_end
-            daily_summaries[day_date] = {
-                "active_min": day_obj.active_minutes,
-                "idle_min": day_obj.idle_minutes,
-                "session_start": sess_start.strftime("%H:%M") if sess_start else "",
-                "session_end": sess_end.strftime("%H:%M") if sess_end else "",
-            }
-
         self.pm.save_segments(self.days)
-        self.pm.save_daily_summary(daily_summaries)
         current_date = datetime.now().date()
         if current_date in self.days:
             self.days = {current_date: self.days[current_date]}
@@ -163,75 +149,11 @@ class SessionTracker:
             self.days = {}
 
     def recover_from_crash(self):
-        state_file = os.path.join(self.pm.get_data_dir(), "activity_tracker_state.json")
-        if not os.path.exists(state_file):
-            return
-
-        with open(state_file, 'r') as f:
-            try:
-                state = json.load(f)
-            except json.JSONDecodeError:
-                return # Ignore corrupt state file
-
-        if state.get("dirty"):
-            last_segment_info = state.get("current_segment")
-            if last_segment_info:
-                # Always recover the current segment, regardless of last_active_time
-                segment_start_time = datetime.fromisoformat(last_segment_info["start_time"])
-                segment_date = segment_start_time.date()
-
-                if segment_date not in self.days:
-                    self.days[segment_date] = Day(date=segment_date)
-
-                # Handle both cases: with and without last_active_time
-                last_active_time_str = state.get("last_active_time")
-                if last_active_time_str:
-                    last_active_time = datetime.fromisoformat(last_active_time_str)
-
-                    if last_active_time.date() != segment_date:
-                        end_of_day = datetime.combine(segment_date, datetime.max.time())
-                        recovered_segment = TimeSegment(
-                            state=last_segment_info["state"],
-                            start_time=segment_start_time,
-                            end_time=end_of_day
-                        )
-                    else:
-                        recovered_segment = TimeSegment(
-                            state=last_segment_info["state"],
-                            start_time=segment_start_time,
-                            end_time=last_active_time
-                        )
-
-                    # Add the recovered segment and save historical data
-                    self.days[segment_date].segments.append(recovered_segment)
-
-                    # Save the recovered data without clearing memory (don't use save_all_days)
-                    daily_summaries = {}
-                    day_obj = self.days[segment_date]
-                    if day_obj.segments:
-                        sess_start = day_obj.session_start
-                        sess_end = day_obj.session_end
-                        daily_summaries[segment_date] = {
-                            "active_min": day_obj.active_minutes,
-                            "idle_min": day_obj.idle_minutes,
-                            "session_start": sess_start.strftime("%H:%M") if sess_start else "",
-                            "session_end": sess_end.strftime("%H:%M") if sess_end else "",
-                        }
-
-                    self.pm.save_segments({segment_date: day_obj})
-                    self.pm.save_daily_summary(daily_summaries)
-                else:
-                    # No last_active_time means the segment is still ongoing
-                    # Just restore it to memory without saving
-                    recovered_segment = TimeSegment(
-                        state=last_segment_info["state"],
-                        start_time=segment_start_time,
-                        end_time=None
-                    )
-                    self.days[segment_date].segments.append(recovered_segment)
-                    # Don't save ongoing segments - they're still in progress
-
-        self.mark_state_clean()
+        """
+        Load previously saved segments from CSV for the current day.
+        The JSON state file is no longer used - all data is in CSV.
+        """
+        pass  # No longer needed - data is loaded from CSV during initialization
 
     def load_current_day_segments(self):
         """
@@ -252,35 +174,6 @@ class SessionTracker:
 
             # Re-sort segments by start_time to maintain order
             self.days[today].segments.sort(key=lambda seg: seg.start_time)
-
-    def write_state(self, dirty: bool = True):
-        state_file = os.path.join(self.pm.get_data_dir(), "activity_tracker_state.json")
-        last_active_times = [
-            seg.end_time
-            for day in self.days.values()
-            for seg in day.segments
-            if seg.state == 'active' and seg.end_time
-        ]
-        last_active = max(last_active_times) if last_active_times else None
-
-        current_segment_info = None
-        if self.current_segment:
-            current_segment_info = {
-                "state": self.current_segment.state,
-                "start_time": self.current_segment.start_time.isoformat()
-            }
-
-        state = {
-            "dirty": dirty,
-            "timestamp": datetime.now().isoformat(),
-            "current_segment": current_segment_info,
-            "last_active_time": last_active.isoformat() if last_active else None
-        }
-        with open(state_file, 'w') as f:
-            json.dump(state, f, indent=2)
-
-    def mark_state_clean(self):
-        self.write_state(dirty=False)
 
     def set_locked(self, is_locked: bool):
         self.is_locked = is_locked
