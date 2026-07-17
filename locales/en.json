@@ -61,6 +61,8 @@
   "WEEK_TARGET_84H_MAX": "84h (maximum)",
   "GENERAL_SETTINGS": "General Settings",
   "GLOBAL_SETTINGS": "Global Settings",
+  "SETTINGS_SECTION_DAILY_DESC": "Workday targets and intervals",
+  "SETTINGS_SECTION_GLOBAL_DESC": "App-wide preferences",
   "SAVE_NOW": "Save Data Now",
   "OPTIMIZE_DATA_FILE": "Optimize Data File",
   "CHANGE_DATA_LOCATION": "Change Data Location...",

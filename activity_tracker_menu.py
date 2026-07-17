@@ -103,9 +103,9 @@ class AppMenu:
             yield MenuItem(i18n.t("WEEK_IDLE", value=format_hours(self._total_weekly_idle)), None, enabled=False)
 
         yield Menu.SEPARATOR
-
         yield MenuItem(i18n.t("GENERAL_SETTINGS"), self._generate_general_settings_menu())
         yield MenuItem(i18n.t("GLOBAL_SETTINGS"), self._generate_global_settings_menu())
+        yield Menu.SEPARATOR
         yield MenuItem(i18n.t("QUIT"), self.app.quit_app)
 
     def _create_daily_settings_submenu(self):
@@ -202,9 +202,9 @@ class AppMenu:
         # Create submenu for Save Interval
         save_interval_submenu = Menu(*save_interval_menu_items)
 
-        # Main daily settings menu
-        # Add separators for cleaner organization
+        # Main daily settings menu with description
         return Menu(
+            MenuItem(i18n.t("SETTINGS_SECTION_DAILY_DESC"), None, enabled=False),
             MenuItem(i18n.t("DAILY_TARGET"), daily_target_submenu),
             MenuItem(i18n.t("WEEKLY_TARGET"), weekly_target_submenu),
             Menu.SEPARATOR,
@@ -247,8 +247,9 @@ class AppMenu:
         autostart_item = MenuItem(i18n.t("AUTOSTART_ENABLED"), self._toggle_autostart,
                                  checked=lambda item: self.platform.autostart_installed())
 
-        # Main global settings menu
+        # Main global settings menu with description
         return Menu(
+            MenuItem(i18n.t("SETTINGS_SECTION_GLOBAL_DESC"), None, enabled=False),
             MenuItem(i18n.t("LANGUAGE"), language_submenu),
             Menu.SEPARATOR,
             MenuItem(i18n.t("DATA_FOLDER"), data_folder_menu),

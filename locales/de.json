@@ -61,6 +61,8 @@
   "WEEK_TARGET_84H_MAX": "84h (Maximum)",
   "GENERAL_SETTINGS": "Allgemeine Einstellungen",
   "GLOBAL_SETTINGS": "Globale Einstellungen",
+  "SETTINGS_SECTION_DAILY_DESC": "Tägliche Zielwerte und Intervalle",
+  "SETTINGS_SECTION_GLOBAL_DESC": "App-weite Einstellungen",
   "SAVE_NOW": "Daten jetzt speichern",
   "OPTIMIZE_DATA_FILE": "Datendatei optimieren",
   "CHANGE_DATA_LOCATION": "Datenort ändern...",
