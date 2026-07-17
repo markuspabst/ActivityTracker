@@ -18,3 +18,4 @@ pyobjc-framework-Quartz==12.2.1
 
 # Testing
 pytest==9.1.1
+pytest-cov==7.1.0

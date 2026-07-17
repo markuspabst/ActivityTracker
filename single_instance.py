@@ -48,11 +48,15 @@ class SingleInstanceLock:
             # Another instance is holding the lock.
             if self.fp:
                 self.fp.close()
+                self.fp = None
             return False
 
     def release(self):
         """
         Releases the lock and cleans up the lock file.
+
+        Safe to call multiple times (e.g. manually and again via the atexit
+        handler registered in acquire()).
         """
         if not fcntl or not self.fp:
             return
@@ -64,4 +68,7 @@ class SingleInstanceLock:
         except Exception as e:
             # Log errors on release, but don't crash the exit sequence.
             print(f"Error releasing single instance lock: {e}", file=sys.stderr)
+        finally:
+            # Null out so a later release() (atexit) becomes a no-op.
+            self.fp = None
 

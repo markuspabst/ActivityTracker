@@ -250,6 +250,28 @@ def test_session_tracker_load_current_day_segments_with_ongoing_segment(pm, temp
     assert s.days[today].active_minutes >= 60
 
 
+def test_session_tracker_load_current_day_segments_sets_ongoing_current(pm, temp_data_dir, patch_all_datetimes):
+    from persistence import PersistenceManager
+    from tracking import SessionTracker
+
+    pm_real = PersistenceManager(lambda: str(temp_data_dir))
+    today = date(2026, 7, 15)
+
+    day_data_to_save = Day(date=today)
+    day_data_to_save.segments.append(TimeSegment(state='active', start_time=datetime(2026, 7, 15, 7, 0, 0), end_time=datetime(2026, 7, 15, 7, 30, 0)))
+    # Last segment is ongoing (no end_time)
+    day_data_to_save.segments.append(TimeSegment(state='idle', start_time=datetime(2026, 7, 15, 8, 0, 0)))
+    pm_real.save_segments({today: day_data_to_save})
+
+    s = SessionTracker(pm_real)
+    patch_all_datetimes.set_now(datetime(2026, 7, 15, 10, 0, 0))
+    s.load_current_day_segments()
+
+    assert s.current_segment is not None
+    assert s.current_segment.end_time is None
+    assert s.current_segment.start_time == datetime(2026, 7, 15, 8, 0, 0)
+
+
 # ============================================================
 #  DAILY AND WEEKLY LOGGING TESTS
 # ============================================================

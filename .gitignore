@@ -39,6 +39,8 @@ version_generated.py
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+coverage.txt
 
 # Runtime data
 activity_tracker_log.csv
