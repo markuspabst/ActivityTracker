@@ -171,6 +171,41 @@ def test_persistence_manager_get_minutes_for_day(pm, temp_data_dir):
 
 
 # ============================================================
+#  SEGMENT MERGING TESTS
+# ============================================================
+
+def test_merge_segments_to_save_keeps_different_states():
+    segs = [
+        TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=datetime(2026, 7, 1, 9, 30, 0)),
+        TimeSegment(state='idle', start_time=datetime(2026, 7, 1, 9, 30, 0), end_time=datetime(2026, 7, 1, 10, 0, 0)),
+    ]
+    merged = PersistenceManager.merge_segments_to_save(segs, 300)
+    assert len(merged) == 2
+
+def test_merge_segments_to_save_merges_small_gap():
+    segs = [
+        TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=datetime(2026, 7, 1, 9, 30, 0)),
+        TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 31, 0), end_time=datetime(2026, 7, 1, 10, 0, 0)),
+    ]
+    merged = PersistenceManager.merge_segments_to_save(segs, 300)
+    assert len(merged) == 1
+    assert merged[0].end_time == datetime(2026, 7, 1, 10, 0, 0)
+
+def test_merge_segments_to_save_keeps_large_gap():
+    segs = [
+        TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=datetime(2026, 7, 1, 9, 30, 0)),
+        TimeSegment(state='active', start_time=datetime(2026, 7, 1, 10, 30, 0), end_time=datetime(2026, 7, 1, 11, 0, 0)),
+    ]
+    merged = PersistenceManager.merge_segments_to_save(segs, 300)
+    assert len(merged) == 2
+
+def test_merge_segments_to_save_single_segment():
+    segs = [TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=datetime(2026, 7, 1, 9, 30, 0))]
+    merged = PersistenceManager.merge_segments_to_save(segs, 300)
+    assert len(merged) == 1
+
+
+# ============================================================
 #  CSV LOADING TESTS
 # ============================================================
 

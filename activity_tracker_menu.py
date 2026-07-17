@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from pystray import Icon, Menu, MenuItem
 
@@ -133,7 +133,7 @@ class AppMenu:
         for hours, display_text in daily_presets:
             daily_target_menu_items.append(MenuItem(display_text,
                 (lambda h_val: lambda *args: self.app.set_target(h_val * 3600))(hours),
-                checked=lambda item, h_val=hours: self.app.target_work_seconds == h_val * 3600))
+                checked=lambda _item, h_val=hours: self.app.target_work_seconds == h_val * 3600))
         daily_target_menu_items.extend([
             Menu.SEPARATOR,
             MenuItem(i18n.t("SET_CUSTOM_VALUE"),
@@ -153,7 +153,7 @@ class AppMenu:
         for hours, display_text in weekly_presets:
             weekly_target_menu_items.append(MenuItem(display_text,
                 (lambda h_val: lambda *args: self.app.set_weekly_target(h_val * 3600))(hours),
-                checked=lambda item, h_val=hours: self.app.weekly_target_seconds == h_val * 3600))
+                checked=lambda _item, h_val=hours: self.app.weekly_target_seconds == h_val * 3600))
         weekly_target_menu_items.extend([
             Menu.SEPARATOR,
             MenuItem(i18n.t("SET_CUSTOM_VALUE"),
@@ -168,7 +168,7 @@ class AppMenu:
         for m in idle_presets:
             idle_menu_items.append(MenuItem(f'{m} min',
                 (lambda m_val: lambda *args: self.app.set_idle_threshold(m_val * 60))(m),
-                checked=lambda item, m_val=m: self.app.idle_threshold == m_val * 60))
+                checked=lambda _item, m_val=m: self.app.idle_threshold == m_val * 60))
         idle_menu_items.extend([
             Menu.SEPARATOR,
             MenuItem(i18n.t("SET_CUSTOM_VALUE"),
@@ -183,7 +183,7 @@ class AppMenu:
         for m in save_presets:
             save_interval_menu_items.append(MenuItem(f'{m} min',
                 (lambda m_val: lambda *args: self.app.set_save_interval(m_val * 60))(m),
-                checked=lambda item, m_val=m: self.app.write_interval == m_val * 60))
+                checked=lambda _item, m_val=m: self.app.write_interval == m_val * 60))
         save_interval_menu_items.extend([
             Menu.SEPARATOR,
             MenuItem(i18n.t("SET_CUSTOM_VALUE"),
@@ -208,11 +208,11 @@ class AppMenu:
         lang_menu_items = []
         lang_menu_items.append(MenuItem(i18n.t("LANGUAGE_SYSTEM_DEFAULT"),
             lambda *args: self.app.set_language(None),
-            checked=lambda item: i18n._lang is None))
+            checked=lambda _item: i18n._lang is None))
         for code in i18n.available_locales():
             lang_menu_items.append(MenuItem(code.upper(),
                 (lambda c: lambda *args: self.app.set_language(c))(code),
-                checked=lambda item, c=code: i18n._lang == c))
+                checked=lambda _item, c=code: i18n._lang == c))
         language_submenu = Menu(*lang_menu_items)
 
         data_folder_menu = Menu(
@@ -223,11 +223,11 @@ class AppMenu:
                    enabled=self.platform.supports_native_dialogs()),
             MenuItem(i18n.t("RESET_DATA_FOLDER"), self.app.reset_data_folder),
             Menu.SEPARATOR,
-            MenuItem(i18n.t("OPTIMIZE_DATA_FILE"), lambda item: self.app.optimize_csv()),
+            MenuItem(i18n.t("OPTIMIZE_DATA_FILE"), lambda _item: self.app.optimize_csv()),
         )
 
         autostart_item = MenuItem(i18n.t("AUTOSTART_ENABLED"), self._toggle_autostart,
-                                 checked=lambda item: self.platform.autostart_installed())
+                                 checked=lambda _item: self.platform.autostart_installed())
 
         return Menu(
             MenuItem(i18n.t("LANGUAGE"), language_submenu),

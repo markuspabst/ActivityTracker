@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, date, timedelta
-from typing import Any, Optional, List, Dict, Tuple
+from datetime import datetime, date
+from typing import Optional, Dict
 from persistence import PersistenceManager
 from models import TimeSegment, Day
 
@@ -21,11 +21,6 @@ import platformdirs
 # ------------------------------------------------------------
 
 APP_NAME = "ActivityTracker"
-
-DEFAULT_TARGET_SECONDS = 8 * 3600
-DEFAULT_WEEKLY_TARGET_SECONDS = 40 * 3600
-DEFAULT_IDLE_THRESHOLD = 300
-DEFAULT_SAVE_INTERVAL_SECONDS = 3600
 
 # ------------------------------------------------------------
 # PATHS

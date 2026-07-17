@@ -86,13 +86,7 @@ Access via system tray icon → Settings:
 
 Settings → **Optimize CSV**
 
-Merges consecutive same-state segments with gaps < 50% of idle threshold.
-
-### Auto-Optimization
-
-Automatically triggers after saves when:
-- More than 15 segments exist for the current day
-- 24+ hours have passed since last optimization
+Merges consecutive same-state segments with gaps < 50% of the idle threshold. This is a manual action; the data is otherwise written as-is on each save.
 
 ## Testing
 
@@ -122,7 +116,8 @@ pytest tests/test_scenarios.py -v     # Integration scenarios
 
 - Python 3.9+
 - platformdirs
-- i18n
+- pystray, Pillow (system tray icon)
+- On macOS: pyobjc (`pyobjc-core`, `pyobjc-framework-Cocoa`, `pyobjc-framework-Quartz`) for native idle detection, dialogs, and autostart
 
 ## License
 

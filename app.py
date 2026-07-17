@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 import threading
 import time
 from datetime import datetime, timedelta
@@ -77,7 +78,6 @@ class ActivityTrackerApp:
         week_start_date = today - timedelta(days=today.weekday())
         # Get weekly total from CSV
         weekly_active_minutes, weekly_idle_minutes = self.pm.get_weekly_minutes(week_start_date)
-        weekly_idle_minutes_csv = weekly_idle_minutes
 
         # Include today's ongoing segment (which may not be in CSV yet)
         # The difference between in-memory total and CSV total is the ongoing time
@@ -90,7 +90,7 @@ class ActivityTrackerApp:
 
         # Add ongoing seconds to weekly totals
         total_weekly_active = (weekly_active_minutes * 60) + active_ongoing_seconds
-        total_weekly_idle = (weekly_idle_minutes_csv * 60) + idle_ongoing_seconds
+        total_weekly_idle = (weekly_idle_minutes * 60) + idle_ongoing_seconds
 
         self.menu.update_ui(is_idle, active_today, total_weekly_active, self.weekly_target_seconds, total_weekly_idle)
 
@@ -118,9 +118,6 @@ class ActivityTrackerApp:
     def set_save_interval(self, seconds):
         self.write_interval = int(seconds)
         set_config_value("save_interval_seconds", int(seconds))
-        # Update cache TTL to match save interval for consistent data
-        from persistence import set_cache_ttl
-        set_cache_ttl(float(seconds))
 
     def set_language(self, code):
         set_config_value("locale", code)
@@ -141,7 +138,7 @@ class ActivityTrackerApp:
     def optimize_csv(self):
         """Merge consecutive same-state segments with small gaps in CSV file."""
         import csv
-        from datetime import datetime, date
+        from datetime import datetime
         from tracking import get_config_value
 
         today = datetime.now().date()
@@ -240,7 +237,7 @@ if __name__ == "__main__":
     # 1. Acquire single-instance lock
     instance_lock = SingleInstanceLock()
     if not instance_lock.acquire():
-        platform = PlatformABC()  # Use the platform for the alert
+        platform = get_platform()  # Use the platform for the alert
         platform.show_alert(
             "ActivityTracker is already running.",
             "Another instance of the application is already active. Please check your menu bar."

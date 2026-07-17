@@ -1,7 +1,6 @@
 import pytest
-from datetime import datetime, date, timedelta
-from unittest.mock import Mock, patch, MagicMock
-import tempfile
+from datetime import datetime, date
+from unittest.mock import MagicMock
 import os
 
 # Mock the platform layer before importing the app
@@ -65,3 +64,17 @@ def test_csv_format(pm, tmp_path):
     assert "active" in lines[1]
     assert "60" in lines[1]  # duration_min
     assert "3600" in lines[1]  # duration_seconds
+
+
+def test_set_save_interval_no_broken_cache_call(monkeypatch):
+    """set_save_interval must not reference the removed module-level set_cache_ttl."""
+    import app as app_module
+
+    monkeypatch.setattr(app_module, "get_platform", lambda: MagicMock())
+    monkeypatch.setattr(app_module, "set_config_value", lambda *args, **kwargs: None)
+
+    app = ActivityTrackerApp()
+    # Previously this raised ImportError calling a non-existent persistence.set_cache_ttl
+    app.set_save_interval(120)
+    assert app.write_interval == 120
+

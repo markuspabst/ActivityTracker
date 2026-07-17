@@ -62,9 +62,6 @@ except Exception:
     _CAN_RUN_ON_MAIN = False
 
 
-from platform_layer import PlatformABC
-
-
 APP_NAME = "ActivityTracker"
 
 LAUNCH_AGENT_LABEL = "com.markus.activitytracker"
@@ -80,7 +77,6 @@ LAUNCH_AGENT_ERR = os.path.join(LOG_DIR, "activitytracker.err.log")
 # ------------------------------------------------------------
 try:
     from Foundation import NSObject
-    import objc
 
     class _SliderHandler(NSObject):
         """Receives NSSlider action messages and updates the value label."""

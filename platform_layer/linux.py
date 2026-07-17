@@ -38,7 +38,7 @@ class LinuxPlatform(PlatformABC):
 
         # Method 1: X11 screensaver extension (requires python-xlib)
         try:
-            from Xlib import X, display
+            from Xlib import display
             from Xlib.ext import screensaver
             d = display.Display()
             info = screensaver.Info(d, d.screen().root)
@@ -52,7 +52,6 @@ class LinuxPlatform(PlatformABC):
             except (FileNotFoundError, ValueError, subprocess.CalledProcessError):
                 # Method 3: logind via dbus (Wayland)
                 try:
-                    import math
                     output = subprocess.check_output(
                         ["loginctl", "show-session", "$(loginctl | grep $(whoami) | awk '{print $1}' | head -1)", "-p", "IdleSinceHint"],
                         shell=True, stderr=subprocess.DEVNULL,
@@ -139,10 +138,7 @@ class LinuxPlatform(PlatformABC):
     def _ensure_desktop_file(self) -> Path:
         AUTOSTART_DIR.mkdir(parents=True, exist_ok=True)
 
-        if getattr(sys, "frozen", False):
-            exe = sys.executable
-        else:
-            exe = sys.executable
+        exe = sys.executable
 
         desktop_content = (
             "[Desktop Entry]\n"

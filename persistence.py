@@ -2,12 +2,11 @@ import csv
 import os
 from datetime import datetime, date, timedelta
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple
 from models import TimeSegment
 
 # Constants
 ACTIVITIES_LOG_PREFIX = "activities"
-CONFIG_FILE_NAME = "activity_tracker_config.json"
 
 
 class PersistenceManager:
@@ -22,10 +21,6 @@ class PersistenceManager:
         if key not in self._path_cache:
             self._path_cache[key] = str(Path(self._get_data_dir()) / f"{prefix}-{year}.csv")
         return Path(self._path_cache[key])
-
-    def set_cache_ttl(self, seconds: float) -> None:
-        """Set cache TTL to match save interval (if using cache)."""
-        pass  # No cache used in simplified version
 
     def get_weekly_minutes(self, week_start_date: date) -> Tuple[int, int]:
         end_of_week = week_start_date + timedelta(days=6)
