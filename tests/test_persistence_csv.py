@@ -536,22 +536,22 @@ def test_merge_segments_to_save_single_segment():
     assert len(PersistenceManager.merge_segments_to_save(segs, 300)) == 1
 
 
-def test_merge_segments_to_save_uses_idle_threshold_half():
-    """Gap is compared against idle_threshold/2."""
-    # Gap of 150s, threshold 300 -> 150 <= 150 -> merge
+def test_merge_segments_to_save_uses_idle_threshold():
+    """Gap is compared against the full idle_threshold."""
+    # Gap of 300s, threshold 300 -> 300 <= 300 -> merge
     segs = [
         TimeSegment(state="active", start_time=datetime(2026, 7, 1, 9, 0, 0),
                     end_time=datetime(2026, 7, 1, 9, 0, 0)),
-        TimeSegment(state="active", start_time=datetime(2026, 7, 1, 9, 2, 30),
-                    end_time=datetime(2026, 7, 1, 9, 5, 0)),
+        TimeSegment(state="active", start_time=datetime(2026, 7, 1, 9, 5, 0),
+                    end_time=datetime(2026, 7, 1, 9, 7, 30)),
     ]
     assert len(PersistenceManager.merge_segments_to_save(segs, 300)) == 1
 
-    # Gap of 151s, threshold 300 -> 151 > 150 -> keep separate
+    # Gap of 301s, threshold 300 -> 301 > 300 -> keep separate
     segs2 = [
         TimeSegment(state="active", start_time=datetime(2026, 7, 1, 9, 0, 0),
                     end_time=datetime(2026, 7, 1, 9, 0, 0)),
-        TimeSegment(state="active", start_time=datetime(2026, 7, 1, 9, 2, 31),
-                    end_time=datetime(2026, 7, 1, 9, 5, 0)),
+        TimeSegment(state="active", start_time=datetime(2026, 7, 1, 9, 5, 1),
+                    end_time=datetime(2026, 7, 1, 9, 7, 30)),
     ]
     assert len(PersistenceManager.merge_segments_to_save(segs2, 300)) == 2

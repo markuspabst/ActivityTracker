@@ -44,11 +44,6 @@ class ActivityTrackerApp:
         self._running = False
         self._save_failure_shown = False
 
-        # Auto-optimize throttle state (persisted across restarts).
-        self.auto_optimize_threshold = 50  # only compact after this many new segments
-        self.last_optimize_time = float(get_config_value("last_optimize_timestamp", 0))
-        self.optimize_baseline = sum(len(d.segments) for d in self.session.days.values())
-
     def run(self):
         self._running = True
         self.menu = AppMenu(self)
@@ -79,12 +74,12 @@ class ActivityTrackerApp:
         if time.time() - self.last_write_time >= self.write_interval:
             try:
                 self.session.save_all_days()
+                self.optimize_csv(silent=True)
                 self.last_write_time = time.time()
                 self._clear_save_failure()
             except PersistenceWriteError:
                 self._alert_save_failure()
 
-        self.maybe_auto_optimize()
         self.update_ui()
 
     def _alert_save_failure(self):
@@ -100,38 +95,6 @@ class ActivityTrackerApp:
     def _clear_save_failure(self):
         self._save_failure_shown = False
         self.update_ui()
-
-    def maybe_auto_optimize(self):
-        """Periodically compact the activity log, but only when it actually grew.
-
-        Two gates prevent re-optimizing already-optimized data:
-          * time   — at most once per ``write_interval`` (same cadence as saves)
-          * data   — only if the in-memory segment count increased by at least
-                     ``auto_optimize_threshold`` since the last run (or startup)
-        The last-run timestamp is persisted in the config so the throttle also
-        applies across app restarts.
-        """
-        now = time.time()
-        if now - self.last_optimize_time < self.write_interval:
-            return
-
-        total_segments = sum(len(d.segments) for d in self.session.days.values())
-        if total_segments - self.optimize_baseline < self.auto_optimize_threshold:
-            # Nothing meaningful changed since last optimize; just bump the
-            # timestamp so we keep checking but never re-process stale data.
-            self.last_optimize_time = now
-            self._persist_optimize_time()
-            return
-
-        self.optimize_csv(silent=True)
-        # Re-establish the baseline from the (now compacted) log so we don't
-        # immediately re-optimize on the next tick.
-        self.optimize_baseline = sum(len(d.segments) for d in self.session.days.values())
-        self.last_optimize_time = now
-        self._persist_optimize_time()
-
-    def _persist_optimize_time(self):
-        set_config_value("last_optimize_timestamp", int(self.last_optimize_time))
 
     def update_ui(self):
         today = datetime.now().date()
@@ -171,6 +134,7 @@ class ActivityTrackerApp:
     def force_save(self):
         try:
             self.session.save_all_days()
+            self.optimize_csv(silent=True)
             self.last_write_time = time.time()
             self._clear_save_failure()
         except PersistenceWriteError:
@@ -209,10 +173,12 @@ class ActivityTrackerApp:
         reset_data_dir_to_default()
 
     def optimize_csv(self, silent: bool = False):
-        """Merge consecutive same-state segments with small gaps in CSV file.
+        """Merge consecutive same-state segments with small gaps in the CSV file.
 
-        When *silent* is True (used by the automatic throttled optimizer) no
-        alert is shown and the app is not brought to the front.
+        Optimization runs automatically after every successful save (see
+        ``update`` / ``force_save``), so the on-disk log stays compact without
+        user action. When *silent* is True no alert is shown and the app is not
+        brought to the front.
         """
         import csv
         from datetime import datetime

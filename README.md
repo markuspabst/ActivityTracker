@@ -12,7 +12,7 @@ A lightweight system tray application that tracks your active and idle time usin
 - **Crash Recovery**: An open segment left by an abnormal shutdown is finalized to the last saved write time on next launch
 - **Save-Failure Resilience**: On a disk-write failure, data is retained in memory, the user is alerted once, and saving retries on the next interval
 - **Daily & Weekly Targets**: Set and monitor work goals
-- **Manual Optimization**: Merge consecutive same-state segments via Settings menu
+- **Automatic CSV Optimization**: Consecutive same-state segments are merged automatically on every save, keeping the log compact with no manual action
 - **Idle Threshold**: Configurable idle detection period (default: 5 minutes)
 - **Save Interval**: Configurable data persistence interval
 - **Language Support**: Multi-language (English, German)
@@ -91,11 +91,11 @@ Access via system tray icon → Settings:
 
 ## CSV Optimization
 
-### Manual Optimization
-
-Settings → **Optimize CSV**
-
-Merges consecutive same-state segments with gaps < 50% of the idle threshold. This is a manual action; the data is otherwise written as-is on each save.
+The activity log is optimized automatically: after every successful save, consecutive
+same-state segments whose gaps are within the idle threshold are merged into a
+single segment. This runs on the same cadence as the save interval, so the on-disk
+data stays compact without any manual action. (The `optimize_csv` routine is also
+available programmatically if a one-off merge is ever needed.)
 
 ## Testing
 

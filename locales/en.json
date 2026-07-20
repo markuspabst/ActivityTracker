@@ -66,7 +66,6 @@
   "SAVE_NOW": "Save Data Now",
   "SAVE_ERROR_TITLE": "Could Not Save Data",
   "SAVE_ERROR_MSG": "Tracking data could not be written to disk (full disk or missing folder). Your data is safely held in memory and will be saved automatically once the problem is resolved. Tracking continues.",
-  "OPTIMIZE_DATA_FILE": "Optimize Data File",
   "CHANGE_DATA_LOCATION": "Change Data Location...",
   "RESET_FACTORY_DEFAULT": "Reset to Factory Default"
 }

@@ -199,7 +199,7 @@ class PersistenceManager:
 
     @staticmethod
     def merge_segments_to_save(segments: List[TimeSegment], idle_threshold: int = 300) -> List[TimeSegment]:
-        """Merge consecutive same-state segments with small gaps."""
+        """Merge consecutive same-state segments whose gap is within idle_threshold."""
         if len(segments) <= 1:
             return segments
         merged: List[TimeSegment] = [segments[0]]
@@ -223,7 +223,7 @@ class PersistenceManager:
                         prev.end_time = seg.end_time
                     continue
                 gap = (seg.start_time - prev.end_time).total_seconds()
-                if gap <= idle_threshold / 2:
+                if gap <= idle_threshold:
                     prev.end_time = seg.end_time or datetime.now().replace(microsecond=0)
                     continue
             merged.append(seg)

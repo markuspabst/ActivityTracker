@@ -322,42 +322,24 @@ def test_merge_segments_to_save_overlap_extends_to_later_end():
 
 
 # ------------------------------------------------------------
-# Auto-optimize throttle (time + data-change gates)
+# Automatic optimization (runs after every successful save)
 # ------------------------------------------------------------
 
-def test_maybe_auto_optimize_skips_when_recent(app, monkeypatch):
+def test_update_optimizes_csv_after_save(app):
+    app.write_interval = 0
+    app.last_write_time = 0.0  # force the save branch
+    app.session.on_tick = MagicMock()
+    app.session.save_all_days = MagicMock()
     app.optimize_csv = MagicMock()
-    app.last_optimize_time = time.time()  # just ran -> within throttle window
-    app.optimize_baseline = 0
-    # Plenty of new segments, but not enough time elapsed -> must NOT optimize.
-    app.session.days[date.today()] = Day(date.today(), segments=[
-        TimeSegment("active", datetime(2026, 7, 15, 9, 0, 0), datetime(2026, 7, 15, 9, 1, 0)),
-    ] * 100)
-    app.maybe_auto_optimize()
-    app.optimize_csv.assert_not_called()
-
-
-def test_maybe_auto_optimize_skips_when_no_new_data(app, monkeypatch):
-    app.optimize_csv = MagicMock()
-    app.last_optimize_time = 0  # long ago -> time gate open
-    app.optimize_baseline = 1000  # already optimized 1000 segments
-    app.session.days.clear()  # nothing new since
-    app.maybe_auto_optimize()
-    app.optimize_csv.assert_not_called()
-
-
-def test_maybe_auto_optimize_runs_when_time_and_data(app, monkeypatch):
-    app.optimize_csv = MagicMock()
-    app.last_optimize_time = 0  # long ago -> time gate open
-    app.optimize_baseline = 0
-    app.session.days[date.today()] = Day(date.today(), segments=[
-        TimeSegment("active", datetime(2026, 7, 15, 9, i, 0), datetime(2026, 7, 15, 9, i, 30))
-        for i in range(60)  # 60 new segments -> >= threshold
-    ])
-    app.maybe_auto_optimize()
+    app.update()
     app.optimize_csv.assert_called_once_with(silent=True)
-    # Baseline updated so a subsequent call (with no new data) won't re-optimize
-    assert app.optimize_baseline == 60
+
+
+def test_force_save_optimizes_csv(app):
+    app.session.save_all_days = MagicMock()
+    app.optimize_csv = MagicMock()
+    app.force_save()
+    app.optimize_csv.assert_called_once_with(silent=True)
 
 
 

@@ -66,7 +66,6 @@
   "SAVE_NOW": "Daten jetzt speichern",
   "SAVE_ERROR_TITLE": "Daten konnten nicht gespeichert werden",
   "SAVE_ERROR_MSG": "Die Tracking-Daten konnten nicht auf die Festplatte geschrieben werden (volle Festplatte oder fehlender Ordner). Ihre Daten bleiben sicher im Arbeitsspeicher und werden automatisch gespeichert, sobald das Problem behoben ist. Das Tracking läuft weiter.",
-  "OPTIMIZE_DATA_FILE": "Datendatei optimieren",
   "CHANGE_DATA_LOCATION": "Datenort ändern...",
   "RESET_FACTORY_DEFAULT": "Auf Werkseinstellungen zurücksetzen"
 }

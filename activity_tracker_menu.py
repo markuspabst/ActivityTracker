@@ -226,8 +226,6 @@ class AppMenu:
             MenuItem(i18n.t("SELECT_DATA_FOLDER"), self.app.select_data_folder,
                    enabled=self.platform.supports_native_dialogs()),
             MenuItem(i18n.t("RESET_DATA_FOLDER"), self.app.reset_data_folder),
-            Menu.SEPARATOR,
-            MenuItem(i18n.t("OPTIMIZE_DATA_FILE"), lambda _item: self.app.optimize_csv()),
         )
 
         autostart_item = MenuItem(i18n.t("AUTOSTART_ENABLED"), self._toggle_autostart,
