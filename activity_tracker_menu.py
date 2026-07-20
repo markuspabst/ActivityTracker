@@ -63,19 +63,18 @@ class AppMenu:
         self.icon.update_menu()
 
     def _create_progress_bar(self, percentage: float, current_value: str, target_value: str) -> str:
-        """Create a progress bar: current | bar | target."""
+        """Create a progress bar: current | bar | target (percentage).
+
+        The bar caps at full width once the target is reached; the numeric
+        percentage still reports the true value (e.g. 112%) so exceeding the
+        target stays visible.
+        """
         pct = max(0, min(100, percentage))
         bar_width = 17
         filled = int(bar_width * pct / 100)
         empty = bar_width - filled
-
-        # Use a dark block for progress and a light block for empty space
-        # Both render at the same width
-        filled_char = "█"
-        empty_char = "░"
-
-        bar = filled_char * filled + empty_char * empty
-        return f"{current_value} │{bar}│ {target_value}"
+        bar = "█" * filled + "░" * empty
+        return f"{current_value} │{bar}│ {target_value} ({percentage:.0f}%)"
 
     def _generate_menu_items(self):
         # Today progress
