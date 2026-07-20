@@ -83,9 +83,11 @@ class ActivityTrackerApp:
         # The difference between in-memory total and CSV total is the ongoing time
         today_csv_active, today_csv_idle = self.pm.get_minutes_for_date(today)
 
-        # Calculate ongoing time for both active and idle
-        active_ongoing_seconds = active_today - (today_csv_active * 60)
-        idle_ongoing_minutes = (current_day_data.idle_minutes if current_day_data else 0) - today_csv_idle
+        # Calculate ongoing time for both active and idle.
+        # Clamp to zero so the weekly totals can never go negative (e.g. after
+        # optimize/merge reduces the in-memory total, or due to clock skew).
+        active_ongoing_seconds = max(0, active_today - (today_csv_active * 60))
+        idle_ongoing_minutes = max(0, (current_day_data.idle_minutes if current_day_data else 0) - today_csv_idle)
         idle_ongoing_seconds = idle_ongoing_minutes * 60
 
         # Add ongoing seconds to weekly totals
@@ -181,7 +183,7 @@ class ActivityTrackerApp:
                         start_time=start_dt,
                         end_time=end_dt
                     ))
-                except (ValueError, TypeError):
+                except (ValueError, TypeError, KeyError, AttributeError):
                     continue
 
         if not all_segments:
@@ -212,6 +214,9 @@ class ActivityTrackerApp:
 
         # Reload segments into memory
         self.session.load_current_day_segments()
+
+        # Keep the daily-summary log consistent with the optimized segment log
+        self.session.save_all_days()
 
         # Show success message with optimization results
         msg = i18n.t("OPTIMIZE_SUCCESS_MSG").format(

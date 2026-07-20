@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from datetime import datetime, date
 from typing import Optional, Dict
 from persistence import PersistenceManager
@@ -88,42 +89,46 @@ class SessionTracker:
         self.days: Dict[date, Day] = {}
         self.current_segment: Optional[TimeSegment] = None
         self.is_locked = False
+        # Guards concurrent access to self.days / self.current_segment between
+        # the background update thread (writes) and the menu thread (reads).
+        self._lock = threading.Lock()
 
     def on_tick(self, idle_time: float, idle_threshold: int):
         """Process a tick with consistent timestamp handling."""
-        now = datetime.now().replace(microsecond=0)
-        current_date = now.date()
+        with self._lock:
+            now = datetime.now().replace(microsecond=0)
+            current_date = now.date()
 
-        if current_date not in self.days:
-            self.days[current_date] = Day(date=current_date)
+            if current_date not in self.days:
+                self.days[current_date] = Day(date=current_date)
 
-        is_idle_by_time = idle_time > idle_threshold
-        current_state = 'idle' if is_idle_by_time or self.is_locked else 'active'
+            is_idle_by_time = idle_time > idle_threshold
+            current_state = 'idle' if is_idle_by_time or self.is_locked else 'active'
 
-        if self.current_segment is None:
-            self.current_segment = TimeSegment(state=current_state, start_time=now)
-            self.days[current_date].segments.append(self.current_segment)
-        elif self.current_segment.state != current_state:
-            # Ensure end_time is always >= start_time
-            end_time = self.current_segment.start_time if now < self.current_segment.start_time else now
-            self.current_segment.end_time = end_time
-            self.current_segment = TimeSegment(state=current_state, start_time=now)
-            self.days[current_date].segments.append(self.current_segment)
-        # else: state hasn't changed, continue with existing segment (end_time will be set on save)
+            if self.current_segment is None:
+                self.current_segment = TimeSegment(state=current_state, start_time=now)
+                self.days[current_date].segments.append(self.current_segment)
+            elif self.current_segment.state != current_state:
+                # Ensure end_time is always >= start_time
+                end_time = self.current_segment.start_time if now < self.current_segment.start_time else now
+                self.current_segment.end_time = end_time
+                self.current_segment = TimeSegment(state=current_state, start_time=now)
+                self.days[current_date].segments.append(self.current_segment)
+            # else: state hasn't changed, continue with existing segment (end_time will be set on save)
 
-        if self.current_segment.start_time.date() != current_date:
-            # Round midnight to the exact start of the day
-            midnight = datetime.combine(self.current_segment.start_time.date(), datetime.max.time())
-            midnight = midnight.replace(microsecond=0)
-            self.current_segment.end_time = midnight
+            if self.current_segment.start_time.date() != current_date:
+                # Round midnight to the exact start of the day
+                midnight = datetime.combine(self.current_segment.start_time.date(), datetime.max.time())
+                midnight = midnight.replace(microsecond=0)
+                self.current_segment.end_time = midnight
 
-            new_day_start = datetime.combine(current_date, datetime.min.time())
-            new_day_start = new_day_start.replace(microsecond=0)
-            self.current_segment = TimeSegment(state=self.current_segment.state, start_time=new_day_start)
-            self.days[current_date].segments.append(self.current_segment)
+                new_day_start = datetime.combine(current_date, datetime.min.time())
+                new_day_start = new_day_start.replace(microsecond=0)
+                self.current_segment = TimeSegment(state=self.current_segment.state, start_time=new_day_start)
+                self.days[current_date].segments.append(self.current_segment)
 
-            # Save data for the previous day when midnight crosses
-            self.save_all_days()
+                # Save data for the previous day when midnight crosses
+                self.save_all_days()
 
     def finalize_session(self):
         if self.current_segment and self.current_segment.end_time is None:

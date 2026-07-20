@@ -34,7 +34,7 @@ def _get_system_locale():
                 return lang
 
     # Try stdlib locale module
-    sys_loc = locale.getdefaultlocale()[0] or locale.getlocale()[0]
+    sys_loc = locale.getlocale()[0] or locale.getdefaultlocale()[0]
     if sys_loc:
         lang = sys_loc.split(".")[0].split("_")[0]
         if lang and lang.lower() != "c":

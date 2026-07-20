@@ -62,6 +62,13 @@ except Exception:
     _CAN_RUN_ON_MAIN = False
 
 
+def _osa_escape(value: str) -> str:
+    """Escape a string for safe interpolation into an osascript double-quoted literal."""
+    if value is None:
+        return ""
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
 APP_NAME = "ActivityTracker"
 
 LAUNCH_AGENT_LABEL = "com.markus.activitytracker"
@@ -277,7 +284,7 @@ class MacOSPlatform(PlatformABC):
             [
                 "osascript", "-e",
                 f'tell application "System Events" to set response to '
-                f'display dialog "{title}" default answer "{current:.1f}" '
+                f'display dialog "{_osa_escape(title)}" default answer "{current:.1f}" '
                 f'buttons {{"Cancel", "OK"}} default button "OK"',
             ],
             capture_output=True, text=True, check=False,
@@ -337,7 +344,7 @@ class MacOSPlatform(PlatformABC):
         try:
             script = 'set f to choose folder'
             if prompt:
-                script += f' with prompt "{prompt}"'
+                script += f' with prompt "{_osa_escape(prompt)}"'
             script += '\nreturn POSIX path of f'
             r = subprocess.run(
                 ["osascript", "-e", script],
@@ -429,8 +436,12 @@ class MacOSPlatform(PlatformABC):
         # Use osascript for alerts to ensure it works from any thread
         # and for simplicity, as AppKit alerts require main thread handling.
         try:
+            script = (
+                f'display alert "{_osa_escape(title)}" '
+                f'message "{_osa_escape(message)}" as critical buttons {{"OK"}}'
+            )
             subprocess.run(
-                ["osascript", "-e", f'display alert "{title}" message "{message}" as critical buttons {{"OK"}}'],
+                ["osascript", "-e", script],
                 capture_output=True, text=True, check=False,
             )
         except Exception as e:
@@ -483,7 +494,7 @@ class MacOSPlatform(PlatformABC):
             from Foundation import NSUserDefaults
             langs = NSUserDefaults.standardUserDefaults().objectForKey_("AppleLanguages")
             if langs and len(langs) > 0:
-                lang = str(langs[0]).split("-")[0]
+                lang = str(langs[0]).split("-", maxsplit=1)[0]
                 if lang and lang.lower() != "c":
                     return lang
         except Exception:

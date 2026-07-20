@@ -35,7 +35,7 @@ class SingleInstanceLock:
             return True # Always succeed if fcntl is not available
 
         try:
-            self.fp = open(self.lockfile_path, 'w')
+            self.fp = open(self.lockfile_path, 'w', encoding="utf-8")
             # Try to acquire an exclusive, non-blocking lock.
             fcntl.flock(self.fp.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
 
@@ -71,4 +71,3 @@ class SingleInstanceLock:
         finally:
             # Null out so a later release() (atexit) becomes a no-op.
             self.fp = None
-

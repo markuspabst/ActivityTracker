@@ -1,4 +1,5 @@
 from __future__ import annotations
+import threading
 from datetime import datetime
 
 from pystray import Icon, Menu, MenuItem
@@ -31,12 +32,15 @@ class AppMenu:
         self.icon.stop()
 
     def update_ui(self, is_idle, active_today, active_week, weekly_target, weekly_idle_week=None):
-        today_date = datetime.now().date()
-        today_data = self.app.session.days.get(today_date)
+        # Guard shared session state: the updater thread mutates
+        # self.app.session.days / current_segment while this (main) thread reads it.
+        with self.app.session._lock:
+            today_date = datetime.now().date()
+            today_data = self.app.session.days.get(today_date)
 
-        self._active_today_session = active_today
-        self._idle_today_session = (today_data.idle_minutes * 60) if today_data else 0
-        self._session_start = today_data.session_start if today_data else None
+            self._active_today_session = active_today
+            self._idle_today_session = (today_data.idle_minutes * 60) if today_data else 0
+            self._session_start = today_data.session_start if today_data else None
 
         self._total_weekly_active = active_week
         self._total_weekly_idle = weekly_idle_week if weekly_idle_week is not None else 0
@@ -50,7 +54,7 @@ class AppMenu:
             status_indicator = "⏸️"
         elif active_today >= self.app.target_work_seconds:
             status_indicator = "✅"
-        elif (self._total_weekly_active / self.app.weekly_target_seconds * 100) >= 50:
+        elif self.app.weekly_target_seconds > 0 and (self._total_weekly_active / self.app.weekly_target_seconds * 100) >= 50:
             status_indicator = "🟢"
         else:
             status_indicator = "⏱️"

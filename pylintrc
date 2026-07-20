@@ -1,0 +1,25 @@
+[MAIN]
+ignore = .venv,build,dist,tests
+
+[MESSAGES CONTROL]
+# Keep pylint focused on real defects; silence pure style noise.
+# The PyObjC-specific checks below only ever fire in platform_layer/macos.py
+# (Objective-C frameworks are bridged at runtime, so static analysis sees
+# "missing" members/names and flags the necessary lazy imports as errors).
+# Disabling them project-wide is safe: no other module triggers them.
+disable =
+    missing-module-docstring,
+    missing-class-docstring,
+    missing-function-docstring,
+    too-few-public-methods,
+    fixme,
+    duplicate-code,
+    no-member,
+    no-name-in-module,
+    import-outside-toplevel,
+    cyclic-import,
+    subprocess-run-check,
+    broad-exception-caught,
+    too-many-locals,
+    too-many-public-methods,
+    ungrouped-imports

@@ -215,7 +215,16 @@ class PersistenceManager:
         merged: List[TimeSegment] = [segments[0]]
         for seg in segments[1:]:
             prev = merged[-1]
-            if prev.end_time and seg.start_time and prev.state == seg.state:
+            # Never merge across a calendar-day boundary: segments are stored
+            # per-year sorted chronologically, so a same-state segment ending
+            # 23:59 and one starting 00:00 would otherwise be merged into the
+            # previous day and corrupt daily totals.
+            same_day = (
+                prev.start_time is not None
+                and seg.start_time is not None
+                and prev.start_time.date() == seg.start_time.date()
+            )
+            if same_day and prev.end_time and seg.start_time and prev.state == seg.state:
                 gap = (seg.start_time - prev.end_time).total_seconds()
                 if gap <= idle_threshold / 2:
                     prev.end_time = seg.end_time or datetime.now().replace(microsecond=0)

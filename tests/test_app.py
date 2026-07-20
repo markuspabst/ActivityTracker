@@ -267,3 +267,112 @@ def test_optimize_csv_skips_malformed_rows(app, tmp_path, optimize_ready):
     segs = pm.read_segments_for_day(D.date())
     assert len(segs) == 1  # the idle segment; malformed active row dropped
     assert segs[0].state == "idle"
+
+
+# ------------------------------------------------------------
+# Regression: HIGH #1 - merge must not cross a calendar-day boundary
+# ------------------------------------------------------------
+
+def test_merge_segments_to_save_does_not_cross_midnight():
+    from persistence import PersistenceManager
+    # Two active segments with a tiny gap BUT on different days
+    seg1 = TimeSegment("active", datetime(2026, 7, 15, 23, 59, 50), datetime(2026, 7, 15, 23, 59, 59))
+    seg2 = TimeSegment("active", datetime(2026, 7, 16, 0, 0, 20), datetime(2026, 7, 16, 0, 1, 0))
+    merged = PersistenceManager.merge_segments_to_save([seg1, seg2], idle_threshold=300)
+    # Must stay as two segments (different calendar days)
+    assert len(merged) == 2
+
+
+def test_merge_segments_to_save_merges_same_day_small_gap():
+    from persistence import PersistenceManager
+    # Two active segments same day, tiny gap -> merge into one
+    seg1 = TimeSegment("active", datetime(2026, 7, 15, 9, 0, 0), datetime(2026, 7, 15, 9, 30, 0))
+    seg2 = TimeSegment("active", datetime(2026, 7, 15, 9, 31, 0), datetime(2026, 7, 15, 10, 0, 0))
+    merged = PersistenceManager.merge_segments_to_save([seg1, seg2], idle_threshold=300)
+    assert len(merged) == 1
+
+
+# ------------------------------------------------------------
+# Regression: MEDIUM #2 - optimize_csv must tolerate missing columns
+# ------------------------------------------------------------
+
+def test_optimize_csv_skips_missing_column_rows(app, tmp_path, optimize_ready):
+    from persistence import PersistenceManager
+    pm = PersistenceManager(lambda: str(tmp_path))
+    D = optimize_ready
+    # Row missing the 'state' column entirely -> would raise KeyError/AttributeError
+    # if not caught. Also include a valid idle segment.
+    path = pm.get_log_file_path("activities", D.year)
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        f.write("date,start,end,duration_min,duration_seconds\n")  # no 'state'
+        f.write("2026-07-15,11:00:00,11:15:00,15,900\n")
+        f.write("2026-07-15,active,12:00:00,12:30:00,30,1800\n")  # missing 'state' col here too
+    app.pm = pm
+    # Must not raise
+    app.optimize_csv()
+    titles = [c.args[0] for c in app.platform.show_alert.call_args_list]
+    assert any(t == i18n.t("OPTIMIZE_EMPTY") or t == i18n.t("OPTIMIZE_SUCCESS") for t in titles)
+
+
+# ------------------------------------------------------------
+# Regression: MEDIUM #4 - ZeroDivisionError when weekly target is 0
+# ------------------------------------------------------------
+
+def test_update_ui_with_zero_weekly_target_does_not_crash():
+    from activity_tracker_menu import AppMenu
+    fake_app = MagicMock()
+    fake_app.session.days = {}
+    fake_app.target_work_seconds = 8 * 3600
+    fake_app.weekly_target_seconds = 0  # the trigger condition
+    menu = AppMenu(fake_app)
+    # Should not raise ZeroDivisionError
+    menu.update_ui(is_idle=False, active_today=0, active_week=0, weekly_target=0, weekly_idle_week=0)
+    # Status indicator should fall through to the default branch
+    assert menu._last_status_icon is not None
+
+
+# ------------------------------------------------------------
+# Regression: MEDIUM #5 - optimize_csv keeps daily summary consistent
+# ------------------------------------------------------------
+
+def test_optimize_csv_keeps_daily_summary_consistent(app, tmp_path, optimize_ready):
+    from persistence import PersistenceManager
+    pm = PersistenceManager(lambda: str(tmp_path))
+    D = optimize_ready
+    day = Day(D.date())
+    # Two consecutive active segments with a tiny gap -> merge to 1
+    day.segments.append(TimeSegment("active", datetime(2026, 7, 15, 9, 0, 0), datetime(2026, 7, 15, 9, 30, 0)))
+    day.segments.append(TimeSegment("active", datetime(2026, 7, 15, 9, 31, 0), datetime(2026, 7, 15, 10, 0, 0)))
+    pm.save_segments({D.date(): day})
+    # Build the (pre-merge) daily summary from the segment log
+    pm.save_daily_summary([D.date()])
+    pre_summary = pm.get_minutes_for_date(D.date())
+
+    app.pm = pm
+    app.session.pm = pm
+    app.optimize_csv()
+
+    # Daily summary must still be present and consistent (merging the 1-minute
+    # gap can shift the floored minute total by 1, which is expected).
+    post_summary = pm.get_minutes_for_date(D.date())
+    assert post_summary[0] in (pre_summary[0], pre_summary[0] + 1)
+    # And the activities log now has a single merged segment
+    segs = pm.read_segments_for_day(D.date())
+    assert len(segs) == 1
+
+
+def test_optimize_csv_preserves_live_segment(app, tmp_path, optimize_ready):
+    from persistence import PersistenceManager
+    pm = PersistenceManager(lambda: str(tmp_path))
+    D = optimize_ready
+    # Simulate an in-memory ongoing (unsaved) active segment for "today"
+    today = D.date()
+    app.session.days[today] = Day(today, segments=[
+        TimeSegment("active", datetime(2026, 7, 15, 9, 0, 0)),
+    ])
+    app.session.current_segment = app.session.days[today].segments[-1]
+    app.pm = pm
+    app.optimize_csv()
+    # The live/ongoing segment must survive: current_segment is still set
+    assert app.session.current_segment is not None
+    assert app.session.current_segment.state == "active"
