@@ -29,7 +29,8 @@ A lightweight system tray application that tracks your active and idle time usin
   ├─ SessionTracker.save_all_days()  │ (if save_interval met)
   │   ├─ PersistenceManager.save_segments()
   │   │   → activities-{year}.csv
-  │   └─ (No daily summary CSV - stats calculated on read)
+  │   └─ PersistenceManager.save_daily_summary()
+  │       → daily-{year}.csv (one row/day: active_min, idle_min)
   │
   └─ AppController.update_ui()
       ├─ Read from session.days for active/idle
@@ -40,7 +41,8 @@ A lightweight system tray application that tracks your active and idle time usin
 
 ```
 ~/.config/ActivityTracker/
-├── activities-{year}.csv          # Segment data (one per year)
+├── activities-{year}.csv          # Segment data (one row per active/idle segment)
+├── daily-{year}.csv               # Daily summary (one row per day)
 └── activity_tracker_config.json   # User settings
 ```
 
@@ -56,6 +58,19 @@ A lightweight system tray application that tracks your active and idle time usin
 | end | End time (HH:MM:SS) or empty for ongoing |
 | duration_min | Duration in minutes (integer, floored) |
 | duration_seconds | Duration in seconds (for precision) |
+
+**`daily-{year}.csv`** - Per-day summary with separate active/idle totals:
+
+| Column | Description |
+|--------|-------------|
+| date | Calendar date (YYYY-MM-DD) |
+| active_min | Total active minutes for the day |
+| idle_min | Total idle minutes for the day |
+| session_start | First active time of the day (HH:MM) |
+| session_end | Last active time of the day (HH:MM) |
+
+Derived from the segment log on each save, so `active_min + idle_min` always
+matches the day's segment totals. Days with no activity are omitted.
 
 ## Installation
 

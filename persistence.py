@@ -3,10 +3,11 @@ import os
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Dict, List, Tuple
-from models import TimeSegment
+from models import TimeSegment, Day
 
 # Constants
 ACTIVITIES_LOG_PREFIX = "activities"
+DAILY_LOG_PREFIX = "daily"
 
 
 class PersistenceManager:
@@ -143,6 +144,68 @@ class PersistenceManager:
                 writer.writeheader()
                 for key in sorted_keys:
                     writer.writerow(existing_segments[key])
+
+    def save_daily_summary(self, dates) -> None:
+        """Write/merge the daily-summary log (FR-3.3), one row per day.
+
+        Schema: date, active_min, idle_min, session_start (HH:MM), session_end (HH:MM).
+
+        Values are derived from the authoritative segment-level log (read back
+        after save_segments) so the two logs stay consistent: the sum of a day's
+        segment durations always equals active_min + idle_min. Days with no
+        recorded activity are omitted (FR-3.7). The file is rotated per calendar
+        year (daily-{year}.csv) per FR-3.6.
+        """
+        # Group the affected dates by calendar year (FR-3.6).
+        dates_by_year: Dict[int, set] = {}
+        for d in dates:
+            dates_by_year.setdefault(d.year, set()).add(d)
+
+        for year, year_dates in dates_by_year.items():
+            # Build fresh summary rows from the segment log for the touched days.
+            new_rows: Dict[str, dict] = {}
+            for d in year_dates:
+                active_min, idle_min = self.get_minutes_for_date(d)
+                if active_min == 0 and idle_min == 0:
+                    continue  # FR-3.7: omit days with no recorded activity.
+                day = Day(date=d, segments=self.read_segments_for_day(d))
+                start = day.session_start
+                end = day.session_end
+                date_str = d.strftime("%Y-%m-%d")
+                new_rows[date_str] = {
+                    "date": date_str,
+                    "active_min": active_min,
+                    "idle_min": idle_min,
+                    "session_start": start.strftime("%H:%M") if start else "",
+                    "session_end": end.strftime("%H:%M") if end else "",
+                }
+
+            path = self.get_log_file_path(DAILY_LOG_PREFIX, year)
+
+            # Preserve rows for days not touched in this save.
+            existing: Dict[str, dict] = {}
+            if os.path.exists(path):
+                try:
+                    with open(path, "r", newline="", encoding="utf-8") as f:
+                        reader = csv.DictReader(f)
+                        for row in reader:
+                            existing[row['date']] = row
+                except (IOError, csv.Error):
+                    pass
+
+            # Freshly computed rows overwrite any stale row for the same day.
+            existing.update(new_rows)
+            if not existing:
+                continue
+
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(
+                    f,
+                    fieldnames=["date", "active_min", "idle_min", "session_start", "session_end"],
+                )
+                writer.writeheader()
+                for date_str in sorted(existing.keys()):
+                    writer.writerow(existing[date_str])
 
     @staticmethod
     def merge_segments_to_save(segments: List[TimeSegment], idle_threshold: int = 300) -> List[TimeSegment]:

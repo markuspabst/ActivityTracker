@@ -142,6 +142,10 @@ class SessionTracker:
 
         self.pm.save_segments(self.days)
 
+        # Write the per-day summary log (separate active/idle totals, FR-3.3).
+        # Derived from the segment log we just wrote, so both stay consistent.
+        self.pm.save_daily_summary(list(self.days.keys()))
+
         # Reset end_time for the current segment so it remains ongoing
         if self.current_segment:
             self.current_segment.end_time = None
