@@ -40,6 +40,11 @@ class ActivityTrackerApp:
         self.last_write_time = time.time()
         self._running = False
 
+        # Auto-optimize throttle state (persisted across restarts).
+        self.auto_optimize_threshold = 50  # only compact after this many new segments
+        self.last_optimize_time = float(get_config_value("last_optimize_timestamp", 0))
+        self.optimize_baseline = sum(len(d.segments) for d in self.session.days.values())
+
     def run(self):
         self._running = True
         self.menu = AppMenu(self)
@@ -67,7 +72,40 @@ class ActivityTrackerApp:
             self.session.save_all_days()
             self.last_write_time = time.time()
 
+        self.maybe_auto_optimize()
         self.update_ui()
+
+    def maybe_auto_optimize(self):
+        """Periodically compact the activity log, but only when it actually grew.
+
+        Two gates prevent re-optimizing already-optimized data:
+          * time   — at most once per ``write_interval`` (same cadence as saves)
+          * data   — only if the in-memory segment count increased by at least
+                     ``auto_optimize_threshold`` since the last run (or startup)
+        The last-run timestamp is persisted in the config so the throttle also
+        applies across app restarts.
+        """
+        now = time.time()
+        if now - self.last_optimize_time < self.write_interval:
+            return
+
+        total_segments = sum(len(d.segments) for d in self.session.days.values())
+        if total_segments - self.optimize_baseline < self.auto_optimize_threshold:
+            # Nothing meaningful changed since last optimize; just bump the
+            # timestamp so we keep checking but never re-process stale data.
+            self.last_optimize_time = now
+            self._persist_optimize_time()
+            return
+
+        self.optimize_csv(silent=True)
+        # Re-establish the baseline from the (now compacted) log so we don't
+        # immediately re-optimize on the next tick.
+        self.optimize_baseline = sum(len(d.segments) for d in self.session.days.values())
+        self.last_optimize_time = now
+        self._persist_optimize_time()
+
+    def _persist_optimize_time(self):
+        set_config_value("last_optimize_timestamp", int(self.last_optimize_time))
 
     def update_ui(self):
         today = datetime.now().date()
@@ -137,8 +175,12 @@ class ActivityTrackerApp:
         self.force_save()
         reset_data_dir_to_default()
 
-    def optimize_csv(self):
-        """Merge consecutive same-state segments with small gaps in CSV file."""
+    def optimize_csv(self, silent: bool = False):
+        """Merge consecutive same-state segments with small gaps in CSV file.
+
+        When *silent* is True (used by the automatic throttled optimizer) no
+        alert is shown and the app is not brought to the front.
+        """
         import csv
         from datetime import datetime
         from tracking import get_config_value
@@ -147,10 +189,11 @@ class ActivityTrackerApp:
         segments_file = self.pm.get_log_file_path('activities', today.year)
 
         if not os.path.exists(segments_file):
-            self.platform.show_alert(
-                i18n.t("OPTIMIZE_ERROR_NO_FILE"),
-                i18n.t("OPTIMIZE_ERROR_NO_FILE_MSG")
-            )
+            if not silent:
+                self.platform.show_alert(
+                    i18n.t("OPTIMIZE_ERROR_NO_FILE"),
+                    i18n.t("OPTIMIZE_ERROR_NO_FILE_MSG")
+                )
             return
 
         # Get idle threshold from config (default 300 sec)
@@ -187,10 +230,11 @@ class ActivityTrackerApp:
                     continue
 
         if not all_segments:
-            self.platform.show_alert(
-                i18n.t("OPTIMIZE_EMPTY"),
-                i18n.t("OPTIMIZE_EMPTY_MSG")
-            )
+            if not silent:
+                self.platform.show_alert(
+                    i18n.t("OPTIMIZE_EMPTY"),
+                    i18n.t("OPTIMIZE_EMPTY_MSG")
+                )
             return
 
         # Merge segments
@@ -226,17 +270,17 @@ class ActivityTrackerApp:
         )
         success_msg = i18n.t("OPTIMIZE_SUCCESS")
 
-        # Bring app to front to ensure alert is visible
-        import time
-        time.sleep(0.1)  # Brief delay to ensure file write completes
-        self.platform.bring_app_to_front()
-
         print(f"Optimization complete: {success_msg} - {msg}")
         print(f"  Original: {original_count}, Merged: {merged_count}, Reduced: {reduced_count}")
 
-        # Show alert with brief delay
-        time.sleep(0.1)  # Brief delay before showing alert
-        self.platform.show_alert(success_msg, msg)
+        if not silent:
+            # Bring app to front to ensure alert is visible
+            import time
+            time.sleep(0.1)  # Brief delay to ensure file write completes
+            self.platform.bring_app_to_front()
+            # Show alert with brief delay
+            time.sleep(0.1)  # Brief delay before showing alert
+            self.platform.show_alert(success_msg, msg)
 
 if __name__ == "__main__":
     # 1. Acquire single-instance lock
