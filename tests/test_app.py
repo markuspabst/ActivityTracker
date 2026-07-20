@@ -5,6 +5,7 @@ logic can be exercised without a real UI, filesystem config dir, or platform API
 """
 
 from datetime import datetime, date
+import os
 import time
 from unittest.mock import MagicMock, patch
 
@@ -400,10 +401,11 @@ def test_update_ui_with_zero_weekly_target_does_not_crash():
 
 
 # ------------------------------------------------------------
-# Regression: MEDIUM #5 - optimize_csv keeps daily summary consistent
+# Regression: MEDIUM #5 - optimize_csv keeps aggregates consistent with the
+# activities log (no separate daily-summary file anymore).
 # ------------------------------------------------------------
 
-def test_optimize_csv_keeps_daily_summary_consistent(app, tmp_path, optimize_ready):
+def test_optimize_csv_keeps_aggregates_consistent(app, tmp_path, optimize_ready):
     from persistence import PersistenceManager
     pm = PersistenceManager(lambda: str(tmp_path))
     D = optimize_ready
@@ -412,21 +414,21 @@ def test_optimize_csv_keeps_daily_summary_consistent(app, tmp_path, optimize_rea
     day.segments.append(TimeSegment("active", datetime(2026, 7, 15, 9, 0, 0), datetime(2026, 7, 15, 9, 30, 0)))
     day.segments.append(TimeSegment("active", datetime(2026, 7, 15, 9, 31, 0), datetime(2026, 7, 15, 10, 0, 0)))
     pm.save_segments({D.date(): day})
-    # Build the (pre-merge) daily summary from the segment log
-    pm.save_daily_summary([D.date()])
     pre_summary = pm.get_minutes_for_date(D.date())
 
     app.pm = pm
     app.session.pm = pm
     app.optimize_csv()
 
-    # Daily summary must still be present and consistent (merging the 1-minute
-    # gap can shift the floored minute total by 1, which is expected).
+    # Aggregate must be preserved (merging the 1-minute gap can shift the
+    # floored minute total by 1, which is expected).
     post_summary = pm.get_minutes_for_date(D.date())
     assert post_summary[0] in (pre_summary[0], pre_summary[0] + 1)
     # And the activities log now has a single merged segment
     segs = pm.read_segments_for_day(D.date())
     assert len(segs) == 1
+    # No separate daily-summary file is written.
+    assert not os.path.exists(pm.get_log_file_path("daily", D.year))
 
 
 def test_optimize_csv_preserves_live_segment(app, tmp_path, optimize_ready):

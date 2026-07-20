@@ -1,13 +1,37 @@
 import csv
+import json
+import logging
 import os
 from datetime import datetime, date, timedelta
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 from models import TimeSegment, Day
+
+logger = logging.getLogger(__name__)
 
 # Constants
 ACTIVITIES_LOG_PREFIX = "activities"
-DAILY_LOG_PREFIX = "daily"
+
+
+class PersistenceWriteError(IOError):
+    """Raised when segment data cannot be written to disk (see NFR-5.2)."""
+
+
+def _hms_to_seconds(value: str) -> Optional[int]:
+    """Parse an 'HH:MM:SS' (or 'HH:MM') time into seconds since midnight."""
+    if not value:
+        return None
+    try:
+        parts = [int(p) for p in value.split(':')]
+    except (ValueError, TypeError, AttributeError):
+        return None
+    if len(parts) == 3:
+        h, m, s = parts
+    elif len(parts) == 2:
+        h, m, s = parts[0], parts[1], 0
+    else:
+        return None
+    return h * 3600 + m * 60 + s
 
 
 class PersistenceManager:
@@ -25,48 +49,50 @@ class PersistenceManager:
 
     def get_weekly_minutes(self, week_start_date: date) -> Tuple[int, int]:
         end_of_week = week_start_date + timedelta(days=6)
+        years = {week_start_date.year, end_of_week.year}
+        totals_by_year = {year: self._day_totals_for_year(year) for year in years}
         active_total, idle_total = 0, 0
-        week_start_str, week_end_str = week_start_date.strftime("%Y-%m-%d"), end_of_week.strftime("%Y-%m-%d")
-        years_to_check = {week_start_date.year, end_of_week.year} if end_of_week.year != week_start_date.year else {week_start_date.year}
-
-        for year in years_to_check:
-            path = str(self.get_log_file_path(ACTIVITIES_LOG_PREFIX, year))
-            if not os.path.exists(path):
-                continue
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        row_date = row['date']
-                        if week_start_str <= row_date <= week_end_str:
-                            dur = int(row.get('duration_min', '0') or '0')
-                            if row['state'] == 'active':
-                                active_total += dur
-                            else:
-                                idle_total += dur
-            except Exception:
-                pass
+        current = week_start_date
+        while current <= end_of_week:
+            day_active, day_idle = totals_by_year[current.year].get(
+                current.strftime("%Y-%m-%d"), (0, 0)
+            )
+            active_total += day_active
+            idle_total += day_idle
+            current += timedelta(days=1)
         return active_total, idle_total
 
     def get_minutes_for_date(self, target_date: date) -> Tuple[int, int]:
-        path = str(self.get_log_file_path(ACTIVITIES_LOG_PREFIX, target_date.year))
+        return self._day_totals_for_year(target_date.year).get(
+            target_date.strftime("%Y-%m-%d"), (0, 0)
+        )
+
+    def _day_totals_for_year(self, year: int) -> Dict[str, Tuple[int, int]]:
+        """Read one year's activities log once and return {date: (active_min, idle_min)}."""
+        path = str(self.get_log_file_path(ACTIVITIES_LOG_PREFIX, year))
+        totals: Dict[str, Tuple[int, int]] = {}
         if not os.path.exists(path):
-            return 0, 0
-        target_str = target_date.strftime("%Y-%m-%d")
-        active_min, idle_min = 0, 0
+            return totals
         try:
             with open(path, "r", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    if row['date'] == target_str:
-                        dur = int(row.get('duration_min', '0') or '0')
-                        if row['state'] == 'active':
-                            active_min += dur
-                        else:
-                            idle_min += dur
-        except Exception:
-            pass
-        return active_min, idle_min
+                    date_str = row['date']
+                    try:
+                        dur_seconds = int(float(row.get('duration_seconds', '0') or '0'))
+                    except (ValueError, TypeError):
+                        dur_seconds = 0
+                    # Floor to whole minutes, matching the per-segment totals.
+                    dur = dur_seconds // 60
+                    active, idle = totals.get(date_str, (0, 0))
+                    if row['state'] == 'active':
+                        active += dur
+                    else:
+                        idle += dur
+                    totals[date_str] = (active, idle)
+        except (IOError, csv.Error, OSError) as exc:
+            logger.warning("Failed to read activities log for %s: %s", year, exc)
+        return totals
 
     def read_segments_for_day(self, target_date: date) -> List[TimeSegment]:
         """Optimized: minimal parsing, direct list construction."""
@@ -84,7 +110,7 @@ class PersistenceManager:
                     try:
                         parts = row['start'].split(':')
                         start_dt = datetime(target_date.year, target_date.month, target_date.day,
-                                           int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 0)
+                                            int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 0)
                         end_dt = None
                         if row.get('end'):
                             parts = row['end'].split(':')
@@ -93,8 +119,8 @@ class PersistenceManager:
                         segments.append(TimeSegment(state=row['state'], start_time=start_dt, end_time=end_dt))
                     except (ValueError, TypeError):
                         continue
-        except (IOError, csv.Error):
-            pass
+        except (IOError, csv.Error, OSError) as exc:
+            logger.warning("Failed to read segments for %s: %s", target_date, exc)
         return segments
 
     def save_segments(self, segments_by_day) -> None:
@@ -131,81 +157,45 @@ class PersistenceManager:
                             if "duration_seconds" not in row:
                                 row["duration_seconds"] = row.get('duration_min', '0') or '0'
                             existing_segments[key] = row
-                except (IOError, csv.Error):
-                    pass
+                except (IOError, csv.Error, OSError) as exc:
+                    logger.warning("Could not read existing %s, starting fresh: %s", path, exc)
+
+            # A merged/extended segment can fully contain an older row of the
+            # same day (e.g. after merge_segments_to_save merged a gap). Drop the
+            # contained row so we never persist overlapping duplicate data.
+            # Only finalized segments (with an end) can contain others; an
+            # ongoing segment (end="") must not drop already-saved neighbors.
+            for seg in sorted(new_segments, key=lambda s: (s['date'], s['start'])):
+                seg_date = seg['date']
+                seg_start = _hms_to_seconds(seg['start'])
+                seg_end = _hms_to_seconds(seg['end']) if seg['end'] else None
+                if seg_end is None or seg_start is None:
+                    continue
+                for key in list(existing_segments.keys()):
+                    erow = existing_segments[key]
+                    if erow['date'] != seg_date or key == f"{seg_date} {seg['start']}":
+                        continue
+                    e_start = _hms_to_seconds(erow['start'])
+                    e_end = _hms_to_seconds(erow['end']) if erow['end'] else None
+                    if e_start is None or e_end is None:
+                        continue
+                    if e_start >= seg_start and e_end <= seg_end:
+                        del existing_segments[key]
 
             for seg in new_segments:
                 key = f"{seg['date']} {seg['start']}"
                 existing_segments[key] = seg
 
             sorted_keys = sorted(existing_segments.keys())
-            with open(path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=["date", "state", "start", "end", "duration_min", "duration_seconds"])
-                writer.writeheader()
-                for key in sorted_keys:
-                    writer.writerow(existing_segments[key])
-
-    def save_daily_summary(self, dates) -> None:
-        """Write/merge the daily-summary log (FR-3.3), one row per day.
-
-        Schema: date, active_min, idle_min, session_start (HH:MM), session_end (HH:MM).
-
-        Values are derived from the authoritative segment-level log (read back
-        after save_segments) so the two logs stay consistent: the sum of a day's
-        segment durations always equals active_min + idle_min. Days with no
-        recorded activity are omitted (FR-3.7). The file is rotated per calendar
-        year (daily-{year}.csv) per FR-3.6.
-        """
-        # Group the affected dates by calendar year (FR-3.6).
-        dates_by_year: Dict[int, set] = {}
-        for d in dates:
-            dates_by_year.setdefault(d.year, set()).add(d)
-
-        for year, year_dates in dates_by_year.items():
-            # Build fresh summary rows from the segment log for the touched days.
-            new_rows: Dict[str, dict] = {}
-            for d in year_dates:
-                active_min, idle_min = self.get_minutes_for_date(d)
-                if active_min == 0 and idle_min == 0:
-                    continue  # FR-3.7: omit days with no recorded activity.
-                day = Day(date=d, segments=self.read_segments_for_day(d))
-                start = day.session_start
-                end = day.session_end
-                date_str = d.strftime("%Y-%m-%d")
-                new_rows[date_str] = {
-                    "date": date_str,
-                    "active_min": active_min,
-                    "idle_min": idle_min,
-                    "session_start": start.strftime("%H:%M") if start else "",
-                    "session_end": end.strftime("%H:%M") if end else "",
-                }
-
-            path = self.get_log_file_path(DAILY_LOG_PREFIX, year)
-
-            # Preserve rows for days not touched in this save.
-            existing: Dict[str, dict] = {}
-            if os.path.exists(path):
-                try:
-                    with open(path, "r", newline="", encoding="utf-8") as f:
-                        reader = csv.DictReader(f)
-                        for row in reader:
-                            existing[row['date']] = row
-                except (IOError, csv.Error):
-                    pass
-
-            # Freshly computed rows overwrite any stale row for the same day.
-            existing.update(new_rows)
-            if not existing:
-                continue
-
-            with open(path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(
-                    f,
-                    fieldnames=["date", "active_min", "idle_min", "session_start", "session_end"],
-                )
-                writer.writeheader()
-                for date_str in sorted(existing.keys()):
-                    writer.writerow(existing[date_str])
+            try:
+                with open(path, "w", newline="", encoding="utf-8") as f:
+                    writer = csv.DictWriter(f, fieldnames=["date", "state", "start", "end", "duration_min", "duration_seconds"])
+                    writer.writeheader()
+                    for key in sorted_keys:
+                        writer.writerow(existing_segments[key])
+            except (IOError, OSError) as exc:
+                logger.error("Failed to write %s: %s", path, exc)
+                raise PersistenceWriteError(f"Could not write {path}: {exc}") from exc
 
     @staticmethod
     def merge_segments_to_save(segments: List[TimeSegment], idle_threshold: int = 300) -> List[TimeSegment]:
@@ -241,3 +231,28 @@ class PersistenceManager:
 
     def get_data_dir(self) -> str:
         return self._get_data_dir()
+
+    # ------------------------------------------------------------
+    # Runtime state (cross-process, lives next to the data files)
+    # ------------------------------------------------------------
+
+    def save_last_segment_write(self, when: datetime) -> None:
+        """Persist the timestamp of the last successful segment write (FR-2.6)."""
+        path = os.path.join(str(self._get_data_dir()), "state.json")
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"last_segment_write": when.isoformat()}, f)
+        except OSError as exc:
+            logger.warning("Could not persist runtime state: %s", exc)
+
+    def read_last_segment_write(self) -> Optional[datetime]:
+        """Read the last successful segment-write timestamp, or None."""
+        path = os.path.join(str(self._get_data_dir()), "state.json")
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return datetime.fromisoformat(data["last_segment_write"])
+        except (OSError, KeyError, ValueError, json.JSONDecodeError):
+            return None
+

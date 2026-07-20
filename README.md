@@ -7,7 +7,10 @@ A lightweight system tray application that tracks your active and idle time usin
 - **Time Tracking**: Tracks active (working) and idle time with minute precision
 - **Live Menu Bar**: Shows status icon and live active/idle time display
 - **Weekly Statistics**: Aggregates time across the week
-- **CSV-Only Persistence**: All data stored in `activities-{year}.csv` files (no JSON state files)
+- **CSV-Only Persistence**: All time data stored in `activities-{year}.csv` files; a tiny `state.json` keeps only the last-write timestamp for crash recovery
+- **Sleep Detection**: System sleep/suspend intervals are classified as idle time
+- **Crash Recovery**: An open segment left by an abnormal shutdown is finalized to the last saved write time on next launch
+- **Save-Failure Resilience**: On a disk-write failure, data is retained in memory, the user is alerted once, and saving retries on the next interval
 - **Daily & Weekly Targets**: Set and monitor work goals
 - **Manual Optimization**: Merge consecutive same-state segments via Settings menu
 - **Idle Threshold**: Configurable idle detection period (default: 5 minutes)
@@ -27,10 +30,8 @@ A lightweight system tray application that tracks your active and idle time usin
   │   (Updates session.days & current_segment)
   │
   ├─ SessionTracker.save_all_days()  │ (if save_interval met)
-  │   ├─ PersistenceManager.save_segments()
-  │   │   → activities-{year}.csv
-  │   └─ PersistenceManager.save_daily_summary()
-  │       → daily-{year}.csv (one row/day: active_min, idle_min)
+  │   └─ PersistenceManager.save_segments()
+  │       → activities-{year}.csv
   │
   └─ AppController.update_ui()
       ├─ Read from session.days for active/idle
@@ -42,13 +43,14 @@ A lightweight system tray application that tracks your active and idle time usin
 ```
 ~/.config/ActivityTracker/
 ├── activities-{year}.csv          # Segment data (one row per active/idle segment)
-├── daily-{year}.csv               # Daily summary (one row per day)
+├── state.json                     # Runtime metadata (last successful write time)
 └── activity_tracker_config.json   # User settings
 ```
 
 ### CSV Format
 
-**`activities-{year}.csv`** - Detailed time segments:
+**`activities-{year}.csv`** - Detailed time segments (the single source of
+truth for all aggregates):
 
 | Column | Description |
 |--------|-------------|
@@ -59,18 +61,10 @@ A lightweight system tray application that tracks your active and idle time usin
 | duration_min | Duration in minutes (integer, floored) |
 | duration_seconds | Duration in seconds (for precision) |
 
-**`daily-{year}.csv`** - Per-day summary with separate active/idle totals:
-
-| Column | Description |
-|--------|-------------|
-| date | Calendar date (YYYY-MM-DD) |
-| active_min | Total active minutes for the day |
-| idle_min | Total idle minutes for the day |
-| session_start | First active time of the day (HH:MM) |
-| session_end | Last active time of the day (HH:MM) |
-
-Derived from the segment log on each save, so `active_min + idle_min` always
-matches the day's segment totals. Days with no activity are omitted.
+Per-day and per-week active/idle totals (`get_minutes_for_date`,
+`get_weekly_minutes`) are derived directly from the segment log, so there is no
+separate daily-summary file. The day's `active_min + idle_min` always matches
+the sum of its segment durations. Days with no activity contribute zero.
 
 ## Installation
 
@@ -120,7 +114,7 @@ pytest tests/test_scenarios.py -v     # Integration scenarios
 | Component | Responsibility |
 |-----------|---------------|
 | `app.py` | Main application controller, event loop, save scheduling |
-| `tracking.py` | SessionTracker: active/idle detection, midnight rollover, segment management |
+| `tracking.py` | SessionTracker: active/idle detection, sleep-gap detection, midnight rollover, orphan finalization, segment management |
 | `persistence.py` | CSV I/O, weekly aggregation, segment merging |
 | `models.py` | TimeSegment and Day dataclasses |
 | `activity_tracker_menu.py` | System tray menu UI |

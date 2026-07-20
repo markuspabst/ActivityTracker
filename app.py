@@ -1,4 +1,5 @@
 from __future__ import annotations
+import logging
 import os
 import threading
 import time
@@ -18,9 +19,11 @@ from tracking import (
     get_configured_data_dir,
 )
 from models import TimeSegment
-from persistence import PersistenceManager
+from persistence import PersistenceManager, PersistenceWriteError
 from activity_tracker_menu import AppMenu
 from single_instance import SingleInstanceLock
+
+logger = logging.getLogger(__name__)
 
 class ActivityTrackerApp:
     def __init__(self):
@@ -39,6 +42,7 @@ class ActivityTrackerApp:
 
         self.last_write_time = time.time()
         self._running = False
+        self._save_failure_shown = False
 
         # Auto-optimize throttle state (persisted across restarts).
         self.auto_optimize_threshold = 50  # only compact after this many new segments
@@ -66,13 +70,35 @@ class ActivityTrackerApp:
 
     def update(self):
         idle_time = self.platform.get_idle_time()
-        self.session.on_tick(idle_time, self.idle_threshold)
+        try:
+            self.session.on_tick(idle_time, self.idle_threshold)
+        except PersistenceWriteError:
+            self._alert_save_failure()
+            return
 
         if time.time() - self.last_write_time >= self.write_interval:
-            self.session.save_all_days()
-            self.last_write_time = time.time()
+            try:
+                self.session.save_all_days()
+                self.last_write_time = time.time()
+                self._clear_save_failure()
+            except PersistenceWriteError:
+                self._alert_save_failure()
 
         self.maybe_auto_optimize()
+        self.update_ui()
+
+    def _alert_save_failure(self):
+        # NFR-5.2: data is retained in memory; alert once per failure episode.
+        logger.error("Saving tracking data failed; data is retained in memory and will retry.")
+        if not getattr(self, "_save_failure_shown", False):
+            self._save_failure_shown = True
+            self.platform.show_alert(
+                i18n.t("SAVE_ERROR_TITLE"),
+                i18n.t("SAVE_ERROR_MSG"),
+            )
+
+    def _clear_save_failure(self):
+        self._save_failure_shown = False
         self.update_ui()
 
     def maybe_auto_optimize(self):
@@ -136,12 +162,19 @@ class ActivityTrackerApp:
 
     def quit_app(self):
         self._running = False
-        self.session.finalize_session()
+        try:
+            self.session.finalize_session()
+        except PersistenceWriteError:
+            self._alert_save_failure()
         self.menu.stop()
 
     def force_save(self):
-        self.session.save_all_days()
-        self.last_write_time = time.time()
+        try:
+            self.session.save_all_days()
+            self.last_write_time = time.time()
+            self._clear_save_failure()
+        except PersistenceWriteError:
+            self._alert_save_failure()
 
     def set_target(self, seconds):
         self.target_work_seconds = int(seconds)
@@ -243,24 +276,33 @@ class ActivityTrackerApp:
         reduced_count = original_count - merged_count
 
         # Write merged segments back to CSV
-        with open(segments_file, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=["date", "state", "start", "end", "duration_min", "duration_seconds"])
-            writer.writeheader()
-            for seg in merged_segments:
-                writer.writerow({
-                    "date": seg.start_time.strftime("%Y-%m-%d"),
-                    "state": seg.state,
-                    "start": seg.start_time.strftime("%H:%M:%S"),
-                    "end": seg.end_time.strftime("%H:%M:%S") if seg.end_time else "",
-                    "duration_min": seg.duration_minutes,
-                    "duration_seconds": int((seg.end_time - seg.start_time).total_seconds()) if seg.end_time else 0,
-                })
+        try:
+            with open(segments_file, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=["date", "state", "start", "end", "duration_min", "duration_seconds"])
+                writer.writeheader()
+                for seg in merged_segments:
+                    writer.writerow({
+                        "date": seg.start_time.strftime("%Y-%m-%d"),
+                        "state": seg.state,
+                        "start": seg.start_time.strftime("%H:%M:%S"),
+                        "end": seg.end_time.strftime("%H:%M:%S") if seg.end_time else "",
+                        "duration_min": seg.duration_minutes,
+                        "duration_seconds": int((seg.end_time - seg.start_time).total_seconds()) if seg.end_time else 0,
+                    })
+        except OSError as exc:
+            logger.error("Optimize failed to write %s: %s", segments_file, exc)
+            if not silent:
+                self.platform.show_alert(
+                    i18n.t("SAVE_ERROR_TITLE"),
+                    i18n.t("SAVE_ERROR_MSG"),
+                )
+            return
 
-        # Reload segments into memory
+        # Reload the optimized segments into memory (the file is now authoritative).
+        # The optimized file already contains every day/segment, so re-writing it
+        # via save_all_days() would be a redundant second pass; load_current_day_segments
+        # repopulates in-memory state (including the live ongoing segment) directly.
         self.session.load_current_day_segments()
-
-        # Keep the daily-summary log consistent with the optimized segment log
-        self.session.save_all_days()
 
         # Show success message with optimization results
         msg = i18n.t("OPTIMIZE_SUCCESS_MSG").format(

@@ -10,7 +10,8 @@ from __future__ import annotations
 import json
 import os
 import threading
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
+import datetime as _dt_module
 from typing import Optional, Dict
 from persistence import PersistenceManager
 from models import TimeSegment, Day
@@ -22,6 +23,11 @@ import platformdirs
 # ------------------------------------------------------------
 
 APP_NAME = "ActivityTracker"
+
+# If the gap between two consecutive ticks exceeds this, the machine is assumed
+# to have slept/suspended; the gap is recorded as Idle (FR-1.5). Normal ticks
+# are ~5s apart, so 60s is a safe threshold for "the system was away".
+SLEEP_GAP_THRESHOLD_SECONDS = 60
 
 # ------------------------------------------------------------
 # PATHS
@@ -92,12 +98,27 @@ class SessionTracker:
         # Guards concurrent access to self.days / self.current_segment between
         # the background update thread (writes) and the menu thread (reads).
         self._lock = threading.Lock()
+        # Timestamp of the previous tick; used to detect sleep/suspend gaps.
+        self._last_tick_time: Optional[datetime] = None
 
     def on_tick(self, idle_time: float, idle_threshold: int):
         """Process a tick with consistent timestamp handling."""
         with self._lock:
             now = datetime.now().replace(microsecond=0)
             current_date = now.date()
+
+            # FR-1.5: if the gap since the last tick is far larger than the poll
+            # interval, the machine likely slept/suspended. Record that interval
+            # as Idle and resume normal tracking from `now`. We only do this when
+            # the system appears active afterward (idle_time <= threshold): a
+            # genuine idle stretch already yields Idle segments through the normal
+            # path, so we must not overwrite it. After a real sleep the idle timer
+            # resets to ~0, so this condition detects exactly the false-active case.
+            if self._last_tick_time is not None:
+                gap_seconds = (now - self._last_tick_time).total_seconds()
+                if gap_seconds > SLEEP_GAP_THRESHOLD_SECONDS and idle_time <= idle_threshold:
+                    self._insert_sleep_gap(self._last_tick_time, now)
+            self._last_tick_time = now
 
             if current_date not in self.days:
                 self.days[current_date] = Day(date=current_date)
@@ -130,6 +151,28 @@ class SessionTracker:
                 # Save data for the previous day when midnight crosses
                 self.save_all_days()
 
+    def _insert_sleep_gap(self, gap_start: datetime, gap_end: datetime) -> None:
+        """Record a sleep/suspend interval [gap_start, gap_end) as Idle segments.
+
+        The interval is split at day boundaries so no segment spans a date
+        (FR-2.4). The previously-open segment is closed at the moment sleep
+        began so its tail is not double-counted.
+        """
+        if self.current_segment is not None and self.current_segment.end_time is None:
+            self.current_segment.end_time = gap_start
+
+        cur = gap_start
+        while cur < gap_end:
+            day = cur.date()
+            day_end = datetime.combine(day, datetime.max.time()).replace(microsecond=0)
+            seg_end = gap_end if gap_end <= day_end else day_end
+            segment = TimeSegment(state="idle", start_time=cur, end_time=seg_end)
+            self.days.setdefault(day, Day(date=day)).segments.append(segment)
+            if gap_end <= day_end:
+                break
+            cur = datetime.combine(day, datetime.min.time()).replace(microsecond=0) + timedelta(days=1)
+        self.current_segment = self.days[cur.date()].segments[-1]
+
     def finalize_session(self):
         if self.current_segment and self.current_segment.end_time is None:
             now = datetime.now().replace(microsecond=0)
@@ -146,10 +189,9 @@ class SessionTracker:
                     seg.end_time = now
 
         self.pm.save_segments(self.days)
-
-        # Write the per-day summary log (separate active/idle totals, FR-3.3).
-        # Derived from the segment log we just wrote, so both stay consistent.
-        self.pm.save_daily_summary(list(self.days.keys()))
+        # Persist the last successful write time so an orphaned open segment
+        # from an abnormal shutdown can be finalized to a known timestamp (FR-2.6).
+        self.pm.save_last_segment_write(now)
 
         # Reset end_time for the current segment so it remains ongoing
         if self.current_segment:
@@ -198,11 +240,23 @@ class SessionTracker:
             # Re-sort segments by start_time to maintain order
             self.days[today].segments.sort(key=lambda seg: seg.start_time)
 
-            # Set current_segment to the last segment if it's still ongoing (end_time is None)
-            if self.days[today].segments:
-                last_segment = self.days[today].segments[-1]
-                if last_segment.end_time is None:
-                    self.current_segment = last_segment
+            # FR-2.6: finalize any orphaned open segment from a previous
+            # (abnormal) shutdown so the untracked gap is not counted as active
+            # time. Close it at the last known write time (persisted on each
+            # save) — the most recent moment we are confident data was recorded.
+            # If no write time is known, conservatively close it at its own start
+            # (no unknown time is credited). The segment is finalized and not
+            # resumed as the current (ongoing) segment.
+            open_segments = [s for s in self.days[today].segments if s.end_time is None]
+            if open_segments:
+                last_write = self.pm.read_last_segment_write()
+                if not isinstance(last_write, _dt_module.datetime):
+                    last_write = None
+                now = datetime.now().replace(microsecond=0)
+                for seg in open_segments:
+                    seg.end_time = max(seg.start_time, min(last_write, now)) if last_write else seg.start_time
+                # Orphan finalized; do not resume it as the current segment.
+                self.current_segment = None
 
     def set_locked(self, is_locked: bool):
         self.is_locked = is_locked

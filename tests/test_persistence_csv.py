@@ -295,13 +295,13 @@ def test_get_minutes_for_date_filters_by_state(pm, tmp_path):
 
 
 def test_get_minutes_for_date_bad_duration_is_ignored(pm, tmp_path):
-    """A corrupt duration_min value must not crash the reader (returns 0,0)."""
+    """A corrupt duration_seconds value must not crash the reader (row ignored)."""
     _write_raw(
         pm, 2026,
         ["date", "state", "start", "end", "duration_min", "duration_seconds"],
-        [["2026-07-01", "active", "09:00:00", "10:00:00", "notanint", "3600"]],
+        [["2026-07-01", "active", "09:00:00", "10:00:00", "60", "notanint"]],
     )
-    # Row is within range, but int() conversion fails -> whole call returns (0,0)
+    # duration_seconds fails to parse -> that row contributes 0, call returns (0,0)
     assert pm.get_minutes_for_date(date(2026, 7, 1)) == (0, 0)
 
 
@@ -381,17 +381,19 @@ def test_get_weekly_minutes_bad_duration_is_ignored(pm, tmp_path):
     _write_raw(
         pm, 2026,
         ["date", "state", "start", "end", "duration_min", "duration_seconds"],
-        [["2026-07-01", "active", "09:00:00", "10:00:00", "xx", "3600"]],
+        [["2026-07-01", "active", "09:00:00", "10:00:00", "60", "notanint"]],
     )
     week_start = date(2026, 7, 1)
     assert pm.get_weekly_minutes(week_start) == (0, 0)
 
 
 # ------------------------------------------------------------
-# save_daily_summary (FR-3.3) - separate active/idle per day
+# Aggregates (get_minutes_for_date / get_weekly_minutes)
+# These are sourced directly from the activities segment log; there is no
+# separate daily-summary file anymore.
 # ------------------------------------------------------------
 
-def test_save_daily_summary_writes_separate_active_and_idle(pm, tmp_path):
+def test_get_minutes_for_date_derives_from_activities_log(pm, tmp_path):
     d = Day(date=date(2026, 7, 1))
     d.segments.append(TimeSegment(
         state="active",
@@ -404,112 +406,88 @@ def test_save_daily_summary_writes_separate_active_and_idle(pm, tmp_path):
         end_time=datetime(2026, 7, 1, 10, 15, 0),
     ))
     pm.save_segments({date(2026, 7, 1): d})
-    pm.save_daily_summary([date(2026, 7, 1)])
 
-    path = pm.get_log_file_path("daily", 2026)
-    with open(path) as f:
-        lines = [ln.strip() for ln in f.readlines()]
-    assert lines[0] == "date,active_min,idle_min,session_start,session_end"
-    row = dict(zip(lines[0].split(","), lines[1].split(",")))
-    assert row["date"] == "2026-07-01"
-    assert row["active_min"] == "60"
-    assert row["idle_min"] == "15"
-    assert row["session_start"] == "09:00"
-    assert row["session_end"] == "10:00"  # last active segment end
+    active, idle = pm.get_minutes_for_date(date(2026, 7, 1))
+    assert active == 60
+    assert idle == 15
+
+    # No separate daily-summary file should be written.
+    assert not os.path.exists(pm.get_log_file_path("daily", 2026))
 
 
-def test_save_daily_summary_omits_days_without_activity(pm, tmp_path):
-    # A day with no segments at all -> no row (FR-3.7)
-    pm.save_daily_summary([date(2026, 7, 2)])
-    path = pm.get_log_file_path("daily", 2026)
-    assert not os.path.exists(path)
-
-
-def test_save_daily_summary_is_idempotent_and_updates(pm, tmp_path):
+def test_get_minutes_for_date_floors_seconds_like_daily_summary(pm, tmp_path):
     d = Day(date=date(2026, 7, 1))
     d.segments.append(TimeSegment(
         state="active",
         start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 9, 30, 0),
+        end_time=datetime(2026, 7, 1, 9, 0, 59),  # 59s -> 0 minutes
+    ))
+    d.segments.append(TimeSegment(
+        state="idle",
+        start_time=datetime(2026, 7, 1, 9, 1, 0),
+        end_time=datetime(2026, 7, 1, 9, 1, 30),  # 30s -> 0 minutes
     ))
     pm.save_segments({date(2026, 7, 1): d})
-    pm.save_daily_summary([date(2026, 7, 1)])
-    pm.save_daily_summary([date(2026, 7, 1)])
 
-    path = pm.get_log_file_path("daily", 2026)
-    with open(path) as f:
-        rows = list(csv.DictReader(f))
-    assert len(rows) == 1
-    assert rows[0]["active_min"] == "30"
+    active, idle = pm.get_minutes_for_date(date(2026, 7, 1))
+    assert active == 0
+    assert idle == 0
 
 
-def test_save_daily_summary_splits_by_year(pm, tmp_path):
-    d1 = Day(date=date(2026, 12, 31))
-    d1.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 12, 31, 23, 0, 0),
-        end_time=datetime(2026, 12, 31, 23, 30, 0),
-    ))
-    d2 = Day(date=date(2027, 1, 1))
-    d2.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2027, 1, 1, 0, 0, 0),
-        end_time=datetime(2027, 1, 1, 0, 30, 0),
-    ))
-    pm.save_segments({date(2026, 12, 31): d1, date(2027, 1, 1): d2})
-    pm.save_daily_summary([date(2026, 12, 31), date(2027, 1, 1)])
-
-    assert os.path.exists(pm.get_log_file_path("daily", 2026))
-    assert os.path.exists(pm.get_log_file_path("daily", 2027))
-
-
-def test_save_daily_summary_preserves_untouched_days(pm, tmp_path):
+def test_get_weekly_minutes_sums_days_from_activities_log(pm, tmp_path):
     d1 = Day(date=date(2026, 7, 1))
     d1.segments.append(TimeSegment(
         state="active",
         start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 9, 30, 0),
+        end_time=datetime(2026, 7, 1, 10, 0, 0),
     ))
-    d2 = Day(date=date(2026, 7, 2))
+    d2 = Day(date=date(2026, 7, 3))
     d2.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 2, 9, 0, 0),
-        end_time=datetime(2026, 7, 2, 9, 45, 0),
+        state="idle",
+        start_time=datetime(2026, 7, 3, 9, 0, 0),
+        end_time=datetime(2026, 7, 3, 9, 45, 0),
     ))
-    pm.save_segments({date(2026, 7, 1): d1, date(2026, 7, 2): d2})
-    pm.save_daily_summary([date(2026, 7, 1)])
-    pm.save_daily_summary([date(2026, 7, 2)])  # a later save for a different day
+    pm.save_segments({date(2026, 7, 1): d1, date(2026, 7, 3): d2})
 
-    path = pm.get_log_file_path("daily", 2026)
-    with open(path) as f:
-        rows = {r["date"]: r for r in csv.DictReader(f)}
-    assert set(rows) == {"2026-07-01", "2026-07-02"}
-    assert rows["2026-07-01"]["active_min"] == "30"
-    assert rows["2026-07-02"]["active_min"] == "45"
+    active, idle = pm.get_weekly_minutes(date(2026, 6, 29))
+    assert active == 60
+    assert idle == 45
 
 
-def test_save_daily_summary_matches_segment_totals(pm, tmp_path):
-    """FR-3.8: active_min + idle_min in daily log equals segment totals."""
+def test_save_segments_drops_inner_segment_covered_by_merged(pm, tmp_path):
+    """A merged/extended segment must not leave an overlapping inner row behind."""
+    # Seed a file with an outer segment and an inner one (e.g. legacy/corrupt overlap)
+    _write_raw(
+        pm, 2026,
+        ["date", "state", "start", "end", "duration_min", "duration_seconds"],
+        [
+            ["2026-07-01", "active", "09:00:00", "09:30:00", "30", "1800"],
+            ["2026-07-01", "idle", "09:15:00", "09:25:00", "10", "600"],
+        ],
+    )
+    # Now persist an extended active segment 09:00-10:00 that covers the inner one
     d = Day(date=date(2026, 7, 1))
     d.segments.append(TimeSegment(
         state="active",
         start_time=datetime(2026, 7, 1, 9, 0, 0),
         end_time=datetime(2026, 7, 1, 10, 0, 0),
     ))
-    d.segments.append(TimeSegment(
-        state="idle",
-        start_time=datetime(2026, 7, 1, 10, 0, 0),
-        end_time=datetime(2026, 7, 1, 10, 20, 0),
-    ))
     pm.save_segments({date(2026, 7, 1): d})
-    pm.save_daily_summary([date(2026, 7, 1)])
 
-    seg_active, seg_idle = pm.get_minutes_for_date(date(2026, 7, 1))
-    path = pm.get_log_file_path("daily", 2026)
-    with open(path) as f:
-        row = next(csv.DictReader(f))
-    assert int(row["active_min"]) == seg_active
-    assert int(row["idle_min"]) == seg_idle
+    segs = pm.read_segments_for_day(date(2026, 7, 1))
+    assert len(segs) == 1
+    assert segs[0].start_time == datetime(2026, 7, 1, 9, 0, 0)
+    assert segs[0].end_time == datetime(2026, 7, 1, 10, 0, 0)
+
+
+def test_readers_survive_unreadable_log_file(pm, tmp_path):
+    """A corrupt/unreadable activities log must not raise; return empty."""
+    # Point the 2026 activities log at a directory so open() fails.
+    real_path = pm.get_log_file_path("activities", 2026)
+    os.makedirs(real_path, exist_ok=True)
+    # get_minutes_for_date / read_segments_for_day should return empty, not raise
+    assert pm.get_minutes_for_date(date(2026, 7, 1)) == (0, 0)
+    assert pm.read_segments_for_day(date(2026, 7, 1)) == []
 
 
 # ------------------------------------------------------------

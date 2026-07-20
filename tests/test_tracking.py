@@ -117,13 +117,15 @@ def test_session_tracker_tick(patch_all_datetimes):
 
 def test_session_tracker_midnight_rollover(patch_all_datetimes):
     s = make_session()
-    patch_all_datetimes.set_now(FROZEN_DAY1)
+    # Use a realistic sub-threshold gap (production ticks every ~5s) so the
+    # sleep-gap detector does not fire across the day boundary.
+    patch_all_datetimes.set_now(datetime(2026, 7, 1, 23, 59, 58))
     s.on_tick(idle_time=0, idle_threshold=300)
 
-    patch_all_datetimes.set_now(FROZEN_DAY2)
+    patch_all_datetimes.set_now(datetime(2026, 7, 2, 0, 0, 3))
     s.on_tick(idle_time=0, idle_threshold=300)
-    assert FROZEN_DAY1.date() in s.days or FROZEN_DAY2.date() in s.days
-    assert FROZEN_DAY2.date() in s.days
+    assert date(2026, 7, 1) in s.days or date(2026, 7, 2) in s.days
+    assert date(2026, 7, 2) in s.days
 
 def test_session_tracker_finalize(patch_all_datetimes):
     s = make_session()
@@ -238,6 +240,9 @@ def test_session_tracker_load_current_day_segments_with_ongoing_segment(pm, temp
     day_data_to_save.segments.append(TimeSegment(state='active', start_time=datetime(2026, 7, 15, 7, 0, 0), end_time=datetime(2026, 7, 15, 7, 30, 0)))
     day_data_to_save.segments.append(TimeSegment(state='idle', start_time=datetime(2026, 7, 15, 8, 0, 0), end_time=datetime(2026, 7, 15, 8, 30, 0)))
     pm_real.save_segments({today: day_data_to_save})
+    # Provide a known last-write time so the (manually added) open segment below
+    # finalizes with a real duration (FR-2.6) instead of being credited zero.
+    pm_real.save_last_segment_write(datetime(2026, 7, 15, 10, 0, 0))
 
     s = SessionTracker(pm_real)
     patch_all_datetimes.set_now(datetime(2026, 7, 15, 10, 0, 0))
@@ -250,26 +255,75 @@ def test_session_tracker_load_current_day_segments_with_ongoing_segment(pm, temp
     assert s.days[today].active_minutes >= 60
 
 
-def test_session_tracker_load_current_day_segments_sets_ongoing_current(pm, temp_data_dir, patch_all_datetimes):
+def test_session_tracker_load_finalizes_orphaned_open_segment(tmp_path, patch_all_datetimes):
     from persistence import PersistenceManager
     from tracking import SessionTracker
 
-    pm_real = PersistenceManager(lambda: str(temp_data_dir))
+    pm_real = PersistenceManager(lambda: str(tmp_path))
     today = date(2026, 7, 15)
 
     day_data_to_save = Day(date=today)
     day_data_to_save.segments.append(TimeSegment(state='active', start_time=datetime(2026, 7, 15, 7, 0, 0), end_time=datetime(2026, 7, 15, 7, 30, 0)))
-    # Last segment is ongoing (no end_time)
+    # Last segment is ongoing (no end_time) -> simulated abnormal shutdown.
     day_data_to_save.segments.append(TimeSegment(state='idle', start_time=datetime(2026, 7, 15, 8, 0, 0)))
     pm_real.save_segments({today: day_data_to_save})
+    pm_real.save_last_segment_write(datetime(2026, 7, 15, 9, 0, 0))
 
     s = SessionTracker(pm_real)
     patch_all_datetimes.set_now(datetime(2026, 7, 15, 10, 0, 0))
     s.load_current_day_segments()
 
-    assert s.current_segment is not None
-    assert s.current_segment.end_time is None
-    assert s.current_segment.start_time == datetime(2026, 7, 15, 8, 0, 0)
+    # FR-2.6: the orphan is finalized (not resumed as ongoing), and its end is
+    # clamped to the last known write time so the untracked gap is not counted.
+    assert s.current_segment is None
+    orphan = s.days[today].segments[-1]
+    assert orphan.end_time is not None
+    assert orphan.end_time == datetime(2026, 7, 15, 9, 0, 0)
+
+
+def test_on_tick_records_sleep_gap_as_idle(patch_all_datetimes):
+    s = make_session()
+    patch_all_datetimes.set_now(datetime(2026, 7, 15, 9, 0, 0))
+    s.on_tick(idle_time=0, idle_threshold=300)
+
+    # Simulate the machine sleeping for ~2 hours (far beyond the poll interval).
+    patch_all_datetimes.set_now(datetime(2026, 7, 15, 11, 0, 0))
+    s.on_tick(idle_time=0, idle_threshold=300)
+
+    segs = s.days[date(2026, 7, 15)].segments
+    idle_segs = [seg for seg in segs if seg.state == 'idle']
+    assert idle_segs, "expected an idle segment covering the sleep gap"
+    gap = idle_segs[0]
+    assert gap.start_time == datetime(2026, 7, 15, 9, 0, 0)
+    assert gap.end_time == datetime(2026, 7, 15, 11, 0, 0)
+
+
+def test_on_tick_no_false_sleep_gap_for_normal_interval(patch_all_datetimes):
+    s = make_session()
+    patch_all_datetimes.set_now(datetime(2026, 7, 15, 9, 0, 0))
+    s.on_tick(idle_time=0, idle_threshold=300)
+    # A normal ~5s tick gap must NOT be recorded as a sleep interval.
+    patch_all_datetimes.set_now(datetime(2026, 7, 15, 9, 0, 5))
+    s.on_tick(idle_time=0, idle_threshold=300)
+    idle_segs = [seg for seg in s.days[date(2026, 7, 15)].segments if seg.state == 'idle']
+    assert not idle_segs
+
+
+def test_save_all_days_propagates_write_error_and_retains_memory():
+    from persistence import PersistenceWriteError
+    s = make_session()
+    today = date(2026, 7, 15)
+    s.days[today] = Day(date=today)
+    s.current_segment = TimeSegment('active', datetime(2026, 7, 15, 9, 0, 0))
+    s.days[today].segments.append(s.current_segment)
+    s.pm.save_segments.side_effect = PersistenceWriteError("disk full")
+
+    with pytest.raises(PersistenceWriteError):
+        s.save_all_days()
+
+    # In-memory data must be retained (not cleared) so it can be retried (NFR-5.2).
+    assert today in s.days
+    assert len(s.days[today].segments) == 1
 
 
 # ============================================================
