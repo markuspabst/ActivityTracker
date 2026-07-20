@@ -225,6 +225,13 @@ class PersistenceManager:
                 and prev.start_time.date() == seg.start_time.date()
             )
             if same_day and prev.end_time and seg.start_time and prev.state == seg.state:
+                # Guard against overlapping segments (shouldn't happen in normal
+                # operation, but corrupt/legacy/manually-edited CSV could contain
+                # them). Never create a segment with end_time < start_time.
+                if seg.start_time < prev.end_time:
+                    if seg.end_time and seg.end_time > prev.end_time:
+                        prev.end_time = seg.end_time
+                    continue
                 gap = (seg.start_time - prev.end_time).total_seconds()
                 if gap <= idle_threshold / 2:
                     prev.end_time = seg.end_time or datetime.now().replace(microsecond=0)

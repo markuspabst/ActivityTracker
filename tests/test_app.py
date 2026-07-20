@@ -292,6 +292,33 @@ def test_merge_segments_to_save_merges_same_day_small_gap():
     assert len(merged) == 1
 
 
+def test_merge_segments_to_save_handles_overlap_no_negative_duration():
+    from persistence import PersistenceManager
+    # Overlapping active segments (seg2 starts before seg1 ends) — e.g. from a
+    # corrupt/legacy/manually-edited CSV. The merge must NOT create a segment
+    # with end_time < start_time (negative duration); it should keep the later
+    # end and drop the overlapping portion.
+    seg1 = TimeSegment("active", datetime(2026, 7, 15, 9, 0, 0), datetime(2026, 7, 15, 10, 0, 0))
+    seg2 = TimeSegment("active", datetime(2026, 7, 15, 9, 30, 0), datetime(2026, 7, 15, 9, 45, 0))
+    merged = PersistenceManager.merge_segments_to_save([seg1, seg2], idle_threshold=300)
+    assert len(merged) == 1
+    # end_time must be >= start_time (no negative-duration segment)
+    assert merged[0].end_time >= merged[0].start_time
+    assert merged[0].end_time == datetime(2026, 7, 15, 10, 0, 0)
+
+
+def test_merge_segments_to_save_overlap_extends_to_later_end():
+    from persistence import PersistenceManager
+    # seg2 overlaps seg1 but extends past it -> result keeps the later end.
+    seg1 = TimeSegment("active", datetime(2026, 7, 15, 9, 0, 0), datetime(2026, 7, 15, 9, 30, 0))
+    seg2 = TimeSegment("active", datetime(2026, 7, 15, 9, 15, 0), datetime(2026, 7, 15, 10, 30, 0))
+    merged = PersistenceManager.merge_segments_to_save([seg1, seg2], idle_threshold=300)
+    assert len(merged) == 1
+    assert merged[0].start_time == datetime(2026, 7, 15, 9, 0, 0)
+    assert merged[0].end_time == datetime(2026, 7, 15, 10, 30, 0)
+    assert merged[0].end_time >= merged[0].start_time
+
+
 # ------------------------------------------------------------
 # Regression: MEDIUM #2 - optimize_csv must tolerate missing columns
 # ------------------------------------------------------------
