@@ -3,6 +3,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, List
 
+
+def _round_minutes(seconds: float) -> int:
+    """Round seconds to nearest whole minute (0.5 rounds up)."""
+    return int(seconds / 60 + 0.5)
+
 @dataclass
 class TimeSegment:
     state: str  # 'active' or 'idle'
@@ -18,11 +23,11 @@ class TimeSegment:
 
     @property
     def duration_minutes(self) -> int:
-        """Calculate duration in whole minutes, always floored."""
+        """Calculate duration in whole minutes, rounded to nearest."""
         if self.end_time is None:
             # For ongoing segments, calculate from start_time to now
-            return int((datetime.now() - self.start_time).total_seconds() / 60)
-        return int((self.end_time - self.start_time).total_seconds() / 60)
+            return _round_minutes((datetime.now() - self.start_time).total_seconds())
+        return _round_minutes((self.end_time - self.start_time).total_seconds())
 
 @dataclass
 class Day:

@@ -98,9 +98,15 @@ class ActivityTrackerApp:
 
     def update_ui(self):
         today = datetime.now().date()
-        current_day_data = self.session.days.get(today)
-        active_today = current_day_data.total_active_seconds() if current_day_data else 0
-        is_idle = self.session.current_segment.state == 'idle' if self.session.current_segment else False
+
+        # Guard shared session state: the updater thread mutates
+        # self.session.days / current_segment while this thread reads it.
+        with self.session._lock:
+            current_day_data = self.session.days.get(today)
+            active_today = current_day_data.total_active_seconds() if current_day_data else 0
+            is_idle = self.session.current_segment.state == 'idle' if self.session.current_segment else False
+            idle_today = (current_day_data.idle_minutes * 60) if current_day_data else 0
+            session_start = current_day_data.session_start if current_day_data else None
 
         week_start_date = today - timedelta(days=today.weekday())
         # Get weekly total from CSV
@@ -114,14 +120,14 @@ class ActivityTrackerApp:
         # Clamp to zero so the weekly totals can never go negative (e.g. after
         # optimize/merge reduces the in-memory total, or due to clock skew).
         active_ongoing_seconds = max(0, active_today - (today_csv_active * 60))
-        idle_ongoing_minutes = max(0, (current_day_data.idle_minutes if current_day_data else 0) - today_csv_idle)
+        idle_ongoing_minutes = max(0, idle_today - today_csv_idle)
         idle_ongoing_seconds = idle_ongoing_minutes * 60
 
         # Add ongoing seconds to weekly totals
         total_weekly_active = (weekly_active_minutes * 60) + active_ongoing_seconds
         total_weekly_idle = (weekly_idle_minutes * 60) + idle_ongoing_seconds
 
-        self.menu.update_ui(is_idle, active_today, total_weekly_active, self.weekly_target_seconds, total_weekly_idle)
+        self.menu.update_ui(is_idle, active_today, total_weekly_active, self.weekly_target_seconds, total_weekly_idle, idle_today, session_start)
 
     def quit_app(self):
         self._running = False
@@ -263,6 +269,9 @@ class ActivityTrackerApp:
                     i18n.t("SAVE_ERROR_MSG"),
                 )
             return
+
+        # Invalidate the totals cache so the next read picks up the optimised data
+        self.pm.invalidate_totals_cache(today.year)
 
         # Reload the optimized segments into memory (the file is now authoritative).
         # The optimized file already contains every day/segment, so re-writing it

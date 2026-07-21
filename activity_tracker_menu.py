@@ -31,16 +31,13 @@ class AppMenu:
     def stop(self):
         self.icon.stop()
 
-    def update_ui(self, is_idle, active_today, active_week, weekly_target, weekly_idle_week=None):
-        # Guard shared session state: the updater thread mutates
-        # self.app.session.days / current_segment while this (main) thread reads it.
-        with self.app.session._lock:
-            today_date = datetime.now().date()
-            today_data = self.app.session.days.get(today_date)
+    def update_ui(self, is_idle, active_today, active_week, weekly_target, weekly_idle_week=None, idle_today=0, session_start=None):
+        # All values are pre-computed by the caller (app.update_ui) under the
+        # session lock, so no direct access to self.app.session.days is needed.
 
-            self._active_today_session = active_today
-            self._idle_today_session = (today_data.idle_minutes * 60) if today_data else 0
-            self._session_start = today_data.session_start if today_data else None
+        self._active_today_session = active_today
+        self._idle_today_session = idle_today
+        self._session_start = session_start
 
         self._total_weekly_active = active_week
         self._total_weekly_idle = weekly_idle_week if weekly_idle_week is not None else 0

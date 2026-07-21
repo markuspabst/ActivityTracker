@@ -295,14 +295,17 @@ def test_get_minutes_for_date_filters_by_state(pm, tmp_path):
 
 
 def test_get_minutes_for_date_bad_duration_is_ignored(pm, tmp_path):
-    """A corrupt duration_seconds value must not crash the reader (row ignored)."""
+    """A corrupt duration_seconds value must not crash the reader (row ignored).
+    duration_min is the authoritative column, so a valid duration_min is used
+    even when duration_seconds is corrupt.
+    """
     _write_raw(
         pm, 2026,
         ["date", "state", "start", "end", "duration_min", "duration_seconds"],
         [["2026-07-01", "active", "09:00:00", "10:00:00", "60", "notanint"]],
     )
-    # duration_seconds fails to parse -> that row contributes 0, call returns (0,0)
-    assert pm.get_minutes_for_date(date(2026, 7, 1)) == (0, 0)
+    # duration_min is parsable even though duration_seconds is corrupt.
+    assert pm.get_minutes_for_date(date(2026, 7, 1)) == (60, 0)
 
 
 # ------------------------------------------------------------
@@ -384,7 +387,8 @@ def test_get_weekly_minutes_bad_duration_is_ignored(pm, tmp_path):
         [["2026-07-01", "active", "09:00:00", "10:00:00", "60", "notanint"]],
     )
     week_start = date(2026, 7, 1)
-    assert pm.get_weekly_minutes(week_start) == (0, 0)
+    # duration_min is parsable even though duration_seconds is corrupt.
+    assert pm.get_weekly_minutes(week_start) == (60, 0)
 
 
 # ------------------------------------------------------------
@@ -415,23 +419,23 @@ def test_get_minutes_for_date_derives_from_activities_log(pm, tmp_path):
     assert not os.path.exists(pm.get_log_file_path("daily", 2026))
 
 
-def test_get_minutes_for_date_floors_seconds_like_daily_summary(pm, tmp_path):
+def test_get_minutes_for_date_rounds_like_duration_minutes(pm, tmp_path):
     d = Day(date=date(2026, 7, 1))
     d.segments.append(TimeSegment(
         state="active",
         start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 9, 0, 59),  # 59s -> 0 minutes
+        end_time=datetime(2026, 7, 1, 9, 0, 59),  # 59s -> 1 minute (rounded)
     ))
     d.segments.append(TimeSegment(
         state="idle",
         start_time=datetime(2026, 7, 1, 9, 1, 0),
-        end_time=datetime(2026, 7, 1, 9, 1, 30),  # 30s -> 0 minutes
+        end_time=datetime(2026, 7, 1, 9, 1, 30),  # 30s -> 1 minute (0.5 rounds up)
     ))
     pm.save_segments({date(2026, 7, 1): d})
 
     active, idle = pm.get_minutes_for_date(date(2026, 7, 1))
-    assert active == 0
-    assert idle == 0
+    assert active == 1
+    assert idle == 1
 
 
 def test_get_weekly_minutes_sums_days_from_activities_log(pm, tmp_path):

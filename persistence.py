@@ -35,11 +35,19 @@ def _hms_to_seconds(value: str) -> Optional[int]:
 
 
 class PersistenceManager:
-    __slots__ = ('_get_data_dir', '_path_cache')
+    __slots__ = ('_get_data_dir', '_path_cache', '_totals_cache')
 
     def __init__(self, data_dir_fn) -> None:
         self._get_data_dir = data_dir_fn
         self._path_cache: Dict[str, str] = {}
+        self._totals_cache: Dict[int, Dict[str, Tuple[int, int]]] = {}
+
+    def invalidate_totals_cache(self, year: Optional[int] = None) -> None:
+        """Invalidate the day-totals cache for *year*, or all years if omitted."""
+        if year is None:
+            self._totals_cache.clear()
+        else:
+            self._totals_cache.pop(year, None)
 
     def get_log_file_path(self, prefix: str, year: int) -> Path:
         key = f"{prefix}-{year}"
@@ -68,22 +76,39 @@ class PersistenceManager:
         )
 
     def _day_totals_for_year(self, year: int) -> Dict[str, Tuple[int, int]]:
-        """Read one year's activities log once and return {date: (active_min, idle_min)}."""
+        """Read one year's activities log once and return {date: (active_min, idle_min)}.
+
+        Results are cached per year; call ``invalidate_totals_cache(year)``
+        after the file is re-written to force a fresh read.
+        """
+        if year in self._totals_cache:
+            return self._totals_cache[year]
+
         path = str(self.get_log_file_path(ACTIVITIES_LOG_PREFIX, year))
         totals: Dict[str, Tuple[int, int]] = {}
         if not os.path.exists(path):
+            self._totals_cache[year] = totals
             return totals
         try:
             with open(path, "r", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
                     date_str = row['date']
-                    try:
-                        dur_seconds = int(float(row.get('duration_seconds', '0') or '0'))
-                    except (ValueError, TypeError):
-                        dur_seconds = 0
-                    # Floor to whole minutes, matching the per-segment totals.
-                    dur = dur_seconds // 60
+                    # Prefer the stored duration_min column (which uses the same
+                    # rounding as the model), falling back to duration_seconds // 60
+                    # for legacy CSV files that predate the column.
+                    dur_str = row.get('duration_min', '')
+                    if dur_str and dur_str.strip():
+                        try:
+                            dur = int(dur_str)
+                        except (ValueError, TypeError):
+                            dur = 0
+                    else:
+                        try:
+                            dur_seconds = int(float(row.get('duration_seconds', '0') or '0'))
+                            dur = (dur_seconds + 30) // 60  # round to nearest
+                        except (ValueError, TypeError):
+                            dur = 0
                     active, idle = totals.get(date_str, (0, 0))
                     if row['state'] == 'active':
                         active += dur
@@ -92,6 +117,7 @@ class PersistenceManager:
                     totals[date_str] = (active, idle)
         except (IOError, csv.Error, OSError) as exc:
             logger.warning("Failed to read activities log for %s: %s", year, exc)
+        self._totals_cache[year] = totals
         return totals
 
     def read_segments_for_day(self, target_date: date) -> List[TimeSegment]:
@@ -193,15 +219,22 @@ class PersistenceManager:
                     writer.writeheader()
                     for key in sorted_keys:
                         writer.writerow(existing_segments[key])
+                # File was written successfully — invalidate the totals cache for
+                # this year so the next read picks up fresh data.
+                self._totals_cache.pop(year, None)
             except (IOError, OSError) as exc:
                 logger.error("Failed to write %s: %s", path, exc)
                 raise PersistenceWriteError(f"Could not write {path}: {exc}") from exc
 
     @staticmethod
     def merge_segments_to_save(segments: List[TimeSegment], idle_threshold: int = 300) -> List[TimeSegment]:
-        """Merge consecutive same-state segments whose gap is within idle_threshold."""
+        """Merge consecutive same-state segments whose gap is within idle_threshold.
+
+        Returns a new list of ``TimeSegment`` objects; the input list is never
+        mutated in place.
+        """
         if len(segments) <= 1:
-            return segments
+            return segments[:]
         merged: List[TimeSegment] = [segments[0]]
         for seg in segments[1:]:
             prev = merged[-1]
@@ -220,11 +253,21 @@ class PersistenceManager:
                 # them). Never create a segment with end_time < start_time.
                 if seg.start_time < prev.end_time:
                     if seg.end_time and seg.end_time > prev.end_time:
-                        prev.end_time = seg.end_time
+                        # Replace prev with a new copy so the original is not mutated
+                        merged[-1] = TimeSegment(
+                            state=prev.state,
+                            start_time=prev.start_time,
+                            end_time=seg.end_time,
+                        )
                     continue
                 gap = (seg.start_time - prev.end_time).total_seconds()
                 if gap <= idle_threshold:
-                    prev.end_time = seg.end_time or datetime.now().replace(microsecond=0)
+                    # Replace prev with a new copy so the original is not mutated
+                    merged[-1] = TimeSegment(
+                        state=prev.state,
+                        start_time=prev.start_time,
+                        end_time=seg.end_time or datetime.now().replace(microsecond=0),
+                    )
                     continue
             merged.append(seg)
         return merged
