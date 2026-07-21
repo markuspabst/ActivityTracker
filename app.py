@@ -120,8 +120,7 @@ class ActivityTrackerApp:
         # Clamp to zero so the weekly totals can never go negative (e.g. after
         # optimize/merge reduces the in-memory total, or due to clock skew).
         active_ongoing_seconds = max(0, active_today - (today_csv_active * 60))
-        idle_ongoing_minutes = max(0, idle_today - today_csv_idle)
-        idle_ongoing_seconds = idle_ongoing_minutes * 60
+        idle_ongoing_seconds = max(0, idle_today - (today_csv_idle * 60))
 
         # Add ongoing seconds to weekly totals
         total_weekly_active = (weekly_active_minutes * 60) + active_ongoing_seconds
