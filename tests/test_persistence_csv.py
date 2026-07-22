@@ -50,6 +50,19 @@ def test_get_log_file_path_respects_prefix(pm, tmp_path):
     assert str(p) == os.path.join(str(tmp_path), "otherprefix-2025.csv")
 
 
+def test_get_log_file_path_recomputes_after_path_cache_invalidation(tmp_path):
+    data_dir = {"path": str(tmp_path / "one")}
+    pm = PersistenceManager(lambda: data_dir["path"])
+
+    first = pm.get_log_file_path("activities", 2026)
+    data_dir["path"] = str(tmp_path / "two")
+    pm.invalidate_path_cache()
+    second = pm.get_log_file_path("activities", 2026)
+
+    assert str(first) == os.path.join(str(tmp_path / "one"), "activities-2026.csv")
+    assert str(second) == os.path.join(str(tmp_path / "two"), "activities-2026.csv")
+
+
 def test_get_data_dir(pm, tmp_path):
     assert pm.get_data_dir() == str(tmp_path)
 

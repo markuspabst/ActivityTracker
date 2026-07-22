@@ -144,21 +144,37 @@ def test_update_ui_computes_and_calls_menu(app, monkeypatch):
 
 def test_select_data_folder(app, monkeypatch):
     app.platform.choose_folder_dialog.return_value = "/selected/folder"
+    app.force_save = MagicMock()
+    app.update_ui = MagicMock()
+    app.session.load_current_day_segments = MagicMock()
+    invalidate_caches = MagicMock()
+    monkeypatch.setattr(app_module.PersistenceManager, "invalidate_caches", invalidate_caches)
     # These are module-level names referenced by the method, not instance attrs
     mock_persist = MagicMock()
     monkeypatch.setattr(app_module, "persist_data_dir", mock_persist)
     app.select_data_folder()
+    app.force_save.assert_called_once()
     assert app._data_dir_calls == ["/selected/folder"]
     mock_persist.assert_called_once_with("/selected/folder")
+    invalidate_caches.assert_called_once()
+    app.session.load_current_day_segments.assert_called_once()
+    app.update_ui.assert_called_once()
 
 
 def test_reset_data_folder(app, monkeypatch):
-    app.session.save_all_days = MagicMock()  # from force_save
+    app.force_save = MagicMock()
+    app.update_ui = MagicMock()
+    app.session.load_current_day_segments = MagicMock()
+    invalidate_caches = MagicMock()
+    monkeypatch.setattr(app_module.PersistenceManager, "invalidate_caches", invalidate_caches)
     mock_reset = MagicMock()
     monkeypatch.setattr(app_module, "reset_data_dir_to_default", mock_reset)
     app.reset_data_folder()
-    app.session.save_all_days.assert_called_once()
+    app.force_save.assert_called_once()
     mock_reset.assert_called_once()
+    invalidate_caches.assert_called_once()
+    app.session.load_current_day_segments.assert_called_once()
+    app.update_ui.assert_called_once()
 
 
 def test_select_data_folder_cancelled(app):

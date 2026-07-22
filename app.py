@@ -173,10 +173,25 @@ class ActivityTrackerApp:
         self.force_save()
         set_data_dir(folder)
         persist_data_dir(folder)
+        self._reload_from_current_data_folder()
 
     def reset_data_folder(self):
         self.force_save()
         reset_data_dir_to_default()
+        self._reload_from_current_data_folder()
+
+    def _reload_from_current_data_folder(self):
+        """Reload in-memory session/weekly view from the currently configured data folder."""
+        # Clear cached paths/aggregates that were computed against the old folder.
+        self.pm.invalidate_caches()
+
+        # Rebuild today's in-memory segments from the new folder's file.
+        with self.session._lock:
+            self.session.days = {}
+            self.session.current_segment = None
+            self.session.load_current_day_segments()
+
+        self.update_ui()
 
     def optimize_csv(self, silent: bool = False):
         """Merge consecutive same-state segments with small gaps in the CSV file.

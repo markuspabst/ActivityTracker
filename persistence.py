@@ -55,6 +55,15 @@ class PersistenceManager:
         else:
             self._totals_cache.pop(year, None)
 
+    def invalidate_path_cache(self) -> None:
+        """Invalidate cached log file paths after a data-dir switch."""
+        self._path_cache.clear()
+
+    def invalidate_caches(self) -> None:
+        """Invalidate all cached paths and totals."""
+        self.invalidate_path_cache()
+        self.invalidate_totals_cache()
+
     def get_log_file_path(self, prefix: str, year: int) -> Path:
         key = f"{prefix}-{year}"
         if key not in self._path_cache:
