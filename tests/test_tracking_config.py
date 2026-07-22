@@ -80,12 +80,21 @@ def test_persist_data_dir_then_read(isolate_config, tmp_path):
     assert get_configured_data_dir() == os.path.expanduser(str(target))
 
 
+def test_set_data_dir_persist_survives_reload(isolate_config, tmp_path, monkeypatch):
+    target = tmp_path / "persisted_again"
+    set_data_dir(str(target), persist=True)
+
+    monkeypatch.setattr(tracking, "DATA_DIR", None)
+    assert get_configured_data_dir() == os.path.expanduser(str(target))
+
+
 def test_reset_data_dir_to_default(isolate_config, tmp_path, monkeypatch):
     monkeypatch.setattr(tracking, "DEFAULT_BASE_DIR", str(tmp_path / "default_data"))
     persist_data_dir(str(tmp_path / "custom"))
     assert get_configured_data_dir() != tracking.DEFAULT_BASE_DIR
     reset_data_dir_to_default()
     assert get_configured_data_dir() == tracking.DEFAULT_BASE_DIR
+    assert load_config()["data_dir"] == tracking.DEFAULT_BASE_DIR
 
 
 def test_state_file_path_stays_in_default_folder(isolate_config, tmp_path, monkeypatch):
@@ -99,6 +108,17 @@ def test_state_file_path_stays_in_default_folder(isolate_config, tmp_path, monke
 
     # state file path remains pinned to default folder
     assert get_state_file_path() == str(default_dir / "state.json")
+
+
+def test_clear_last_segment_write_removes_timestamp(tmp_path):
+    state_file = tmp_path / "state.json"
+    state_file.write_text('{"last_segment_write": "2026-07-22T14:05:03", "other": 1}', encoding="utf-8")
+    pm = PersistenceManager(lambda: str(tmp_path), lambda: str(state_file))
+
+    pm.clear_last_segment_write()
+
+    assert state_file.exists()
+    assert state_file.read_text(encoding="utf-8") == '{\n  "other": 1\n}'
 
 
 # ------------------------------------------------------------

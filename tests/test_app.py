@@ -32,7 +32,7 @@ def app(monkeypatch, tmp_path):
 
     data_dir_calls = []
 
-    def fake_set_data_dir(path):
+    def fake_set_data_dir(path, *args, **kwargs):
         data_dir_calls.append(path)
 
     monkeypatch.setattr(app_module, "set_data_dir", fake_set_data_dir)
@@ -147,16 +147,12 @@ def test_select_data_folder(app, monkeypatch):
     app.force_save = MagicMock()
     app.update_ui = MagicMock()
     app.session.load_current_day_segments = MagicMock()
-    invalidate_caches = MagicMock()
-    monkeypatch.setattr(app_module.PersistenceManager, "invalidate_caches", invalidate_caches)
-    # These are module-level names referenced by the method, not instance attrs
-    mock_persist = MagicMock()
-    monkeypatch.setattr(app_module, "persist_data_dir", mock_persist)
+    clear_last_segment_write = MagicMock()
+    monkeypatch.setattr(app_module.PersistenceManager, "clear_last_segment_write", clear_last_segment_write)
     app.select_data_folder()
     app.force_save.assert_called_once()
     assert app._data_dir_calls == ["/selected/folder"]
-    mock_persist.assert_called_once_with("/selected/folder")
-    invalidate_caches.assert_called_once()
+    clear_last_segment_write.assert_called_once()
     app.session.load_current_day_segments.assert_called_once()
     app.update_ui.assert_called_once()
 
@@ -165,14 +161,14 @@ def test_reset_data_folder(app, monkeypatch):
     app.force_save = MagicMock()
     app.update_ui = MagicMock()
     app.session.load_current_day_segments = MagicMock()
-    invalidate_caches = MagicMock()
-    monkeypatch.setattr(app_module.PersistenceManager, "invalidate_caches", invalidate_caches)
+    clear_last_segment_write = MagicMock()
+    monkeypatch.setattr(app_module.PersistenceManager, "clear_last_segment_write", clear_last_segment_write)
     mock_reset = MagicMock()
     monkeypatch.setattr(app_module, "reset_data_dir_to_default", mock_reset)
     app.reset_data_folder()
     app.force_save.assert_called_once()
     mock_reset.assert_called_once()
-    invalidate_caches.assert_called_once()
+    clear_last_segment_write.assert_called_once()
     app.session.load_current_day_segments.assert_called_once()
     app.update_ui.assert_called_once()
 

@@ -587,6 +587,33 @@ def test_merge_segments_to_save_uses_idle_threshold():
     assert len(PersistenceManager.merge_segments_to_save(segs2, 300)) == 2
 
 
+def test_save_segments_does_not_write_short_idle_rows(pm, tmp_path):
+    d = Day(date=date(2026, 7, 1))
+    d.segments.append(TimeSegment(
+        state="active",
+        start_time=datetime(2026, 7, 1, 9, 0, 0),
+        end_time=datetime(2026, 7, 1, 9, 30, 0),
+    ))
+    d.segments.append(TimeSegment(
+        state="idle",
+        start_time=datetime(2026, 7, 1, 9, 30, 0),
+        end_time=datetime(2026, 7, 1, 9, 33, 0),
+    ))
+    d.segments.append(TimeSegment(
+        state="active",
+        start_time=datetime(2026, 7, 1, 9, 33, 0),
+        end_time=datetime(2026, 7, 1, 10, 0, 0),
+    ))
+
+    pm.save_segments({date(2026, 7, 1): d}, idle_threshold=300)
+    segs = pm.read_segments_for_day(date(2026, 7, 1))
+
+    assert len(segs) == 1
+    assert segs[0].state == "active"
+    assert segs[0].start_time == datetime(2026, 7, 1, 9, 0, 0)
+    assert segs[0].end_time == datetime(2026, 7, 1, 10, 0, 0)
+
+
 # ------------------------------------------------------------
 # _filter_idle_boundary_segments tests
 # ------------------------------------------------------------

@@ -86,10 +86,12 @@ def get_state_file_path() -> str:
     os.makedirs(DEFAULT_BASE_DIR, exist_ok=True)
     return STATE_FILE
 
-def set_data_dir(path):
+def set_data_dir(path, persist: bool = False):
     global DATA_DIR
     DATA_DIR = path
     os.makedirs(DATA_DIR, exist_ok=True)
+    if persist:
+        persist_data_dir(path)
 
 
 def persist_data_dir(path: str) -> None:
@@ -97,11 +99,7 @@ def persist_data_dir(path: str) -> None:
 
 
 def reset_data_dir_to_default() -> None:
-    config = load_config()
-    if "data_dir" in config:
-        del config["data_dir"]
-    save_config(config)
-    set_data_dir(DEFAULT_BASE_DIR)
+    set_data_dir(DEFAULT_BASE_DIR, persist=True)
 
 
 # ------------------------------------------------------------
@@ -207,7 +205,8 @@ class SessionTracker:
                 if seg.end_time is None:
                     seg.end_time = now
 
-        self.pm.save_segments(self.days)
+        idle_threshold = getattr(self, "idle_threshold", 300)
+        self.pm.save_segments(self.days, idle_threshold=idle_threshold)
         # Persist the last successful write time so an orphaned open segment
         # from an abnormal shutdown can be finalized to a known timestamp (FR-2.6).
         self.pm.save_last_segment_write(now)

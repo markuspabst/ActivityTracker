@@ -164,7 +164,7 @@ class PersistenceManager:
             logger.warning("Failed to read segments for %s: %s", target_date, exc)
         return segments
 
-    def save_segments(self, segments_by_day) -> None:
+    def save_segments(self, segments_by_day, idle_threshold: int = 300) -> None:
         """Save segment-level data to a CSV file, by year."""
         if not segments_by_day:
             return
@@ -174,9 +174,12 @@ class PersistenceManager:
             year = day.year
             if year not in segments_by_year:
                 segments_by_year[year] = []
-            # Filter idle segments: exclude idle time before first active and after last active
+            # Filter idle segments at the boundaries, then merge short idle gaps
+            # into surrounding active time so the CSV never stores idle segments
+            # shorter than the configured inactivity limit.
             filtered_segments = self._filter_idle_boundary_segments(day_data.segments)
-            for seg in filtered_segments:
+            optimized_segments = self.merge_segments_to_save(filtered_segments, idle_threshold)
+            for seg in optimized_segments:
                 if seg.start_time:
                     segments_by_year[year].append({
                         "date": day.strftime("%Y-%m-%d"),
@@ -298,42 +301,69 @@ class PersistenceManager:
         """
         if len(segments) <= 1:
             return segments[:]
-        merged: List[TimeSegment] = [segments[0]]
-        for seg in segments[1:]:
-            prev = merged[-1]
-            # Never merge across a calendar-day boundary: segments are stored
-            # per-year sorted chronologically, so a same-state segment ending
-            # 23:59 and one starting 00:00 would otherwise be merged into the
-            # previous day and corrupt daily totals.
-            same_day = (
-                prev.start_time is not None
-                and seg.start_time is not None
-                and prev.start_time.date() == seg.start_time.date()
-            )
-            if same_day and prev.end_time and seg.start_time and prev.state == seg.state:
-                # Guard against overlapping segments (shouldn't happen in normal
-                # operation, but corrupt/legacy/manually-edited CSV could contain
-                # them). Never create a segment with end_time < start_time.
-                if seg.start_time < prev.end_time:
-                    if seg.end_time and seg.end_time > prev.end_time:
+
+        def _merge_same_state(input_segments: List[TimeSegment]) -> List[TimeSegment]:
+            merged: List[TimeSegment] = [input_segments[0]]
+            for seg in input_segments[1:]:
+                prev = merged[-1]
+                # Never merge across a calendar-day boundary: segments are stored
+                # per-year sorted chronologically, so a same-state segment ending
+                # 23:59 and one starting 00:00 would otherwise be merged into the
+                # previous day and corrupt daily totals.
+                same_day = (
+                    prev.start_time is not None
+                    and seg.start_time is not None
+                    and prev.start_time.date() == seg.start_time.date()
+                )
+                if same_day and prev.end_time and seg.start_time and prev.state == seg.state:
+                    # Guard against overlapping segments (shouldn't happen in normal
+                    # operation, but corrupt/legacy/manually-edited CSV could contain
+                    # them). Never create a segment with end_time < start_time.
+                    if seg.start_time < prev.end_time:
+                        if seg.end_time and seg.end_time > prev.end_time:
+                            # Replace prev with a new copy so the original is not mutated
+                            merged[-1] = TimeSegment(
+                                state=prev.state,
+                                start_time=prev.start_time,
+                                end_time=seg.end_time,
+                            )
+                        continue
+                    gap = (seg.start_time - prev.end_time).total_seconds()
+                    if gap <= idle_threshold:
                         # Replace prev with a new copy so the original is not mutated
                         merged[-1] = TimeSegment(
                             state=prev.state,
                             start_time=prev.start_time,
-                            end_time=seg.end_time,
+                            end_time=seg.end_time or datetime.now().replace(microsecond=0),
                         )
-                    continue
-                gap = (seg.start_time - prev.end_time).total_seconds()
-                if gap <= idle_threshold:
-                    # Replace prev with a new copy so the original is not mutated
-                    merged[-1] = TimeSegment(
-                        state=prev.state,
-                        start_time=prev.start_time,
-                        end_time=seg.end_time or datetime.now().replace(microsecond=0),
+                        continue
+                merged.append(seg)
+            return merged
+
+        merged = _merge_same_state(segments)
+
+        absorbed_idle: List[TimeSegment] = []
+        for seg in merged:
+            if (
+                absorbed_idle
+                and seg.state == "idle"
+                and absorbed_idle[-1].state == "active"
+                and absorbed_idle[-1].end_time is not None
+                and seg.start_time is not None
+                and seg.end_time is not None
+                and absorbed_idle[-1].start_time.date() == seg.start_time.date() == seg.end_time.date()
+            ):
+                idle_duration = (seg.end_time - seg.start_time).total_seconds()
+                if 0 <= idle_duration <= idle_threshold and seg.start_time >= absorbed_idle[-1].end_time:
+                    absorbed_idle[-1] = TimeSegment(
+                        state="active",
+                        start_time=absorbed_idle[-1].start_time,
+                        end_time=seg.end_time,
                     )
                     continue
-            merged.append(seg)
-        return merged
+            absorbed_idle.append(seg)
+
+        return _merge_same_state(absorbed_idle)
 
     def get_data_dir(self) -> str:
         return self._get_data_dir()
@@ -361,4 +391,20 @@ class PersistenceManager:
             return datetime.fromisoformat(data["last_segment_write"])
         except (OSError, KeyError, ValueError, json.JSONDecodeError):
             return None
+
+    def clear_last_segment_write(self) -> None:
+        """Remove the last successful segment-write timestamp from runtime state."""
+        path = self._state_file_path()
+        try:
+            if not os.path.exists(path):
+                return
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if "last_segment_write" in data:
+                del data["last_segment_write"]
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Could not clear runtime state: %s", exc)
 

@@ -40,6 +40,7 @@ class ActivityTrackerApp:
         self.weekly_target_seconds = int(get_config_value("weekly_target_seconds", 40 * 3600))
         self.idle_threshold = int(get_config_value("idle_threshold_seconds", 300))
         self.write_interval = int(get_config_value("save_interval_seconds", 3600))
+        self.session.idle_threshold = self.idle_threshold
 
         self.last_write_time = time.time()
         self._running = False
@@ -157,6 +158,7 @@ class ActivityTrackerApp:
     def set_idle_threshold(self, seconds):
         self.idle_threshold = int(seconds)
         set_config_value("idle_threshold_seconds", int(seconds))
+        self.session.idle_threshold = self.idle_threshold
 
     def set_save_interval(self, seconds):
         self.write_interval = int(seconds)
@@ -171,13 +173,14 @@ class ActivityTrackerApp:
         if not folder:
             return
         self.force_save()
-        set_data_dir(folder)
-        persist_data_dir(folder)
+        set_data_dir(folder, persist=True)
+        self.pm.clear_last_segment_write()
         self._reload_from_current_data_folder()
 
     def reset_data_folder(self):
         self.force_save()
         reset_data_dir_to_default()
+        self.pm.clear_last_segment_write()
         self._reload_from_current_data_folder()
 
     def _reload_from_current_data_folder(self):
