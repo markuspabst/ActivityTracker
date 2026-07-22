@@ -61,6 +61,23 @@ class Day:
             return None
         return max(seg.end_time for seg in active_segments_with_end)
 
+    def first_active_start(self) -> Optional[datetime]:
+        """Return the start time of the first active segment, or None if no active segments."""
+        active_segments = [seg for seg in self.segments if seg.state == 'active']
+        if not active_segments:
+            return None
+        return min(seg.start_time for seg in active_segments)
+
+    def last_active_end(self) -> Optional[datetime]:
+        """Return the end time of the last active segment with an end time, or None if no active segments."""
+        active_segments = [seg for seg in self.segments if seg.state == 'active']
+        if not active_segments:
+            return None
+        active_segments_with_end = [seg for seg in active_segments if seg.end_time]
+        if not active_segments_with_end:
+            return None
+        return max(seg.end_time for seg in active_segments_with_end)
+
     def total_active_seconds(self) -> float:
         """Calculate total active seconds precisely, including ongoing segment."""
         total = float(sum(seg.duration_seconds for seg in self.segments if seg.state == 'active'))

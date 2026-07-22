@@ -159,7 +159,9 @@ class PersistenceManager:
             year = day.year
             if year not in segments_by_year:
                 segments_by_year[year] = []
-            for seg in day_data.segments:
+            # Filter idle segments: exclude idle time before first active and after last active
+            filtered_segments = self._filter_idle_boundary_segments(day_data.segments)
+            for seg in filtered_segments:
                 if seg.start_time:
                     segments_by_year[year].append({
                         "date": day.strftime("%Y-%m-%d"),
@@ -225,6 +227,52 @@ class PersistenceManager:
             except (IOError, OSError) as exc:
                 logger.error("Failed to write %s: %s", path, exc)
                 raise PersistenceWriteError(f"Could not write {path}: {exc}") from exc
+
+    def _filter_idle_boundary_segments(self, segments: List[TimeSegment]) -> List[TimeSegment]:
+        """Filter out idle segments before first active start and after last active end.
+
+        Idle segments between active segments are preserved (e.g., lunch break).
+        If there are no active segments, an empty list is returned.
+
+        Returns a new list of TimeSegment objects; the input list is not mutated.
+        """
+        if not segments:
+            return []
+
+        # Find the first active start and last active end
+        first_active = None
+        last_active_end = None
+        for seg in segments:
+            if seg.state == 'active':
+                if first_active is None:
+                    first_active = seg.start_time
+                if seg.end_time:
+                    if last_active_end is None or seg.end_time > last_active_end:
+                        last_active_end = seg.end_time
+
+        # If no active segments, return empty list (per user request)
+        if first_active is None:
+            return []
+
+        # Filter out idle segments outside the active window
+        filtered = []
+        for seg in segments:
+            if seg.state == 'idle':
+                seg_start = seg.start_time
+                seg_end = seg.end_time
+
+                # Skip idle segments that end before first active starts
+                if seg_end and seg_end <= first_active:
+                    continue
+
+                # Skip idle segments that start after last active ends
+                if seg_start and last_active_end and seg_start >= last_active_end:
+                    continue
+
+            # Keep non-idle segments and relevant idle segments
+            filtered.append(seg)
+
+        return filtered
 
     @staticmethod
     def merge_segments_to_save(segments: List[TimeSegment], idle_threshold: int = 300) -> List[TimeSegment]:
