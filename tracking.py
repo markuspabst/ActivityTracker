@@ -34,8 +34,12 @@ SLEEP_GAP_THRESHOLD_SECONDS = 60
 # ------------------------------------------------------------
 
 DEFAULT_BASE_DIR = platformdirs.user_data_dir(APP_NAME)
-CONFIG_DIR = platformdirs.user_config_dir(APP_NAME)
+# Keep config/state files in the app's default base folder regardless of
+# custom data directory selection.
+CONFIG_DIR = DEFAULT_BASE_DIR
 CONFIG_FILE = os.path.join(CONFIG_DIR, "activity_tracker_config.json")
+LEGACY_CONFIG_FILE = os.path.join(platformdirs.user_config_dir(APP_NAME), "activity_tracker_config.json")
+STATE_FILE = os.path.join(DEFAULT_BASE_DIR, "state.json")
 DATA_DIR: Optional[str] = None
 
 # ------------------------------------------------------------
@@ -44,6 +48,16 @@ DATA_DIR: Optional[str] = None
 
 def load_config():
     if not os.path.exists(CONFIG_FILE):
+        # One-time compatibility fallback: load from legacy config location
+        # if present, then persist it in the new default-base location.
+        if os.path.exists(LEGACY_CONFIG_FILE):
+            try:
+                with open(LEGACY_CONFIG_FILE, 'r') as f:
+                    cfg = json.load(f)
+                save_config(cfg)
+                return cfg
+            except (IOError, json.JSONDecodeError):
+                return {}
         return {}
     try:
         with open(CONFIG_FILE, 'r') as f:
@@ -66,6 +80,11 @@ def set_config_value(key, value):
 
 def get_configured_data_dir():
     return get_config_value('data_dir', DEFAULT_BASE_DIR)
+
+
+def get_state_file_path() -> str:
+    os.makedirs(DEFAULT_BASE_DIR, exist_ok=True)
+    return STATE_FILE
 
 def set_data_dir(path):
     global DATA_DIR

@@ -16,6 +16,7 @@ from tracking import (
     set_data_dir,
     persist_data_dir,
     reset_data_dir_to_default,
+    get_state_file_path,
     SessionTracker,
 )
 from persistence import PersistenceManager
@@ -28,8 +29,10 @@ def isolate_config(tmp_path, monkeypatch):
     cfg_dir = tmp_path / "config"
     cfg_dir.mkdir()
     cfg_file = cfg_dir / "activity_tracker_config.json"
+    legacy_cfg_file = tmp_path / "legacy" / "activity_tracker_config.json"
     monkeypatch.setattr(tracking, "CONFIG_DIR", str(cfg_dir))
     monkeypatch.setattr(tracking, "CONFIG_FILE", str(cfg_file))
+    monkeypatch.setattr(tracking, "LEGACY_CONFIG_FILE", str(legacy_cfg_file))
     saved_data_dir = tracking.DATA_DIR
     monkeypatch.setattr(tracking, "DATA_DIR", None)
     yield str(cfg_file)
@@ -83,6 +86,19 @@ def test_reset_data_dir_to_default(isolate_config, tmp_path, monkeypatch):
     assert get_configured_data_dir() != tracking.DEFAULT_BASE_DIR
     reset_data_dir_to_default()
     assert get_configured_data_dir() == tracking.DEFAULT_BASE_DIR
+
+
+def test_state_file_path_stays_in_default_folder(isolate_config, tmp_path, monkeypatch):
+    default_dir = tmp_path / "default_data"
+    custom_dir = tmp_path / "custom_data"
+    monkeypatch.setattr(tracking, "DEFAULT_BASE_DIR", str(default_dir))
+    monkeypatch.setattr(tracking, "STATE_FILE", str(default_dir / "state.json"))
+
+    # Change data dir to custom location
+    set_data_dir(str(custom_dir))
+
+    # state file path remains pinned to default folder
+    assert get_state_file_path() == str(default_dir / "state.json")
 
 
 # ------------------------------------------------------------

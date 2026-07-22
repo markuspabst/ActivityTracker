@@ -17,6 +17,7 @@ from tracking import (
     persist_data_dir,
     reset_data_dir_to_default,
     get_configured_data_dir,
+    get_state_file_path,
 )
 from models import TimeSegment
 from persistence import PersistenceManager, PersistenceWriteError
@@ -31,7 +32,7 @@ class ActivityTrackerApp:
         i18n.set_locale(cfg.get("locale"))
 
         self.platform = get_platform()
-        self.pm = PersistenceManager(get_configured_data_dir)
+        self.pm = PersistenceManager(get_configured_data_dir, get_state_file_path)
         self.session = SessionTracker(self.pm)
         self.session.load_current_day_segments()
 

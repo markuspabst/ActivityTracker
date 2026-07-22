@@ -35,12 +35,18 @@ def _hms_to_seconds(value: str) -> Optional[int]:
 
 
 class PersistenceManager:
-    __slots__ = ('_get_data_dir', '_path_cache', '_totals_cache')
+    __slots__ = ('_get_data_dir', '_get_state_file_path', '_path_cache', '_totals_cache')
 
-    def __init__(self, data_dir_fn) -> None:
+    def __init__(self, data_dir_fn, state_file_path_fn=None) -> None:
         self._get_data_dir = data_dir_fn
+        self._get_state_file_path = state_file_path_fn
         self._path_cache: Dict[str, str] = {}
         self._totals_cache: Dict[int, Dict[str, Tuple[int, int]]] = {}
+
+    def _state_file_path(self) -> str:
+        if self._get_state_file_path is not None:
+            return str(self._get_state_file_path())
+        return os.path.join(str(self._get_data_dir()), "state.json")
 
     def invalidate_totals_cache(self, year: Optional[int] = None) -> None:
         """Invalidate the day-totals cache for *year*, or all years if omitted."""
@@ -329,7 +335,7 @@ class PersistenceManager:
 
     def save_last_segment_write(self, when: datetime) -> None:
         """Persist the timestamp of the last successful segment write (FR-2.6)."""
-        path = os.path.join(str(self._get_data_dir()), "state.json")
+        path = self._state_file_path()
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w", encoding="utf-8") as f:
@@ -339,7 +345,7 @@ class PersistenceManager:
 
     def read_last_segment_write(self) -> Optional[datetime]:
         """Read the last successful segment-write timestamp, or None."""
-        path = os.path.join(str(self._get_data_dir()), "state.json")
+        path = self._state_file_path()
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
