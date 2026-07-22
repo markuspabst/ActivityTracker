@@ -215,6 +215,10 @@ class SessionTracker:
                 else:
                     # Keep historical segments as-is
                     updated_segments.append(seg)
+
+            # Filter idle segments that are before first active or after last active
+            updated_segments = self.pm._filter_idle_boundary_segments(updated_segments)
+
             self.days = {current_date: Day(date=current_date, segments=updated_segments)}
         else:
             self.days = {}

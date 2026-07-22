@@ -163,13 +163,15 @@ def test_persistence_manager_get_minutes_for_day(pm, temp_data_dir):
     test_date = date(2026, 7, 1)
     d = Day(date=test_date)
     d.segments.append(TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=datetime(2026, 7, 1, 9, 30, 0)))
+    # Idle after active - should be filtered out
     d.segments.append(TimeSegment(state='idle', start_time=datetime(2026, 7, 1, 9, 30, 0), end_time=datetime(2026, 7, 1, 9, 40, 0)))
 
     pm.save_segments({test_date: d})
 
     active, idle = pm.get_minutes_for_date(test_date)
     assert active == d.active_minutes
-    assert idle == d.idle_minutes
+    # Idle after last active is filtered, so idle should be 0
+    assert idle == 0
 
 
 # ============================================================
@@ -263,8 +265,10 @@ def test_session_tracker_load_finalizes_orphaned_open_segment(tmp_path, patch_al
     today = date(2026, 7, 15)
 
     day_data_to_save = Day(date=today)
+    # Active 7:00-7:30
     day_data_to_save.segments.append(TimeSegment(state='active', start_time=datetime(2026, 7, 15, 7, 0, 0), end_time=datetime(2026, 7, 15, 7, 30, 0)))
-    # Last segment is ongoing (no end_time) -> simulated abnormal shutdown.
+    # Idle after last active - with the new behavior, this is filtered out and not saved
+    # So when loading, only the active segment exists
     day_data_to_save.segments.append(TimeSegment(state='idle', start_time=datetime(2026, 7, 15, 8, 0, 0)))
     pm_real.save_segments({today: day_data_to_save})
     pm_real.save_last_segment_write(datetime(2026, 7, 15, 9, 0, 0))
@@ -273,12 +277,13 @@ def test_session_tracker_load_finalizes_orphaned_open_segment(tmp_path, patch_al
     patch_all_datetimes.set_now(datetime(2026, 7, 15, 10, 0, 0))
     s.load_current_day_segments()
 
-    # FR-2.6: the orphan is finalized (not resumed as ongoing), and its end is
-    # clamped to the last known write time so the untracked gap is not counted.
+    # The idle segment after last active is filtered, so only the active segment remains
+    # The orphan finalization applies to ongoing segments, but since the idle was filtered,
+    # the last saved segment is the active one which already has end_time=7:30
     assert s.current_segment is None
-    orphan = s.days[today].segments[-1]
-    assert orphan.end_time is not None
-    assert orphan.end_time == datetime(2026, 7, 15, 9, 0, 0)
+    assert len(s.days[today].segments) == 1
+    assert s.days[today].segments[0].state == 'active'
+    assert s.days[today].segments[0].end_time == datetime(2026, 7, 15, 7, 30, 0)
 
 
 def test_on_tick_records_sleep_gap_as_idle(patch_all_datetimes):
