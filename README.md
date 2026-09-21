@@ -2,20 +2,33 @@
 
 A lightweight system tray application that tracks your active and idle time using CSV-only persistence.
 
+![License](https://img.shields.io/github/license/markuspabst/ActivityTracker)
+![Python](https://img.shields.io/badge/python-3.9+-blue.svg)
+![macOS](https://img.shields.io/badge/platform-macos-lightgray)
+![Tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/markuspabst/ActivityTracker/main/tests/badge.json)
+
 ## Features
 
 - **Time Tracking**: Tracks active (working) and idle time with minute precision
-- **Live Menu Bar**: Shows status icon and live active/idle time display
-- **Weekly Statistics**: Aggregates time across the week
+- **Live Menu Bar**: Shows status icon and live active/idle time display with visual indicators
+- **Weekly Statistics**: Aggregates time across the week with progress bars
 - **CSV-Only Persistence**: All time data stored in `activities-{year}.csv` files; a tiny `state.json` keeps only the last-write timestamp for crash recovery
 - **Sleep Detection**: System sleep/suspend intervals are classified as idle time
 - **Crash Recovery**: An open segment left by an abnormal shutdown is finalized to the last saved write time on next launch
 - **Save-Failure Resilience**: On a disk-write failure, data is retained in memory, the user is alerted once, and saving retries on the next interval
-- **Daily & Weekly Targets**: Set and monitor work goals
+- **Daily & Weekly Targets**: Set and monitor work goals with configurable presets
 - **Automatic CSV Optimization**: Consecutive same-state segments are merged automatically on every save, keeping the log compact with no manual action
 - **Idle Threshold**: Configurable idle detection period (default: 5 minutes)
 - **Save Interval**: Configurable data persistence interval
 - **Language Support**: Multi-language (English, German)
+- **Automatic Startup**: Optional autostart on system login
+- **macOS 27+ Compatible**: Fixed crashes on macOS 27+ by deferring menu operations to the main thread
+
+## Quick Links
+
+- [Quick Start](#quick-start) - Get up and running in minutes
+- [Configuration](#configuration) - Customize targets, thresholds, and behavior
+- [Testing](#testing) - Run the test suite
 
 ## Architecture
 
@@ -66,7 +79,13 @@ Per-day and per-week active/idle totals (`get_minutes_for_date`,
 separate daily-summary file. The day's `active_min + idle_min` always matches
 the sum of its segment durations. Days with no activity contribute zero.
 
-## Installation
+## Quick Start
+
+### Prerequisites
+- Python 3.9 or higher
+- macOS (native support); Linux/Windows support via `platform_layer/`
+
+### Installation
 
 ```bash
 # Clone and install
@@ -75,9 +94,24 @@ cd ActivityTracker
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+```
 
-# Run
+### Running
+
+```bash
+# Run the application
 python3 app.py
+```
+
+The app will appear in your system tray with a yellow indicator. Click the icon to view your progress or adjust settings.
+
+### Building (macOS)
+
+To create a standalone macOS application:
+
+```bash
+python3 setup.py py2app
+# App will be in ./dist/ActivityTracker.app
 ```
 
 ## Configuration
@@ -120,13 +154,6 @@ pytest tests/test_scenarios.py -v     # Integration scenarios
 | `activity_tracker_menu.py` | System tray menu UI |
 | `platform_layer/` | Native idle detection |
 | `locales/` | Translation files (EN, DE) |
-
-## Requirements
-
-- Python 3.9+
-- platformdirs
-- pystray, Pillow (system tray icon)
-- On macOS: pyobjc (`pyobjc-core`, `pyobjc-framework-Cocoa`, `pyobjc-framework-Quartz`) for native idle detection, dialogs, and autostart
 
 ## License
 

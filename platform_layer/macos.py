@@ -62,6 +62,18 @@ except Exception:
     _CAN_RUN_ON_MAIN = False
 
 
+# Expose for use by other modules
+def run_on_main_thread(func, *args, **kwargs):
+    """Run a function on the main thread. Returns the result or raises any exception."""
+    if _CAN_RUN_ON_MAIN:
+        return _run_on_main(func)(*args, **kwargs)
+    return func(*args, **kwargs)
+
+
+# Store for access by other modules
+_CAN_RUN_ON_MAIN = _CAN_RUN_ON_MAIN
+
+
 def _osa_escape(value: str) -> str:
     """Escape a string for safe interpolation into an osascript double-quoted literal."""
     if value is None:
@@ -109,6 +121,8 @@ class MacOSPlatform(PlatformABC):
 
     _idle_cache: dict = {"time": 0.0, "value": 0.0}
     IDLE_CACHE_TTL: float = 1.0
+    _can_run_on_main = _CAN_RUN_ON_MAIN
+    _run_on_main = staticmethod(_run_on_main)
 
     # ── Idle detection ──────────────────────────────────────
 

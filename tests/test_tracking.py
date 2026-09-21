@@ -124,8 +124,10 @@ def test_session_tracker_midnight_rollover(patch_all_datetimes):
 
     patch_all_datetimes.set_now(datetime(2026, 7, 2, 0, 0, 3))
     s.on_tick(idle_time=0, idle_threshold=300)
-    assert date(2026, 7, 1) in s.days or date(2026, 7, 2) in s.days
+
+    # After midnight rollover and save, only July 2 should remain in memory
     assert date(2026, 7, 2) in s.days
+    assert date(2026, 7, 1) not in s.days
 
 def test_session_tracker_finalize(patch_all_datetimes):
     s = make_session()

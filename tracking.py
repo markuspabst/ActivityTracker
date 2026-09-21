@@ -114,7 +114,7 @@ class SessionTracker:
         self.is_locked = False
         # Guards concurrent access to self.days / self.current_segment between
         # the background update thread (writes) and the menu thread (reads).
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         # Timestamp of the previous tick; used to detect sleep/suspend gaps.
         self._last_tick_time: Optional[datetime] = None
 
@@ -197,49 +197,50 @@ class SessionTracker:
         self.save_all_days()
 
     def save_all_days(self):
-        # Set end_time for all ongoing segments using current time
-        # This ensures we save accurate duration data
-        now = datetime.now().replace(microsecond=0)
-        for day_obj in self.days.values():
-            for seg in day_obj.segments:
-                if seg.end_time is None:
-                    seg.end_time = now
+        with self._lock:
+            # Set end_time for all ongoing segments using current time
+            # This ensures we save accurate duration data
+            now = datetime.now().replace(microsecond=0)
+            for day_obj in self.days.values():
+                for seg in day_obj.segments:
+                    if seg.end_time is None:
+                        seg.end_time = now
 
-        idle_threshold = getattr(self, "idle_threshold", 300)
-        self.pm.save_segments(self.days, idle_threshold=idle_threshold)
-        # Persist the last successful write time so an orphaned open segment
-        # from an abnormal shutdown can be finalized to a known timestamp (FR-2.6).
-        self.pm.save_last_segment_write(now)
+            idle_threshold = getattr(self, "idle_threshold", 300)
+            self.pm.save_segments(self.days, idle_threshold=idle_threshold)
+            # Persist the last successful write time so an orphaned open segment
+            # from an abnormal shutdown can be finalized to a known timestamp (FR-2.6).
+            self.pm.save_last_segment_write(now)
 
-        # Reset end_time for the current segment so it remains ongoing
-        if self.current_segment:
-            self.current_segment.end_time = None
+            # Reset end_time for the current segment so it remains ongoing
+            if self.current_segment:
+                self.current_segment.end_time = None
 
-        # Clear completed segments but keep the current ongoing segment in memory
-        current_date = datetime.now().date()
+            # Clear completed segments but keep the current ongoing segment in memory
+            current_date = datetime.now().date()
 
-        if current_date in self.days and self.current_segment:
-            # Keep ALL segments but reset end_time for the current ongoing segment
-            # This preserves historical data for today while allowing the current segment to continue
-            updated_segments = []
-            for seg in self.days[current_date].segments:
-                if seg.start_time == self.current_segment.start_time:
-                    # This is the current segment - reset end_time for continued tracking
-                    updated_segments.append(TimeSegment(
-                        state=seg.state,
-                        start_time=seg.start_time,
-                        end_time=None
-                    ))
-                else:
-                    # Keep historical segments as-is
-                    updated_segments.append(seg)
+            if current_date in self.days and self.current_segment:
+                # Keep ALL segments but reset end_time for the current ongoing segment
+                # This preserves historical data for today while allowing the current segment to continue
+                updated_segments = []
+                for seg in self.days[current_date].segments:
+                    if seg.start_time == self.current_segment.start_time:
+                        # This is the current segment - reset end_time for continued tracking
+                        updated_segments.append(TimeSegment(
+                            state=seg.state,
+                            start_time=seg.start_time,
+                            end_time=None
+                        ))
+                    else:
+                        # Keep historical segments as-is
+                        updated_segments.append(seg)
 
-            # Filter idle segments that are before first active or after last active
-            updated_segments = self.pm._filter_idle_boundary_segments(updated_segments)
+                # Filter idle segments that are before first active or after last active
+                updated_segments = self.pm._filter_idle_boundary_segments(updated_segments)
 
-            self.days = {current_date: Day(date=current_date, segments=updated_segments)}
-        else:
-            self.days = {}
+                self.days = {current_date: Day(date=current_date, segments=updated_segments)}
+            else:
+                self.days = {}
 
     def load_current_day_segments(self):
         """
@@ -273,6 +274,7 @@ class SessionTracker:
             if open_segments:
                 last_write = self.pm.read_last_segment_write()
                 if not isinstance(last_write, _dt_module.datetime):
+                    logger.warning("Invalid last_segment_write timestamp: %s", last_write)
                     last_write = None
                 now = datetime.now().replace(microsecond=0)
                 for seg in open_segments:

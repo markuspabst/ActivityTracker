@@ -40,8 +40,11 @@ OPTIONS = {
         "LSMinimumSystemVersion": "10.15",
         "NSHighResolutionCapable": True,
         "NSQuietSafeQuit": True,
+        "NSAppSleepEnabled": False,
+        "NSSupportsAutomaticGraphicsSwitching": True,
     },
-    "packages": ["platformdirs"],
+    "packages": ["platformdirs", "pystray", "PIL"],
+    "excludes": ["Tkinter", "tkinter", "matplotlib", "scipy", "numpy"],
     "includes": [
         "AppKit",
         "Foundation",
@@ -52,7 +55,11 @@ OPTIONS = {
         "tracking",
         "platform_layer",
         "platform_layer.macos",
-    ]
+        "pystray",
+        "PIL",
+        "PIL.Image",
+        "PIL.ImageDraw",
+    ],
 }
 
 
@@ -66,5 +73,5 @@ setup(
     app=APP,
     options={"py2app": OPTIONS},
     data_files=DATA_FILES,
-    setup_requires=["py2app"],
+    setup_requires=["setuptools", "py2app"],
 )
