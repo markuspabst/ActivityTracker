@@ -48,16 +48,6 @@ DATA_DIR: Optional[str] = None
 
 def load_config():
     if not os.path.exists(CONFIG_FILE):
-        # One-time compatibility fallback: load from legacy config location
-        # if present, then persist it in the new default-base location.
-        if os.path.exists(LEGACY_CONFIG_FILE):
-            try:
-                with open(LEGACY_CONFIG_FILE, 'r') as f:
-                    cfg = json.load(f)
-                save_config(cfg)
-                return cfg
-            except (IOError, json.JSONDecodeError):
-                return {}
         return {}
     try:
         with open(CONFIG_FILE, 'r') as f:

@@ -1,36 +1,10 @@
 from __future__ import annotations
-import threading
-from datetime import datetime
-import sys
-
 from pystray import Icon, Menu, MenuItem
 
 import i18n
 from platform_layer import get_platform
 from tray_icon import create_icon, get_status_icon
-from tracking import (
-    format_hours,
-)
-
-
-def _run_on_main_thread(func):
-    """Decorator to ensure a function runs on the main thread."""
-    def wrapper(*args, **kwargs):
-        # Check if we're already on the main thread
-        if threading.current_thread().name == "MainThread":
-            return func(*args, **kwargs)
-
-        # Try to use the platform's main thread runner
-        platform = None
-        if args and hasattr(args[0], 'platform'):
-            platform = args[0].platform
-
-        if platform and hasattr(platform, '_can_run_on_main') and platform._can_run_on_main:
-            return platform._run_on_main(func, *args, **kwargs)
-
-        # Fallback: run directly (may crash on macOS 27)
-        return func(*args, **kwargs)
-    return wrapper
+from tracking import format_hours
 
 
 class AppMenu:
