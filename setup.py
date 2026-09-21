@@ -37,6 +37,9 @@ OPTIONS = {
         "LSUIElement": True,
         "NSMainNibFile": False,
         "NSPrincipalClass": "NSApplication",
+        "LSMinimumSystemVersion": "10.15",
+        "NSHighResolutionCapable": True,
+        "NSQuietSafeQuit": True,
     },
     "packages": ["platformdirs"],
     "includes": [

@@ -2,20 +2,20 @@
 
 # Packaging / Build
 setuptools
-py2app
+py2app>=0.24,<0.28
 
 # System Tray & Icon
 pystray==0.19.5
-Pillow==12.3.0
+Pillow>=9.0.0,<12.0.0
 
 # Path & Platform Support
-platformdirs==4.2.2
+platformdirs>=2.0.0,<4.0.0
 
 # macOS native integration (AppKit / Foundation accessed via pyobjc)
-pyobjc-core==12.2.1
-pyobjc-framework-Cocoa==12.2.1
-pyobjc-framework-Quartz==12.2.1
+pyobjc-core>=10.0.0,<12.0.0
+pyobjc-framework-Cocoa>=10.0.0,<12.0.0
+pyobjc-framework-Quartz>=10.0.0,<12.0.0
 
 # Testing
-pytest==9.1.1
-pytest-cov==7.1.0
+pytest>=7.0.0,<9.0.0
+pytest-cov>=4.0.0,<7.0.0
