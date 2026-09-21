@@ -86,7 +86,8 @@ class AppMenu:
 
         if self._active_today_session > 0:
             yield MenuItem(i18n.t("MENU_IDLE", value=format_hours(self._idle_today_session)), None, enabled=False)
-        yield MenuItem(i18n.t("MENU_SESSION_STARTED", value=self._session_start.strftime("%H:%M") if self._session_start else "N/A"), None, enabled=False)
+        session_start_str = self._session_start.strftime("%H:%M") if self._session_start else "N/A"
+        yield MenuItem(i18n.t("MENU_SESSION_STARTED", value=session_start_str), None, enabled=False)
         yield Menu.SEPARATOR
 
         # Weekly progress
