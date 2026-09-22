@@ -139,9 +139,8 @@ To publish a GitHub release from VS Code:
 
 The task increments `[project].version` in `pyproject.toml`, commits the change,
 builds the macOS app, creates a `v<version>` tag, and pushes it.
-The GitHub Actions workflow then creates the release automatically with both the
-macOS DMG and a source-code ZIP. GitHub's automatic source archives are also
-available. It requires
+The GitHub Actions workflow then creates the release automatically with the
+macOS DMG. GitHub's automatic source archives are also available. It requires
 the repository remote to be named `origin` and the GitHub account to have push access.
 
 ## macOS 27 Compatibility

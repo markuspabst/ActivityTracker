@@ -31,20 +31,10 @@ jobs:
     - name: Package DMG
       run: briefcase package macOS --no-input --adhoc-sign --packaging-format dmg
 
-    - name: Archive source code
-      run: |
-        git archive \
-          --format=zip \
-          --prefix="ActivityTracker-${GITHUB_REF_NAME}/" \
-          "${GITHUB_SHA}" \
-          -o "dist/ActivityTracker-${GITHUB_REF_NAME}-source.zip"
-    
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
-        files: |
-          dist/ActivityTracker-*.dmg
-          dist/ActivityTracker-*-source.zip
+        files: dist/ActivityTracker-*.dmg
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
