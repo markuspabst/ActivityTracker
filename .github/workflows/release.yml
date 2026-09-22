@@ -31,11 +31,10 @@ jobs:
     - name: Package DMG
       run: briefcase package macOS --no-input --adhoc-sign --packaging-format dmg
 
-    - name: Create Release
-      run: |
-        gh release create "$GITHUB_REF_NAME" \
-          dist/ActivityTracker-*.dmg \
-          --title "ActivityTracker $GITHUB_REF_NAME" \
-          --generate-notes
+     - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: dist/ActivityTracker-*.dmg
+        generate_release_notes: true
       env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
