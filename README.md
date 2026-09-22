@@ -111,7 +111,7 @@ The app will appear in your system tray with a yellow indicator. Click the icon 
 To create a standalone macOS application:
 
 ```bash
-python3 setup.py py2app
+briefcase build macOS
 # App will be in ./dist/ActivityTracker.app
 ```
 
