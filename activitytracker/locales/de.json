@@ -62,6 +62,7 @@
   "WEEK_TARGET_60H_HEAVY": "60h (viel)",
   "WEEK_TARGET_84H_MAX": "84h (Maximum)",
   "GENERAL_SETTINGS": "Allgemeine Einstellungen",
+  "VERSION": "Version {value}",
   "GLOBAL_SETTINGS": "Globale Einstellungen",
   "SAVE_NOW": "Daten jetzt speichern",
   "SAVE_ERROR_TITLE": "Daten konnten nicht gespeichert werden",

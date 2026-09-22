@@ -1,4 +1,6 @@
 from __future__ import annotations
+from importlib.metadata import PackageNotFoundError, version as package_version
+
 from pystray import Icon, Menu, MenuItem
 
 from activitytracker import i18n
@@ -111,7 +113,17 @@ class AppMenu:
         yield MenuItem(i18n.t("QUIT"), self.app.quit_app)
 
     def _generate_general_settings_menu(self):
-        return self._create_daily_settings_submenu()
+        try:
+            fallback_version = package_version("ActivityTracker")
+        except PackageNotFoundError:
+            fallback_version = "dev"
+
+        version = self.platform.get_bundle_version(fallback_version)
+        return Menu(
+            MenuItem(i18n.t("VERSION", value=version), None, enabled=False),
+            Menu.SEPARATOR,
+            *self._create_daily_settings_submenu().items,
+        )
 
     def _generate_global_settings_menu(self):
         return self._create_global_settings_submenu()
