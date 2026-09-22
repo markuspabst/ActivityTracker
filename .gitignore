@@ -15,9 +15,6 @@ dist/
 *.egg-info/
 build_apple/
 
-# Build-time generated version stamp
-version_generated.py
-
 # macOS
 .DS_Store
 ._*
@@ -56,4 +53,3 @@ ActivityTracker_Dashboard_Data.js
 
 # Logs
 *.log
-version.json

@@ -2,15 +2,6 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Bump Version",
-      "type": "shell",
-      "command": "${workspaceFolder}/.venv/bin/python",
-      "args": [
-        "scripts/bump_version.py"
-      ],
-      "problemMatcher": []
-    },
-    {
       "label": "Clean",
       "type": "shell",
       "command": "bash",
@@ -53,7 +44,6 @@
     {
       "label": "Build Only",
       "dependsOn": [
-        "Bump Version",
         "Clean",
         "Build App"
       ],
@@ -64,7 +54,6 @@
     {
       "label": "Build and Run App",
       "dependsOn": [
-        "Bump Version",
         "Clean",
         "Build App",
         "Run App"
@@ -79,7 +68,6 @@
     {
       "label": "Build + Run + Dashboard",
       "dependsOn": [
-        "Bump Version",
         "Clean",
         "Build App",
         "Run App",

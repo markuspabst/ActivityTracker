@@ -1,13 +1,8 @@
 #!/bin/bash
 # Release script for ActivityTracker
-# Usage: ./scripts/release.sh <major|minor|patch>
+# Version is managed in pyproject.toml.
 
 set -e
-
-VERSION_PART=${1:-patch}
-
-# Bump version
-python3 scripts/bump_version.py --tag
 
 # Build the app (briefcase builds to build/activitytracker/macos/app/)
 briefcase build macOS
@@ -26,4 +21,3 @@ echo "  git push --follow-tags"
 echo ""
 echo "Note: The app is built to build/activitytracker/macos/app/ActivityTracker.app"
 echo "GitHub Actions will automatically create the release with the built app."
-

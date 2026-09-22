@@ -112,8 +112,23 @@ To create a standalone macOS application:
 
 ```bash
 briefcase build macOS
-# App will be in ./dist/ActivityTracker.app
+# App will be in ./build/activitytracker/macos/app/ActivityTracker.app
+
+# Optional: create a distributable DMG
+briefcase package macOS
+# DMG will be in ./dist/
 ```
+
+### Versioning
+
+The application version is managed directly in `pyproject.toml`:
+
+```toml
+[project]
+version = "1.0.1"
+```
+
+Update this value before creating a release, then run the build or release script.
 
 ## macOS 27 Compatibility
 
@@ -153,15 +168,15 @@ pytest tests/test_scenarios.py -v     # Integration scenarios
 
 | Component | Responsibility |
 |-----------|---------------|
-| `app.py` | Main application controller, event loop, save scheduling |
-| `tracking.py` | SessionTracker: active/idle detection, sleep-gap detection, midnight rollover, orphan finalization, segment management |
-| `persistence.py` | CSV I/O, weekly aggregation, segment merging, data persistence resilience |
-| `models.py` | TimeSegment and Day dataclasses |
-| `activity_tracker_menu.py` | System tray menu UI (macOS 27+: all operations dispatch to main thread) |
-| `platform_layer/` | Native idle detection, main thread dispatch helper |
-| `tray_icon.py` | Icon generation helper functions |
-| `i18n.py` | Internationalization support (EN, DE) |
-| `single_instance.py` | Single-instance lock to prevent duplicate apps |
+| `activitytracker/app.py` | Main application controller, event loop, save scheduling |
+| `activitytracker/tracking.py` | SessionTracker: active/idle detection, sleep-gap detection, midnight rollover, orphan finalization, segment management |
+| `activitytracker/persistence.py` | CSV I/O, weekly aggregation, segment merging, data persistence resilience |
+| `activitytracker/models.py` | TimeSegment and Day dataclasses |
+| `activitytracker/activity_tracker_menu.py` | System tray menu UI (macOS 27+: all operations dispatch to main thread) |
+| `activitytracker/platform_layer/` | Native idle detection and platform helpers |
+| `activitytracker/tray_icon.py` | Icon generation helper functions |
+| `activitytracker/i18n.py` | Internationalization support (EN, DE) |
+| `activitytracker/single_instance.py` | Single-instance lock to prevent duplicate apps |
 
 ## Data Persistence
 
