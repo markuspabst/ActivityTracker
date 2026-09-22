@@ -22,6 +22,19 @@
       "problemMatcher": []
     },
     {
+      "label": "Release: Create GitHub Release",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/release.sh",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "Run App",
       "type": "shell",
       "command": "${workspaceFolder}/.venv/bin/briefcase",

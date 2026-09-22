@@ -130,6 +130,17 @@ version = "1.0.1"
 
 Update this value before creating a release, then run the build or release script.
 
+To publish a GitHub release from VS Code:
+
+1. Update `[project].version` in `pyproject.toml`.
+2. Commit all changes.
+3. Open **Terminal → Run Task...**.
+4. Select **Release: Create GitHub Release**.
+
+The task builds the macOS app, creates a `v<version>` tag, and pushes it.
+The GitHub Actions workflow then creates the release automatically. It requires
+the repository remote to be named `origin` and the GitHub account to have push access.
+
 ## macOS 27 Compatibility
 
 ActivityTracker includes a fix for macOS 27's stricter threading requirements. All pystray menu bar icon operations are now dispatched to the main thread using Foundation's `performSelectorOnMainThread_withObject_waitUntilDone_`. This prevents crashes that occurred when background threads tried to call AppKit methods like `NSStatusItem.setMenu_`.

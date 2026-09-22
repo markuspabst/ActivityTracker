@@ -1,4 +1,5 @@
 from __future__ import annotations
+from datetime import datetime, timedelta
 from importlib.metadata import PackageNotFoundError, version as package_version
 
 from pystray import Icon, Menu, MenuItem
@@ -109,6 +110,7 @@ class AppMenu:
         # Settings label
         yield MenuItem(i18n.t("GENERAL_SETTINGS"), self._generate_general_settings_menu())
         yield MenuItem(i18n.t("GLOBAL_SETTINGS"), self._generate_global_settings_menu())
+        yield MenuItem(i18n.t("REPORT"), self._generate_report_menu())
         yield Menu.SEPARATOR
         yield MenuItem(i18n.t("QUIT"), self.app.quit_app)
 
@@ -127,6 +129,53 @@ class AppMenu:
 
     def _generate_global_settings_menu(self):
         return self._create_global_settings_submenu()
+
+    def _generate_report_menu(self):
+        """Build daily statistics for today and the previous six days."""
+        today = datetime.now().date()
+        days = []
+        for offset in range(7):
+            day = today - timedelta(days=offset)
+            segments = []
+            if day == today:
+                with self.app.session._lock:
+                    current_day = self.app.session.days.get(day)
+                    if current_day:
+                        segments = list(current_day.segments)
+            if not segments:
+                segments = self.app.pm.read_segments_for_day(day)
+
+            now = datetime.now()
+            active_seconds = 0.0
+            idle_seconds = 0.0
+            active_starts = []
+            active_ends = []
+            for segment in segments:
+                end = segment.end_time or now
+                duration = max(0.0, (end - segment.start_time).total_seconds())
+                if segment.state == "active":
+                    active_seconds += duration
+                    active_starts.append(segment.start_time)
+                    active_ends.append(end)
+                elif segment.state == "idle":
+                    idle_seconds += duration
+
+            total_seconds = active_seconds + idle_seconds
+            productivity = active_seconds / total_seconds * 100 if total_seconds else 0
+            if active_starts:
+                date_label = day.strftime("%a %Y-%m-%d")
+                details = Menu(
+                    MenuItem(i18n.t("REPORT_START", value=min(active_starts).strftime("%H:%M")), None, enabled=False),
+                    MenuItem(i18n.t("REPORT_LAST_ACTIVE", value=max(active_ends).strftime("%H:%M")), None, enabled=False),
+                    MenuItem(i18n.t("REPORT_ACTIVE", value=format_hours(active_seconds)), None, enabled=False),
+                    MenuItem(i18n.t("REPORT_IDLE", value=format_hours(idle_seconds)), None, enabled=False),
+                    MenuItem(i18n.t("REPORT_PRODUCTIVITY", value=f"{productivity:.0f}%"), None, enabled=False),
+                )
+                days.append(MenuItem(date_label, details))
+
+        if not days:
+            days.append(MenuItem(i18n.t("REPORT_NO_DATA"), None, enabled=False))
+        return Menu(*days)
 
     def _create_daily_settings_submenu(self):
         def _slider_callback(setter, title_key, current, factor, min_v, max_v):
