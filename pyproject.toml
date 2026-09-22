@@ -41,7 +41,7 @@ icon = "app-icon"
 
 [tool.briefcase.app.activitytracker.macOS.app]
 # Menu-bar only app, no Dock icon
-LSUIElement = true
+info = { LSUIElement = true }
 # Minimum macOS version
 LSMinimumSystemVersion = "10.15"
 
