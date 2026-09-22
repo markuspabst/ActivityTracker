@@ -16,7 +16,7 @@ A lightweight system tray application that tracks your active and idle time usin
 - **CSV-Only Persistence**: All time data stored in `activities-{year}.csv` files; a tiny `state.json` keeps only the last-write timestamp for crash recovery
 - **Sleep Detection**: System sleep/suspend intervals are classified as idle time
 - **Crash Recovery**: An open segment left by an abnormal shutdown is finalized to the last saved write time on next launch
-- **Save-Failure Resilience**: On a disk-write failure, data is retained in memory, the user is alerted once, and saving retries on the next interval
+- **Save-Failure Resilience (NFR-5.2)**: On a disk-write failure, data is retained in memory, the user is alerted once, and saving retries on the next interval
 - **Daily & Weekly Targets**: Set and monitor work goals with configurable presets
 - **Automatic CSV Optimization**: Consecutive same-state segments are merged automatically on every save, keeping the log compact with no manual action
 - **Idle Threshold**: Configurable idle detection period (default: 5 minutes)
@@ -127,6 +127,7 @@ Access via system tray icon → Settings:
 - **Weekly Target**: Default 40 hours (2400 minutes)  
 - **Idle Threshold**: Default 5 minutes (300 seconds)
 - **Save Interval**: Default 1 hour (3600 seconds)
+- **Language**: English or German
 
 ## CSV Optimization
 
@@ -158,7 +159,9 @@ pytest tests/test_scenarios.py -v     # Integration scenarios
 | `models.py` | TimeSegment and Day dataclasses |
 | `activity_tracker_menu.py` | System tray menu UI (macOS 27+: all operations dispatch to main thread) |
 | `platform_layer/` | Native idle detection, main thread dispatch helper |
-| `locales/` | Translation files (EN, DE) |
+| `tray_icon.py` | Icon generation helper functions |
+| `i18n.py` | Internationalization support (EN, DE) |
+| `single_instance.py` | Single-instance lock to prevent duplicate apps |
 
 ## Non-Functional Requirements
 
