@@ -19,6 +19,12 @@ This document lists the runtime and development dependencies for ActivityTracker
 | `pyobjc-framework-Quartz` | PyObjC Quartz framework bindings (idle detection) |
 | `std-nslog` | Captures stdout/stderr in macOS app logs |
 
+## Linux-Specific Dependencies
+
+| Package | Description |
+|---------|-------------|
+| `python-xlib` | X11 idle-time detection |
+
 ## Development Dependencies
 
 | Package | Description |
@@ -39,7 +45,13 @@ This document lists the runtime and development dependencies for ActivityTracker
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e ".[dev]"
+```
+
+On macOS, include the native dependencies:
+
+```bash
+pip install -e ".[macos,dev]"
 ```
 
 ## Non-Functional Requirements

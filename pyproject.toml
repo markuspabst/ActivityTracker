@@ -57,4 +57,6 @@ requires = [
 requires = []
 
 [tool.briefcase.app.activitytracker.linux]
-requires = []
+requires = [
+    "python-xlib",
+]

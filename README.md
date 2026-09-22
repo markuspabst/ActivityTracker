@@ -13,6 +13,8 @@ A lightweight system tray application that tracks your active and idle time usin
 - **Time Tracking**: Tracks active (working) and idle time with minute precision
 - **Live Menu Bar**: Shows status icon and live active/idle time display with visual indicators
 - **Weekly Statistics**: Aggregates time across the week with progress bars
+- **Daily Report**: A report submenu shows the last seven active days with start
+  time, last active time, active time, idle time, and a productivity score
 - **CSV-Only Persistence**: All time data stored in `activities-{year}.csv` files; a tiny `state.json` keeps only the last-write timestamp for crash recovery
 - **Sleep Detection**: System sleep/suspend intervals are classified as idle time
 - **Crash Recovery**: An open segment left by an abnormal shutdown is finalized to the last saved write time on next launch
@@ -23,6 +25,7 @@ A lightweight system tray application that tracks your active and idle time usin
 - **Save Interval**: Configurable data persistence interval
 - **Language Support**: Multi-language (English, German)
 - **Automatic Startup**: Optional autostart on system login
+- **Version Display**: Shows the current version in the general settings menu
 - **macOS 27+ Compatible**: Fixed crashes on macOS 27+ by dispatching all pystray menu operations to the main thread using `Foundation.performSelectorOnMainThread_withObject_waitUntilDone_`
 
 ## Quick Links
@@ -94,7 +97,7 @@ git clone https://github.com/markuspabst/ActivityTracker.git
 cd ActivityTracker
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e ".[macos,dev]"
 ```
 
 ### Running
@@ -119,16 +122,19 @@ briefcase package macOS
 # DMG will be in ./dist/
 ```
 
+The release workflow uses ad-hoc signing. For public distribution on other
+Macs, configure a Developer ID certificate and notarization.
+
 ### Versioning
 
 The application version is managed directly in `pyproject.toml`:
 
 ```toml
 [project]
-version = "1.0.1"
+version = "1.0.4"
 ```
 
-Update this value before creating a release, then run the build or release script.
+The version is incremented automatically when creating a release.
 
 To publish a GitHub release from VS Code:
 
@@ -138,7 +144,7 @@ To publish a GitHub release from VS Code:
 4. Choose `patch`, `minor`, or `major` when prompted.
 
 The task increments `[project].version` in `pyproject.toml`, commits the change,
-builds the macOS app, creates a `v<version>` tag, and pushes it.
+builds the macOS app, packages the DMG, creates a `v<version>` tag, and pushes it.
 The GitHub Actions workflow then creates the release automatically with the
 macOS DMG. GitHub's automatic source archives are also available. It requires
 the repository remote to be named `origin` and the GitHub account to have push access.

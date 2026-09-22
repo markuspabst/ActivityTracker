@@ -63,6 +63,14 @@ def test_get_log_file_path_recomputes_after_path_cache_invalidation(tmp_path):
     assert str(second) == os.path.join(str(tmp_path / "two"), "activities-2026.csv")
 
 
+def test_totals_cache_is_bounded_to_recent_years(pm):
+    for year in (2024, 2025, 2026):
+        pm.get_minutes_for_date(date(year, 1, 1))
+
+    assert len(pm._totals_cache) <= 2
+    assert 2026 in pm._totals_cache
+
+
 def test_get_data_dir(pm, tmp_path):
     assert pm.get_data_dir() == str(tmp_path)
 

@@ -4,7 +4,7 @@ The platform and persistence/config side effects are mocked so the controller
 logic can be exercised without a real UI, filesystem config dir, or platform APIs.
 """
 
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import os
 import time
 from unittest.mock import MagicMock, patch
@@ -392,6 +392,111 @@ def test_update_ui_with_zero_weekly_target_does_not_crash():
     menu.update_ui(is_idle=False, active_today=0, active_week=0, weekly_target=0, weekly_idle_week=0)
     # Status indicator should fall through to the default branch
     assert menu._last_status_icon is not None
+
+
+def test_report_menu_omits_days_without_activity(tmp_path):
+    from activitytracker.activity_tracker_menu import AppMenu
+    from activitytracker.persistence import PersistenceManager
+    from activitytracker.tracking import SessionTracker
+
+    pm = PersistenceManager(lambda: str(tmp_path))
+    session = SessionTracker(pm)
+    yesterday = date.today() - timedelta(days=1)
+    session.days[yesterday] = Day(
+        yesterday,
+        [TimeSegment("active", datetime.combine(yesterday, datetime.min.time()),
+                      datetime.combine(yesterday, datetime.min.time()) + timedelta(hours=2))],
+    )
+    pm.save_segments(session.days)
+
+    fake_app = MagicMock()
+    fake_app.pm = pm
+    fake_app.session = session
+    fake_app.target_work_seconds = 8 * 3600
+    fake_app.weekly_target_seconds = 40 * 3600
+
+    menu = AppMenu(fake_app)
+    report = menu._generate_report_menu()
+    labels = [item.text for item in report.items]
+
+    assert len(labels) == 1
+    assert yesterday.strftime("%Y-%m-%d") in labels[0]
+
+
+def test_report_menu_day_includes_statistics(tmp_path):
+    from activitytracker.activity_tracker_menu import AppMenu
+    from activitytracker.persistence import PersistenceManager
+    from activitytracker.tracking import SessionTracker
+
+    pm = PersistenceManager(lambda: str(tmp_path))
+    session = SessionTracker(pm)
+    yesterday = date.today() - timedelta(days=1)
+    start = datetime.combine(yesterday, datetime.min.time()) + timedelta(hours=9)
+    session.days[yesterday] = Day(
+        yesterday,
+        [
+            TimeSegment("active", start, start + timedelta(hours=2)),
+            TimeSegment("idle", start + timedelta(hours=2), start + timedelta(hours=3)),
+            TimeSegment("active", start + timedelta(hours=3), start + timedelta(hours=4)),
+        ],
+    )
+    pm.save_segments(session.days)
+
+    fake_app = MagicMock()
+    fake_app.pm = pm
+    fake_app.session = session
+    fake_app.target_work_seconds = 8 * 3600
+    fake_app.weekly_target_seconds = 40 * 3600
+
+    menu = AppMenu(fake_app)
+    report = menu._generate_report_menu()
+    day_menu = report.items[0].submenu
+    labels = [item.text for item in day_menu.items]
+
+    assert any(i18n.t("REPORT_START", value="09:00") in text for text in labels)
+    assert any(i18n.t("REPORT_LAST_ACTIVE", value="13:00") in text for text in labels)
+    assert any(i18n.t("REPORT_ACTIVE", value="03:00") in text for text in labels)
+    assert any(i18n.t("REPORT_IDLE", value="01:00") in text for text in labels)
+    assert any(i18n.t("REPORT_PRODUCTIVITY", value="75%") in text for text in labels)
+
+
+def test_general_settings_menu_shows_version(tmp_path):
+    from activitytracker.activity_tracker_menu import AppMenu
+    from activitytracker.persistence import PersistenceManager
+    from activitytracker.tracking import SessionTracker
+
+    pm = PersistenceManager(lambda: str(tmp_path))
+    fake_app = MagicMock()
+    fake_app.pm = pm
+    fake_app.session = SessionTracker(pm)
+    fake_app.target_work_seconds = 8 * 3600
+    fake_app.weekly_target_seconds = 40 * 3600
+    fake_app.idle_threshold = 300
+    fake_app.write_interval = 3600
+
+    menu = AppMenu(fake_app)
+    menu.platform.get_bundle_version = MagicMock(return_value="1.0.4")
+    general = menu._generate_general_settings_menu()
+
+    assert any(i18n.t("VERSION", value="1.0.4") in item.text for item in general.items)
+
+
+def test_report_menu_shows_no_activity_message_when_empty(tmp_path):
+    from activitytracker.activity_tracker_menu import AppMenu
+    from activitytracker.persistence import PersistenceManager
+    from activitytracker.tracking import SessionTracker
+
+    pm = PersistenceManager(lambda: str(tmp_path))
+    fake_app = MagicMock()
+    fake_app.pm = pm
+    fake_app.session = SessionTracker(pm)
+    fake_app.target_work_seconds = 8 * 3600
+    fake_app.weekly_target_seconds = 40 * 3600
+
+    menu = AppMenu(fake_app)
+    report = menu._generate_report_menu()
+
+    assert [item.text for item in report.items] == [i18n.t("REPORT_NO_DATA")]
 
 
 # ------------------------------------------------------------
