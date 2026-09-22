@@ -25,6 +25,7 @@ from activitytracker.activity_tracker_menu import AppMenu
 from activitytracker.single_instance import SingleInstanceLock
 
 logger = logging.getLogger(__name__)
+POLL_INTERVAL_SECONDS = 10
 
 class ActivityTrackerApp:
     def __init__(self):
@@ -44,10 +45,12 @@ class ActivityTrackerApp:
 
         self.last_write_time = time.time()
         self._running = False
+        self._stop_event = threading.Event()
         self._save_failure_shown = False
 
     def run(self):
         self._running = True
+        self._stop_event.clear()
         self.menu = AppMenu(self)
         self._updater = threading.Thread(target=self._update_loop, daemon=True)
         self._updater.start()
@@ -56,14 +59,14 @@ class ActivityTrackerApp:
 
     def _update_loop(self):
         while self._running:
-            time.sleep(5)
-            if self._running:
-                is_locked = self.platform.is_screen_locked()
-                if self.session.is_locked != is_locked:
-                    self.session.set_locked(is_locked)
+            if self._stop_event.wait(POLL_INTERVAL_SECONDS):
+                break
+            is_locked = self.platform.is_screen_locked()
+            if self.session.is_locked != is_locked:
+                self.session.set_locked(is_locked)
 
-                if not is_locked:
-                    self.update()
+            if not is_locked:
+                self.update()
 
     def update(self):
         idle_time = self.platform.get_idle_time()
@@ -131,6 +134,7 @@ class ActivityTrackerApp:
 
     def quit_app(self):
         self._running = False
+        self._stop_event.set()
         try:
             self.session.finalize_session()
         except PersistenceWriteError:

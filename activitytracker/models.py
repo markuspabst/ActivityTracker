@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, date
-from typing import Optional
+from typing import List, Optional
 
 
 def _round_minutes(seconds: float) -> int:
@@ -46,20 +46,11 @@ class Day:
 
     @property
     def session_start(self) -> Optional[datetime]:
-        active_segments = [seg for seg in self.segments if seg.state == 'active']
-        if not active_segments:
-            return None
-        return min(seg.start_time for seg in active_segments)
+        return self.first_active_start()
 
     @property
     def session_end(self) -> Optional[datetime]:
-        active_segments = [seg for seg in self.segments if seg.state == 'active']
-        if not active_segments:
-            return None
-        active_segments_with_end = [seg for seg in active_segments if seg.end_time]
-        if not active_segments_with_end:
-            return None
-        return max(seg.end_time for seg in active_segments_with_end)
+        return self.last_active_end()
 
     def first_active_start(self) -> Optional[datetime]:
         """Return the start time of the first active segment, or None if no active segments."""

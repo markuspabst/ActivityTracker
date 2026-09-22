@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 # Constants
 ACTIVITIES_LOG_PREFIX = "activities"
+MAX_CACHED_YEARS = 2
 
 
 class PersistenceWriteError(IOError):
@@ -64,6 +65,12 @@ class PersistenceManager:
         self.invalidate_path_cache()
         self.invalidate_totals_cache()
 
+    def _cache_year_totals(self, year: int, totals: Dict[str, Tuple[int, int]]) -> None:
+        """Cache recent totals without retaining every queried year in memory."""
+        self._totals_cache[year] = totals
+        while len(self._totals_cache) > MAX_CACHED_YEARS:
+            self._totals_cache.pop(next(iter(self._totals_cache)))
+
     def get_log_file_path(self, prefix: str, year: int) -> Path:
         key = f"{prefix}-{year}"
         if key not in self._path_cache:
@@ -102,7 +109,7 @@ class PersistenceManager:
         path = str(self.get_log_file_path(ACTIVITIES_LOG_PREFIX, year))
         totals: Dict[str, Tuple[int, int]] = {}
         if not os.path.exists(path):
-            self._totals_cache[year] = totals
+            self._cache_year_totals(year, totals)
             return totals
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -132,7 +139,7 @@ class PersistenceManager:
                     totals[date_str] = (active, idle)
         except (IOError, csv.Error, OSError) as exc:
             logger.warning("Failed to read activities log for %s: %s", year, exc)
-        self._totals_cache[year] = totals
+        self._cache_year_totals(year, totals)
         return totals
 
     def read_segments_for_day(self, target_date: date) -> List[TimeSegment]:
@@ -407,4 +414,3 @@ class PersistenceManager:
                 json.dump(data, f, indent=2)
         except (OSError, json.JSONDecodeError) as exc:
             logger.warning("Could not clear runtime state: %s", exc)
-

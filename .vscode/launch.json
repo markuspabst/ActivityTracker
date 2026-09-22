@@ -13,20 +13,10 @@
             "python": "${workspaceFolder}/.venv/bin/python"
         },
         {
-            "name": "ActivityTracker (app.py)",
+            "name": "ActivityTracker",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/app.py",
-            "console": "integratedTerminal",
-            "python": "${workspaceFolder}/.venv/bin/python",
-            "args": [],
-            "env": {}
-        },
-        {
-            "name": "ActivityTracker (activity_tracker_menu.py)",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/activity_tracker_menu.py",
+            "module": "activitytracker",
             "console": "integratedTerminal",
             "python": "${workspaceFolder}/.venv/bin/python",
             "args": [],

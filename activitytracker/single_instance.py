@@ -1,7 +1,6 @@
 
 import atexit
 import os
-import sys
 import platformdirs
 
 # fcntl is Unix-specific, which is fine for our macOS target.

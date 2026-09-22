@@ -36,7 +36,7 @@ A lightweight system tray application that tracks your active and idle time usin
 ### Data Flow
 
 ```
-[App ticks every 5 seconds]
+[App ticks every 10 seconds]
   ┌──────────────────────────────────┐
   │ ActivityTrackerApp.update()      │
   ├─ platform_layer.get_idle_time()  │
@@ -101,7 +101,7 @@ pip install -r requirements.txt
 
 ```bash
 # Run the application
-python3 app.py
+python3 -m activitytracker
 ```
 
 The app will appear in your system tray with a yellow indicator. Click the icon to view your progress or adjust settings.
