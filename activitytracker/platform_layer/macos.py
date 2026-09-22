@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Optional, Tuple
 
-from platform_layer import PlatformABC
+from activitytracker.platform_layer import PlatformABC
 
 
 # ------------------------------------------------------------
@@ -68,10 +68,6 @@ def run_on_main_thread(func, *args, **kwargs):
     if _CAN_RUN_ON_MAIN:
         return _run_on_main(func)(*args, **kwargs)
     return func(*args, **kwargs)
-
-
-# Store for access by other modules
-_CAN_RUN_ON_MAIN = _CAN_RUN_ON_MAIN
 
 
 def _osa_escape(value: str) -> str:

@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import tracking
-from tracking import (
+from activitytracker import tracking
+from activitytracker.tracking import (
     load_config,
     save_config,
     get_config_value,
@@ -19,8 +19,8 @@ from tracking import (
     get_state_file_path,
     SessionTracker,
 )
-from persistence import PersistenceManager
-from models import TimeSegment, Day
+from activitytracker.persistence import PersistenceManager
+from activitytracker.models import TimeSegment, Day
 
 
 @pytest.fixture
@@ -200,5 +200,5 @@ def _patch_now(module, value):
 
 
 def _patch_now_models(value):
-    import models
+    from activitytracker import models
     return _PatchNow(models, value)

@@ -4,7 +4,7 @@ import os
 import sys
 from pathlib import Path
 
-from platform_layer import get_platform
+from activitytracker.platform_layer import get_platform
 
 _translations = {}
 _lang = None

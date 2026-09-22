@@ -1,10 +1,11 @@
 from __future__ import annotations
 from pystray import Icon, Menu, MenuItem
 
-import i18n
-from platform_layer import get_platform
-from tray_icon import create_icon, get_status_icon
-from tracking import format_hours
+from activitytracker import i18n
+from activitytracker.platform_layer import get_platform
+from activitytracker.tray_icon import create_icon, get_status_icon
+from activitytracker.tracking import format_hours
+from activitytracker.platform_layer.macos import run_on_main_thread
 
 
 class AppMenu:
@@ -18,13 +19,18 @@ class AppMenu:
         self._total_weekly_active = 0
         self._total_weekly_idle = 0
 
+        # Create icon on main thread - critical for macOS 27
+        run_on_main_thread(self._create_icon)
+
+    def _create_icon(self):
+        """Create the pystray icon on the main thread."""
         self.icon = Icon("ActivityTracker", create_icon("🟡"), "ActivityTracker", Menu(self._generate_menu_items))
 
     def run(self):
-        self.icon.run()
+        run_on_main_thread(self.icon.run)
 
     def stop(self):
-        self.icon.stop()
+        run_on_main_thread(self.icon.stop)
 
     def update_ui(self, is_idle, active_today, active_week, weekly_target, weekly_idle_week=None, idle_today=0, session_start=None):
         # All values are pre-computed by the caller (app.update_ui) under the
@@ -39,7 +45,7 @@ class AppMenu:
 
         status_emoji = get_status_icon(is_idle, active_today, self.app.target_work_seconds, active_week, weekly_target)
         if status_emoji != self._last_status_icon:
-            self.icon.icon = create_icon(status_emoji)
+            run_on_main_thread(lambda: setattr(self.icon, 'icon', create_icon(status_emoji)))
             self._last_status_icon = status_emoji
 
         if is_idle:
@@ -51,8 +57,8 @@ class AppMenu:
         else:
             status_indicator = "⏱️"
 
-        self.icon.title = f"{status_indicator} {format_hours(active_today)}"
-        self.icon.update_menu()
+        run_on_main_thread(lambda: setattr(self.icon, 'title', f"{status_indicator} {format_hours(active_today)}"))
+        run_on_main_thread(lambda: self.icon.update_menu())
 
     def _create_progress_bar(self, percentage: float, current_value: str, target_value: str) -> str:
         """Create a progress bar: current | bar | target (percentage).
@@ -232,11 +238,14 @@ class AppMenu:
         )
 
     def _toggle_autostart(self):
-        try:
-            if self.platform.autostart_installed():
-                self.platform.uninstall_autostart()
-            else:
-                self.app.force_save()
-                self.platform.install_autostart()
-        except Exception as e:
-            print(f"Autostart error: {e}")
+        def do_toggle():
+            try:
+                if self.platform.autostart_installed():
+                    self.platform.uninstall_autostart()
+                else:
+                    self.app.force_save()
+                    self.platform.install_autostart()
+            except Exception as e:
+                print(f"Autostart error: {e}")
+        
+        run_on_main_thread(do_toggle)

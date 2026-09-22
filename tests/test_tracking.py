@@ -5,13 +5,13 @@ import pytest
 from unittest.mock import patch, MagicMock
 from datetime import datetime, date, timedelta
 from contextlib import ExitStack
-from tracking import (
+from activitytracker.tracking import (
     SessionTracker,
     format_hours,
 )
-from models import TimeSegment, Day
-from tray_icon import get_status_icon
-from persistence import PersistenceManager
+from activitytracker.models import TimeSegment, Day
+from activitytracker.tray_icon import get_status_icon
+from activitytracker.persistence import PersistenceManager
 
 
 # ============================================================
@@ -45,12 +45,12 @@ def patch_all_datetimes():
         mock_datetime_tracking = MagicMock(wraps=datetime)
         mock_datetime_tracking.now.return_value = FROZEN_DAY1
         mock_datetime_tracking.fromisoformat.side_effect = datetime.fromisoformat
-        mock_patch_tracking = stack.enter_context(patch('tracking.datetime', mock_datetime_tracking))
+        mock_patch_tracking = stack.enter_context(patch('activitytracker.tracking.datetime', mock_datetime_tracking))
 
         mock_datetime_models = MagicMock(wraps=datetime)
         mock_datetime_models.now.return_value = FROZEN_DAY1
         mock_datetime_models.fromisoformat.side_effect = datetime.fromisoformat
-        mock_patch_models = stack.enter_context(patch('models.datetime', mock_datetime_models))
+        mock_patch_models = stack.enter_context(patch('activitytracker.models.datetime', mock_datetime_models))
 
         yield PatcherInfo(mock_patch_tracking, mock_patch_models)
 
@@ -216,8 +216,8 @@ def test_merge_segments_to_save_single_segment():
 # ============================================================
 
 def test_session_tracker_load_current_day_segments_clean_start(pm, temp_data_dir, patch_all_datetimes):
-    from persistence import PersistenceManager
-    from tracking import SessionTracker
+    from activitytracker.persistence import PersistenceManager
+    from activitytracker.tracking import SessionTracker
 
     pm_real = PersistenceManager(lambda: str(temp_data_dir))
     today = date(2026, 7, 15)
@@ -234,8 +234,8 @@ def test_session_tracker_load_current_day_segments_clean_start(pm, temp_data_dir
     assert len(s.days[today].segments) >= 1
 
 def test_session_tracker_load_current_day_segments_with_ongoing_segment(pm, temp_data_dir, patch_all_datetimes):
-    from persistence import PersistenceManager
-    from tracking import SessionTracker
+    from activitytracker.persistence import PersistenceManager
+    from activitytracker.tracking import SessionTracker
 
     pm_real = PersistenceManager(lambda: str(temp_data_dir))
     today = date(2026, 7, 15)
@@ -260,8 +260,8 @@ def test_session_tracker_load_current_day_segments_with_ongoing_segment(pm, temp
 
 
 def test_session_tracker_load_finalizes_orphaned_open_segment(tmp_path, patch_all_datetimes):
-    from persistence import PersistenceManager
-    from tracking import SessionTracker
+    from activitytracker.persistence import PersistenceManager
+    from activitytracker.tracking import SessionTracker
 
     pm_real = PersistenceManager(lambda: str(tmp_path))
     today = date(2026, 7, 15)
@@ -317,7 +317,7 @@ def test_on_tick_no_false_sleep_gap_for_normal_interval(patch_all_datetimes):
 
 
 def test_save_all_days_propagates_write_error_and_retains_memory():
-    from persistence import PersistenceWriteError
+    from activitytracker.persistence import PersistenceWriteError
     s = make_session()
     today = date(2026, 7, 15)
     s.days[today] = Day(date=today)

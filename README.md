@@ -5,6 +5,7 @@ A lightweight system tray application that tracks your active and idle time usin
 ![License](https://img.shields.io/github/license/markuspabst/ActivityTracker)
 ![Python](https://img.shields.io/badge/python-3.9+-blue.svg)
 ![macOS](https://img.shields.io/badge/platform-macos-lightgray)
+![macOS 27](https://img.shields.io/badge/macOS-27+-success.svg)
 ![Tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/markuspabst/ActivityTracker/main/tests/badge.json)
 
 ## Features
@@ -22,7 +23,7 @@ A lightweight system tray application that tracks your active and idle time usin
 - **Save Interval**: Configurable data persistence interval
 - **Language Support**: Multi-language (English, German)
 - **Automatic Startup**: Optional autostart on system login
-- **macOS 27+ Compatible**: Fixed crashes on macOS 27+ by deferring menu operations to the main thread
+- **macOS 27+ Compatible**: Fixed crashes on macOS 27+ by dispatching all pystray menu operations to the main thread using `Foundation.performSelectorOnMainThread_withObject_waitUntilDone_`
 
 ## Quick Links
 
@@ -46,9 +47,9 @@ A lightweight system tray application that tracks your active and idle time usin
   │   └─ PersistenceManager.save_segments()
   │       → activities-{year}.csv
   │
-  └─ AppController.update_ui()
+  └─ AppMenu.update_ui()             │ (dispatches to main thread on macOS)
       ├─ Read from session.days for active/idle
-      └─ AppMenu.update_ui()
+      └─ Icon updates                │ (main thread required on macOS 27+)
 ```
 
 ### File Structure
@@ -83,7 +84,7 @@ the sum of its segment durations. Days with no activity contribute zero.
 
 ### Prerequisites
 - Python 3.9 or higher
-- macOS (native support); Linux/Windows support via `platform_layer/`
+- macOS 10.15+ (native support); Linux/Windows support via `platform_layer/`
 
 ### Installation
 
@@ -114,6 +115,10 @@ python3 setup.py py2app
 # App will be in ./dist/ActivityTracker.app
 ```
 
+## macOS 27 Compatibility
+
+ActivityTracker includes a fix for macOS 27's stricter threading requirements. All pystray menu bar icon operations are now dispatched to the main thread using Foundation's `performSelectorOnMainThread_withObject_waitUntilDone_`. This prevents crashes that occurred when background threads tried to call AppKit methods like `NSStatusItem.setMenu_`.
+
 ## Configuration
 
 Access via system tray icon → Settings:
@@ -143,17 +148,23 @@ pytest tests/test_requirements.py -v  # Feature requirements
 pytest tests/test_scenarios.py -v     # Integration scenarios
 ```
 
-## Component Overview
+### Component Overview
 
 | Component | Responsibility |
 |-----------|---------------|
 | `app.py` | Main application controller, event loop, save scheduling |
 | `tracking.py` | SessionTracker: active/idle detection, sleep-gap detection, midnight rollover, orphan finalization, segment management |
-| `persistence.py` | CSV I/O, weekly aggregation, segment merging |
+| `persistence.py` | CSV I/O, weekly aggregation, segment merging, PersistenceWriteError handling (NFR-5.2) |
 | `models.py` | TimeSegment and Day dataclasses |
-| `activity_tracker_menu.py` | System tray menu UI |
-| `platform_layer/` | Native idle detection |
+| `activity_tracker_menu.py` | System tray menu UI (macOS 27+: all operations dispatch to main thread) |
+| `platform_layer/` | Native idle detection, main thread dispatch helper |
 | `locales/` | Translation files (EN, DE) |
+
+## Non-Functional Requirements
+
+| ID | Description | Implementation |
+|----|-------------|----------------|
+| NFR-5.2 | **Data Resilience**: On a disk-write failure, data is retained in memory, user is alerted once, and saving retries on the next interval | Implemented in `activitytracker/app.py` and `activitytracker/persistence.py` |
 
 ## License
 

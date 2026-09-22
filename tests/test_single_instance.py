@@ -2,8 +2,8 @@
 
 import pytest
 
-import single_instance
-from single_instance import SingleInstanceLock
+from activitytracker import single_instance
+from activitytracker.single_instance import SingleInstanceLock
 
 
 @pytest.fixture

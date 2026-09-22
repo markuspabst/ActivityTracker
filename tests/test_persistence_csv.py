@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from persistence import PersistenceManager
-from models import TimeSegment, Day
+from activitytracker.persistence import PersistenceManager
+from activitytracker.models import TimeSegment, Day
 
 
 @pytest.fixture

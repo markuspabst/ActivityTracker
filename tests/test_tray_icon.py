@@ -1,6 +1,6 @@
 """Tests for tray_icon helpers."""
 
-from tray_icon import create_icon, get_status_icon
+from activitytracker.tray_icon import create_icon, get_status_icon
 
 
 def test_create_icon_returns_rgba_image():

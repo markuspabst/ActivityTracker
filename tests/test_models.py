@@ -3,7 +3,7 @@
 from datetime import datetime, date, timedelta
 from unittest.mock import patch
 
-from models import TimeSegment, Day
+from activitytracker.models import TimeSegment, Day
 
 
 def test_time_segment_duration_seconds_closed():
@@ -36,7 +36,7 @@ def test_time_segment_duration_minutes_closed():
 def test_time_segment_duration_minutes_open_uses_now():
     now = datetime(2026, 7, 1, 10, 0, 0)
     start = datetime(2026, 7, 1, 9, 35, 0)
-    with patch("models.datetime") as mock_dt:
+    with patch("activitytracker.models.datetime") as mock_dt:
         mock_dt.now.return_value = now
         mock_dt.side_effect = lambda *a, **k: datetime(*a, **k)
         seg = TimeSegment(state="active", start_time=start, end_time=None)
@@ -120,7 +120,7 @@ def test_day_total_active_seconds_closed_only():
 def test_day_total_active_seconds_includes_ongoing():
     now = datetime(2026, 7, 1, 10, 0, 0)
     start = datetime(2026, 7, 1, 9, 50, 0)
-    with patch("models.datetime") as mock_dt:
+    with patch("activitytracker.models.datetime") as mock_dt:
         mock_dt.now.return_value = now
         mock_dt.side_effect = lambda *a, **k: datetime(*a, **k)
         d = Day(date=date(2026, 7, 1))
@@ -142,7 +142,7 @@ def test_day_total_active_seconds_ongoing_only_counts_last():
     """Only the LAST segment, if active+open, contributes ongoing time."""
     now = datetime(2026, 7, 1, 10, 0, 0)
     start = datetime(2026, 7, 1, 9, 30, 0)
-    with patch("models.datetime") as mock_dt:
+    with patch("activitytracker.models.datetime") as mock_dt:
         mock_dt.now.return_value = now
         mock_dt.side_effect = lambda *a, **k: datetime(*a, **k)
         d = Day(date=date(2026, 7, 1))

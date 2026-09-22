@@ -1,0 +1,60 @@
+[project]
+name = "ActivityTracker"
+version = "1.0.1"
+description = "A menu-bar application that tracks active and idle time."
+requires-python = ">=3.9"
+license = "MIT"
+authors = [{ name = "Markus" }]
+dependencies = [
+    "std-nslog",
+    "pystray",
+    "Pillow",
+    "platformdirs",
+    "python-dateutil",
+    "pytz",
+    "tzdata",
+    "pandas",
+    "requests",
+]
+
+[project.optional-dependencies]
+macos = [
+    "pyobjc-core",
+    "pyobjc-framework-Cocoa",
+    "pyobjc-framework-Quartz",
+]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "coverage",
+    "briefcase",
+]
+
+[tool.briefcase]
+project_name = "ActivityTracker"
+bundle = "com.markus"
+
+[tool.briefcase.app.activitytracker]
+formal_name = "ActivityTracker"
+description = "A menu-bar application that tracks active and idle time."
+sources = ["activitytracker"]
+icon = "app-icon"
+
+[tool.briefcase.app.activitytracker.macOS.app]
+# Menu-bar only app, no Dock icon
+LSUIElement = true
+# Minimum macOS version
+LSMinimumSystemVersion = "10.15"
+
+[tool.briefcase.app.activitytracker.macOS]
+requires = [
+    "pyobjc-core",
+    "pyobjc-framework-Cocoa",
+    "pyobjc-framework-Quartz",
+]
+
+[tool.briefcase.app.activitytracker.windows]
+requires = []
+
+[tool.briefcase.app.activitytracker.linux]
+requires = []

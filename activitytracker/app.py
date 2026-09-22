@@ -6,9 +6,9 @@ import time
 from datetime import datetime, timedelta
 import sys
 
-import i18n
-from platform_layer import get_platform
-from tracking import (
+from activitytracker import i18n
+from activitytracker.platform_layer import get_platform
+from activitytracker.tracking import (
     SessionTracker,
     get_config_value,
     load_config,
@@ -19,10 +19,10 @@ from tracking import (
     get_configured_data_dir,
     get_state_file_path,
 )
-from models import TimeSegment
-from persistence import PersistenceManager, PersistenceWriteError
-from activity_tracker_menu import AppMenu
-from single_instance import SingleInstanceLock
+from activitytracker.models import TimeSegment
+from activitytracker.persistence import PersistenceManager, PersistenceWriteError
+from activitytracker.activity_tracker_menu import AppMenu
+from activitytracker.single_instance import SingleInstanceLock
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +206,7 @@ class ActivityTrackerApp:
         """
         import csv
         from datetime import datetime
-        from tracking import get_config_value
+        from activitytracker.tracking import get_config_value
 
         today = datetime.now().date()
         segments_file = self.pm.get_log_file_path('activities', today.year)
@@ -317,7 +317,8 @@ class ActivityTrackerApp:
             time.sleep(0.1)  # Brief delay before showing alert
             self.platform.show_alert(success_msg, msg)
 
-if __name__ == "__main__":
+def main():
+    """Entry point for Briefcase and direct execution."""
     # 1. Acquire single-instance lock
     instance_lock = SingleInstanceLock()
     if not instance_lock.acquire():
@@ -332,3 +333,7 @@ if __name__ == "__main__":
     set_data_dir(get_configured_data_dir())
     app = ActivityTrackerApp()
     app.run()
+
+
+if __name__ == "__main__":
+    main()

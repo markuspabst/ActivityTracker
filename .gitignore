@@ -8,11 +8,12 @@ __pycache__/
 venv/
 env/
 
-# py2app
+# Build artifacts
 build/
 dist/
 .eggs/
 *.egg-info/
+build_apple/
 
 # Build-time generated version stamp
 version_generated.py

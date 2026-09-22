@@ -11,11 +11,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import app as app_module
-import i18n
-import tracking
-from models import TimeSegment, Day
-from app import ActivityTrackerApp
+from activitytracker import app as app_module
+from activitytracker import i18n
+from activitytracker import tracking
+from activitytracker.models import TimeSegment, Day
+from activitytracker.app import ActivityTrackerApp
 
 
 @pytest.fixture
@@ -236,7 +236,7 @@ def test_optimize_csv_empty_file(app, tmp_path, optimize_ready):
 
 
 def test_optimize_csv_merges_and_reports(app, tmp_path, optimize_ready):
-    from persistence import PersistenceManager
+    from activitytracker.persistence import PersistenceManager
     pm = PersistenceManager(lambda: str(tmp_path))
     D = optimize_ready
     day = Day(D.date())
@@ -262,7 +262,7 @@ def test_optimize_csv_merges_and_reports(app, tmp_path, optimize_ready):
 
 
 def test_optimize_csv_skips_malformed_rows(app, tmp_path, optimize_ready):
-    from persistence import PersistenceManager
+    from activitytracker.persistence import PersistenceManager
     pm = PersistenceManager(lambda: str(tmp_path))
     D = optimize_ready
     # Write a CSV with one malformed row (bad start) and one valid segment
@@ -288,7 +288,7 @@ def test_optimize_csv_skips_malformed_rows(app, tmp_path, optimize_ready):
 # ------------------------------------------------------------
 
 def test_merge_segments_to_save_does_not_cross_midnight():
-    from persistence import PersistenceManager
+    from activitytracker.persistence import PersistenceManager
     # Two active segments with a tiny gap BUT on different days
     seg1 = TimeSegment("active", datetime(2026, 7, 15, 23, 59, 50), datetime(2026, 7, 15, 23, 59, 59))
     seg2 = TimeSegment("active", datetime(2026, 7, 16, 0, 0, 20), datetime(2026, 7, 16, 0, 1, 0))
@@ -298,7 +298,7 @@ def test_merge_segments_to_save_does_not_cross_midnight():
 
 
 def test_merge_segments_to_save_merges_same_day_small_gap():
-    from persistence import PersistenceManager
+    from activitytracker.persistence import PersistenceManager
     # Two active segments same day, tiny gap -> merge into one
     seg1 = TimeSegment("active", datetime(2026, 7, 15, 9, 0, 0), datetime(2026, 7, 15, 9, 30, 0))
     seg2 = TimeSegment("active", datetime(2026, 7, 15, 9, 31, 0), datetime(2026, 7, 15, 10, 0, 0))
@@ -307,7 +307,7 @@ def test_merge_segments_to_save_merges_same_day_small_gap():
 
 
 def test_merge_segments_to_save_handles_overlap_no_negative_duration():
-    from persistence import PersistenceManager
+    from activitytracker.persistence import PersistenceManager
     # Overlapping active segments (seg2 starts before seg1 ends) — e.g. from a
     # corrupt/legacy/manually-edited CSV. The merge must NOT create a segment
     # with end_time < start_time (negative duration); it should keep the later
@@ -322,7 +322,7 @@ def test_merge_segments_to_save_handles_overlap_no_negative_duration():
 
 
 def test_merge_segments_to_save_overlap_extends_to_later_end():
-    from persistence import PersistenceManager
+    from activitytracker.persistence import PersistenceManager
     # seg2 overlaps seg1 but extends past it -> result keeps the later end.
     seg1 = TimeSegment("active", datetime(2026, 7, 15, 9, 0, 0), datetime(2026, 7, 15, 9, 30, 0))
     seg2 = TimeSegment("active", datetime(2026, 7, 15, 9, 15, 0), datetime(2026, 7, 15, 10, 30, 0))
@@ -360,7 +360,7 @@ def test_force_save_optimizes_csv(app):
 # ------------------------------------------------------------
 
 def test_optimize_csv_skips_missing_column_rows(app, tmp_path, optimize_ready):
-    from persistence import PersistenceManager
+    from activitytracker.persistence import PersistenceManager
     pm = PersistenceManager(lambda: str(tmp_path))
     D = optimize_ready
     # Row missing the 'state' column entirely -> would raise KeyError/AttributeError
@@ -382,7 +382,7 @@ def test_optimize_csv_skips_missing_column_rows(app, tmp_path, optimize_ready):
 # ------------------------------------------------------------
 
 def test_update_ui_with_zero_weekly_target_does_not_crash():
-    from activity_tracker_menu import AppMenu
+    from activitytracker.activity_tracker_menu import AppMenu
     fake_app = MagicMock()
     fake_app.session.days = {}
     fake_app.target_work_seconds = 8 * 3600
@@ -400,7 +400,7 @@ def test_update_ui_with_zero_weekly_target_does_not_crash():
 # ------------------------------------------------------------
 
 def test_optimize_csv_keeps_aggregates_consistent(app, tmp_path, optimize_ready):
-    from persistence import PersistenceManager
+    from activitytracker.persistence import PersistenceManager
     pm = PersistenceManager(lambda: str(tmp_path))
     D = optimize_ready
     day = Day(D.date())
@@ -426,7 +426,7 @@ def test_optimize_csv_keeps_aggregates_consistent(app, tmp_path, optimize_ready)
 
 
 def test_optimize_csv_preserves_live_segment(app, tmp_path, optimize_ready):
-    from persistence import PersistenceManager
+    from activitytracker.persistence import PersistenceManager
     pm = PersistenceManager(lambda: str(tmp_path))
     D = optimize_ready
     # Simulate an in-memory ongoing (unsaved) active segment for "today"

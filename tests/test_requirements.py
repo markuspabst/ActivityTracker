@@ -11,14 +11,14 @@ class TestRequirements(unittest.TestCase):
 
     @pytest.mark.fr('4.1')
     def test_fr_4_1_language_settings(self):
-        from tracking import load_config
+        from activitytracker.tracking import load_config
         # Language settings are handled by i18n module
         # Test that config loading works
         assert isinstance(load_config(), dict)
 
     @pytest.mark.fr('FR-4')
     def test_fr_4_configuration(self):
-        from tracking import get_config_value
+        from activitytracker.tracking import get_config_value
         assert isinstance(get_config_value("test", "default"), str)
 
     @pytest.mark.fr('FR-6')
@@ -28,7 +28,7 @@ class TestRequirements(unittest.TestCase):
 
     @pytest.mark.fr('FR-4.1')
     def test_fr_4_configuration_persistence(self):
-        from tracking import load_config, save_config, CONFIG_FILE
+        from activitytracker.tracking import load_config, save_config, CONFIG_FILE
 
         config_path = CONFIG_FILE
         if os.path.exists(config_path):

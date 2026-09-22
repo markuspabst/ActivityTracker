@@ -5,7 +5,7 @@ import os
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from models import TimeSegment, Day
+from activitytracker.models import TimeSegment, Day
 
 logger = logging.getLogger(__name__)
 
