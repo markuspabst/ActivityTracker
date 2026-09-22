@@ -138,7 +138,9 @@ To publish a GitHub release from VS Code:
 4. Select **Release: Create GitHub Release**.
 
 The task builds the macOS app, creates a `v<version>` tag, and pushes it.
-The GitHub Actions workflow then creates the release automatically. It requires
+The GitHub Actions workflow then creates the release automatically with both the
+macOS DMG and a source-code ZIP. GitHub's automatic source archives are also
+available. It requires
 the repository remote to be named `origin` and the GitHub account to have push access.
 
 ## macOS 27 Compatibility

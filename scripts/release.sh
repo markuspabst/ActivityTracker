@@ -27,11 +27,19 @@ if git rev-parse "$TAG" >/dev/null 2>&1; then
 fi
 
 # Build the app (briefcase builds to build/activitytracker/macos/app/)
-"$BRIEFCASE" build macOS
+"$BRIEFCASE" build macOS --no-input
+
+# Package the distributable macOS installer.
+"$BRIEFCASE" package macOS --no-input --adhoc-sign --packaging-format dmg
 
 # Verify build exists
 if [ ! -d "build/activitytracker/macos/app/ActivityTracker.app" ]; then
     echo "ERROR: Build failed - build/activitytracker/macos/app/ActivityTracker.app not found"
+    exit 1
+fi
+
+if ! compgen -G "dist/ActivityTracker-*.dmg" > /dev/null; then
+    echo "ERROR: DMG package was not created in dist/"
     exit 1
 fi
 
@@ -42,5 +50,5 @@ echo "Creating GitHub release with tag $TAG..."
 git tag -a "$TAG" -m "Release $TAG"
 git push origin "$TAG"
 echo ""
-echo "Note: The app is built to build/activitytracker/macos/app/ActivityTracker.app"
+echo "Note: The DMG package is in dist/"
 echo "GitHub Actions will now create the release."
