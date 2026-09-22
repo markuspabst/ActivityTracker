@@ -30,10 +30,17 @@ jobs:
     - name: Package DMG
       run: briefcase package macOS --no-input --adhoc-sign --packaging-format dmg
 
+    - name: Package app bundle
+      run: |
+        ditto -c -k --sequesterRsrc --keepParent \
+          build/activitytracker/macos/app/ActivityTracker.app \
+          dist/ActivityTracker-${GITHUB_REF_NAME}.app.zip
+
     - name: Create Release
       run: |
         gh release create "$GITHUB_REF_NAME" \
           dist/ActivityTracker-*.dmg \
+          dist/ActivityTracker-*.app.zip \
           --title "ActivityTracker $GITHUB_REF_NAME" \
           --generate-notes
       env:
