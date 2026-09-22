@@ -23,6 +23,7 @@ This document lists the runtime and development dependencies for ActivityTracker
 
 | Package | Description |
 |---------|-------------|
+| `briefcase` | Builds the standalone macOS application |
 | `pytest` | Testing framework |
 | `pytest-cov` | Coverage reporting for pytest |
 | `coverage` | Code coverage measurement |

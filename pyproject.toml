@@ -23,6 +23,7 @@ macos = [
     "std-nslog",
 ]
 dev = [
+    "briefcase",
     "pytest",
     "pytest-cov",
     "coverage",
