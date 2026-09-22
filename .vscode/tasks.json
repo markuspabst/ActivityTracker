@@ -16,27 +16,27 @@
       "command": "bash",
       "args": [
         "-c",
-        "rm -rf build dist"
+        "rm -rf build"
       ],
       "problemMatcher": []
     },
     {
       "label": "Build App",
       "type": "shell",
-      "command": "${workspaceFolder}/.venv/bin/python",
+      "command": "${workspaceFolder}/.venv/bin/briefcase",
       "args": [
-        "setup.py",
-        "py2app"
+        "build",
+        "macOS"
       ],
       "problemMatcher": []
     },
     {
-      "label": "Open App",
+      "label": "Run App",
       "type": "shell",
-      "command": "bash",
+      "command": "${workspaceFolder}/.venv/bin/briefcase",
       "args": [
-        "-c",
-        "open dist/ActivityTracker.app"
+        "run",
+        "macOS"
       ],
       "problemMatcher": []
     },
@@ -67,7 +67,7 @@
         "Bump Version",
         "Clean",
         "Build App",
-        "Open App"
+        "Run App"
       ],
       "dependsOrder": "sequence",
       "group": {
@@ -82,7 +82,7 @@
         "Bump Version",
         "Clean",
         "Build App",
-        "Open App",
+        "Run App",
         "Run Dashboard Script"
       ],
       "dependsOrder": "sequence"

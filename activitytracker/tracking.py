@@ -13,8 +13,8 @@ import threading
 from datetime import datetime, date, timedelta
 import datetime as _dt_module
 from typing import Optional, Dict
-from persistence import PersistenceManager
-from models import TimeSegment, Day
+from activitytracker.persistence import PersistenceManager
+from activitytracker.models import TimeSegment, Day
 
 import platformdirs
 

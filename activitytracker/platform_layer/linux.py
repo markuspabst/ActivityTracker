@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Optional, Tuple
 
-from platform_layer import PlatformABC
+from activitytracker.platform_layer import PlatformABC
 
 
 APP_NAME = "ActivityTracker"

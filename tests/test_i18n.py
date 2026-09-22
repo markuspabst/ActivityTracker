@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-import i18n
+from activitytracker import i18n
 
 
 @pytest.fixture(autouse=True)

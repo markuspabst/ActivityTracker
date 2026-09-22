@@ -7,8 +7,8 @@ import os
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from app import ActivityTrackerApp
-from persistence import PersistenceManager
+from activitytracker.app import ActivityTrackerApp
+from activitytracker.persistence import PersistenceManager
 
 @pytest.fixture
 def pm(tmp_path):
@@ -28,8 +28,8 @@ def mock_menu():
 
 def test_csv_format(pm, tmp_path):
     """Test that CSV files are written in the correct format with HH:MM:SS timestamps."""
-    from tracking import SessionTracker
-    from models import TimeSegment, Day
+    from activitytracker.tracking import SessionTracker
+    from activitytracker.models import TimeSegment, Day
 
     s = SessionTracker(pm)
 
@@ -68,7 +68,7 @@ def test_csv_format(pm, tmp_path):
 
 def test_set_save_interval_no_broken_cache_call(monkeypatch):
     """set_save_interval must not reference the removed module-level set_cache_ttl."""
-    import app as app_module
+    from activitytracker import app as app_module
 
     monkeypatch.setattr(app_module, "get_platform", lambda: MagicMock())
     monkeypatch.setattr(app_module, "set_config_value", lambda *args, **kwargs: None)

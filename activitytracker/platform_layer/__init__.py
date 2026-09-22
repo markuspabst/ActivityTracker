@@ -145,13 +145,13 @@ def get_platform() -> PlatformABC:
     detected = detect_platform()
 
     if detected == "macos":
-        from platform_layer.macos import MacOSPlatform
+        from activitytracker.platform_layer.macos import MacOSPlatform
         _platform_instance = MacOSPlatform()
     elif detected == "windows":
-        from platform_layer.windows import WindowsPlatform
+        from activitytracker.platform_layer.windows import WindowsPlatform
         _platform_instance = WindowsPlatform()
     elif detected == "linux":
-        from platform_layer.linux import LinuxPlatform
+        from activitytracker.platform_layer.linux import LinuxPlatform
         _platform_instance = LinuxPlatform()
     else:
         _platform_instance = FallbackPlatform()

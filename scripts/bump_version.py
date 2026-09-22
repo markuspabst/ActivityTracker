@@ -1,9 +1,11 @@
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 
 VERSION_FILE = Path("version.json")
 VERSION_GENERATED = Path("version_generated.py")
+PYPROJECT_FILE = Path("pyproject.toml")
 
 
 def read_version() -> dict:
@@ -35,9 +37,28 @@ def write_version_generated(v: dict) -> None:
     print(f"version_generated.py -> {full_version}")
 
 
+def write_pyproject_version(v: dict) -> None:
+    """Update the version field in pyproject.toml."""
+    if not PYPROJECT_FILE.exists():
+        return
+    version_str = f"{v['major']}.{v['minor']}.{v['patch']}"
+    content = PYPROJECT_FILE.read_text()
+    new_content = re.sub(
+        r'^(version\s*=\s*)"[^"]*"$',
+        f'\\1"{version_str}"',
+        content,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if new_content != content:
+        PYPROJECT_FILE.write_text(new_content)
+        print(f"pyproject.toml -> version {version_str}")
+
+
 if __name__ == "__main__":
     v = read_version()
     v["build"] += 1
     v["build_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     write_version(v)
     write_version_generated(v)
+    write_pyproject_version(v)
