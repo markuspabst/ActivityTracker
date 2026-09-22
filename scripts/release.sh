@@ -102,6 +102,7 @@ echo ""
 echo "Creating GitHub release with tag $TAG..."
 git tag -a "$TAG" -m "Release $TAG"
 git push origin "$TAG"
+find dist -maxdepth 1 -type f -name 'ActivityTracker-*.dmg' -delete
 echo ""
-echo "Note: The DMG package is in dist/"
+echo "Local DMG removed."
 echo "GitHub Actions will now create the release."
