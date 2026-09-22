@@ -16,7 +16,7 @@ A lightweight system tray application that tracks your active and idle time usin
 - **CSV-Only Persistence**: All time data stored in `activities-{year}.csv` files; a tiny `state.json` keeps only the last-write timestamp for crash recovery
 - **Sleep Detection**: System sleep/suspend intervals are classified as idle time
 - **Crash Recovery**: An open segment left by an abnormal shutdown is finalized to the last saved write time on next launch
-- **Save-Failure Resilience (NFR-5.2)**: On a disk-write failure, data is retained in memory, the user is alerted once, and saving retries on the next interval
+- **Save-Failure Resilience**: On a disk-write failure, data is retained in memory, the user is alerted once, and saving retries on the next interval
 - **Daily & Weekly Targets**: Set and monitor work goals with configurable presets
 - **Automatic CSV Optimization**: Consecutive same-state segments are merged automatically on every save, keeping the log compact with no manual action
 - **Idle Threshold**: Configurable idle detection period (default: 5 minutes)
@@ -155,7 +155,7 @@ pytest tests/test_scenarios.py -v     # Integration scenarios
 |-----------|---------------|
 | `app.py` | Main application controller, event loop, save scheduling |
 | `tracking.py` | SessionTracker: active/idle detection, sleep-gap detection, midnight rollover, orphan finalization, segment management |
-| `persistence.py` | CSV I/O, weekly aggregation, segment merging, PersistenceWriteError handling (NFR-5.2) |
+| `persistence.py` | CSV I/O, weekly aggregation, segment merging, data persistence resilience |
 | `models.py` | TimeSegment and Day dataclasses |
 | `activity_tracker_menu.py` | System tray menu UI (macOS 27+: all operations dispatch to main thread) |
 | `platform_layer/` | Native idle detection, main thread dispatch helper |
@@ -163,11 +163,11 @@ pytest tests/test_scenarios.py -v     # Integration scenarios
 | `i18n.py` | Internationalization support (EN, DE) |
 | `single_instance.py` | Single-instance lock to prevent duplicate apps |
 
-## Non-Functional Requirements
+## Data Persistence
 
-| ID | Description | Implementation |
-|----|-------------|----------------|
-| NFR-5.2 | **Data Resilience**: On a disk-write failure, data is retained in memory, user is alerted once, and saving retries on the next interval | Implemented in `activitytracker/app.py` and `activitytracker/persistence.py` |
+| Requirement | Description | Implementation |
+|-------------|-------------|----------------|
+| **Data Resilience** | On a disk-write failure, data is retained in memory, user is alerted once, and saving retries on the next interval | Implemented in `activitytracker/app.py` and `activitytracker/persistence.py` |
 
 ## License
 
