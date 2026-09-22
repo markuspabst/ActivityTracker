@@ -6,15 +6,9 @@ requires-python = ">=3.9"
 license = "MIT"
 authors = [{ name = "Markus" }]
 dependencies = [
-    "std-nslog",
     "pystray",
     "Pillow",
     "platformdirs",
-    "python-dateutil",
-    "pytz",
-    "tzdata",
-    "pandas",
-    "requests",
 ]
 
 [project.optional-dependencies]
@@ -27,7 +21,6 @@ dev = [
     "pytest",
     "pytest-cov",
     "coverage",
-    "briefcase",
 ]
 
 [tool.briefcase]

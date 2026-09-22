@@ -1,34 +1,16 @@
 # Runtime dependencies for ActivityTracker
 # Generated from pyproject.toml
 
-altgraph==0.17.5
-certifi==2026.7.22
-charset-normalizer==3.5.1
-idna==3.20
-iniconfig==2.3.0
-macholib==1.16.4
-modulegraph==0.19.7
-numpy==2.5.3
-packaging==26.3
-pandas==3.0.6
+pystray==0.19.5
 pillow==12.3.0
 platformdirs==4.11.11
-pluggy==1.6.0
-Pygments==2.21.0
+
+# macOS-specific dependencies
 pyobjc-core==12.2.2
 pyobjc-framework-Cocoa==12.2.2
 pyobjc-framework-Quartz==12.2.2
-pystray==0.19.5
+
+# Development dependencies
 pytest==9.1.1
 pytest-cov==7.1.0
-python-dateutil==2.9.0.post0
-pytz==2026.3.post1
-requests==2.34.2
-setuptools==68.2.2
-six==1.17.0
-std-nslog==0.4.1
-tomli==2.4.1
-typing_extensions==4.16.0
-tzdata==2026.4
-urllib3==2.8.0
-wheel==0.48.0
+coverage==7.16.1

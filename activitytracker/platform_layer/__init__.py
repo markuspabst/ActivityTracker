@@ -8,9 +8,7 @@ New platforms (Windows, Linux, etc.) simply implement this interface.
 from __future__ import annotations
 
 import abc
-import os
 import sys
-import time
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -205,7 +203,7 @@ class FallbackPlatform(PlatformABC):
         raise NotImplementedError("Autostart not implemented on this platform")
 
     def open_file_manager(self, path: str) -> None:
-        print(f"Open file manager: {path}")
+        pass
 
     def reveal_file_in_manager(self, path: str) -> None:
         self.open_file_manager(os.path.dirname(path))

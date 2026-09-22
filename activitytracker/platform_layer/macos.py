@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import functools
 import os
-import plistlib
 import subprocess
 import sys
 import time
@@ -284,8 +283,7 @@ class MacOSPlatform(PlatformABC):
             if response == 1000:  # NSAlertFirstButtonReturn
                 return max(min(slider.doubleValue(), max_value), min_value)
             return None
-        except Exception as e:
-            print(f"Native slider dialog failed: {e}")
+        except Exception:
             return None
 
     def _ask_slider_osascript(self, title, current, min_value, max_value):
@@ -337,8 +335,7 @@ class MacOSPlatform(PlatformABC):
             if panel.runModal() == 1:
                 return str(panel.URLs()[0].path()) if panel.URLs() else None
             return None
-        except Exception as e:
-            print(f"Native folder chooser failed: {e}")
+        except Exception:
             return None
 
     def _choose_folder_osascript(self, prompt: str = "") -> Optional[str]:
@@ -361,8 +358,7 @@ class MacOSPlatform(PlatformABC):
                 capture_output=True, text=True, check=False,
             )
             return r.stdout.strip() if r.returncode == 0 else None
-        except Exception as e:
-            print(f"Error opening folder choice dialog: {e}")
+        except Exception:
             return None
 
     # ── Autostart (launchd) ─────────────────────────────────
@@ -454,8 +450,8 @@ class MacOSPlatform(PlatformABC):
                 ["osascript", "-e", script],
                 capture_output=True, text=True, check=False,
             )
-        except Exception as e:
-            print(f"Error displaying alert: {e}")
+        except Exception:
+            pass
 
     def open_file_manager(self, path: str) -> None:
         subprocess.run(["open", path])

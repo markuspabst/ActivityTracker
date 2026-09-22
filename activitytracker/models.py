@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, date
-from typing import Optional, List
+from typing import Optional
 
 
 def _round_minutes(seconds: float) -> int:

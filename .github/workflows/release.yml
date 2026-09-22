@@ -27,7 +27,7 @@ jobs:
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
-        files: dist/ActivityTracker.app
+        files: build/activitytracker/macos/app/ActivityTracker.app
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -9,12 +9,12 @@ VERSION_PART=${1:-patch}
 # Bump version
 python3 scripts/bump_version.py --tag
 
-# Build the app
+# Build the app (briefcase builds to build/activitytracker/macos/app/)
 briefcase build macOS
 
 # Verify build exists
-if [ ! -f "dist/ActivityTracker.app" ]; then
-    echo "ERROR: Build failed - dist/ActivityTracker.app not found"
+if [ ! -d "build/activitytracker/macos/app/ActivityTracker.app" ]; then
+    echo "ERROR: Build failed - build/activitytracker/macos/app/ActivityTracker.app not found"
     exit 1
 fi
 
@@ -24,8 +24,6 @@ echo ""
 echo "To push changes and create GitHub release, run:"
 echo "  git push --follow-tags"
 echo ""
-echo "Or manually:"
-echo "  git push origin main"
-echo "  git push origin v*.*.*"
-echo ""
+echo "Note: The app is built to build/activitytracker/macos/app/ActivityTracker.app"
 echo "GitHub Actions will automatically create the release with the built app."
+

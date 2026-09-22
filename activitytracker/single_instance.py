@@ -1,7 +1,7 @@
 
-import sys
-import os
 import atexit
+import os
+import sys
 import platformdirs
 
 # fcntl is Unix-specific, which is fine for our macOS target.
@@ -65,9 +65,8 @@ class SingleInstanceLock:
             fcntl.flock(self.fp.fileno(), fcntl.LOCK_UN)
             self.fp.close()
             os.remove(self.lockfile_path)
-        except Exception as e:
-            # Log errors on release, but don't crash the exit sequence.
-            print(f"Error releasing single instance lock: {e}", file=sys.stderr)
+        except Exception:
+            pass
         finally:
             # Null out so a later release() (atexit) becomes a no-op.
             self.fp = None

@@ -100,6 +100,7 @@ class ActivityTrackerApp:
 
     def update_ui(self):
         today = datetime.now().date()
+        week_start_date = today - timedelta(days=today.weekday())
 
         # Guard shared session state: the updater thread mutates
         # self.session.days / current_segment while this thread reads it.
@@ -110,17 +111,15 @@ class ActivityTrackerApp:
             idle_today = (current_day_data.idle_minutes * 60) if current_day_data else 0
             session_start = current_day_data.session_start if current_day_data else None
 
-        week_start_date = today - timedelta(days=today.weekday())
-        # Get weekly total from CSV
+        # Get cached weekly totals from the totals_cache (already cached per year)
+        # This avoids reading CSV on every UI update
         weekly_active_minutes, weekly_idle_minutes = self.pm.get_weekly_minutes(week_start_date)
 
-        # Include today's ongoing segment (which may not be in CSV yet)
-        # The difference between in-memory total and CSV total is the ongoing time
+        # Get cached daily totals (already cached per year in totals_cache)
         today_csv_active, today_csv_idle = self.pm.get_minutes_for_date(today)
 
         # Calculate ongoing time for both active and idle.
-        # Clamp to zero so the weekly totals can never go negative (e.g. after
-        # optimize/merge reduces the in-memory total, or due to clock skew).
+        # Clamp to zero so the weekly totals can never go negative.
         active_ongoing_seconds = max(0, active_today - (today_csv_active * 60))
         idle_ongoing_seconds = max(0, idle_today - (today_csv_idle * 60))
 
@@ -305,16 +304,10 @@ class ActivityTrackerApp:
         )
         success_msg = i18n.t("OPTIMIZE_SUCCESS")
 
-        print(f"Optimization complete: {success_msg} - {msg}")
-        print(f"  Original: {original_count}, Merged: {merged_count}, Reduced: {reduced_count}")
-
         if not silent:
-            # Bring app to front to ensure alert is visible
-            import time
-            time.sleep(0.1)  # Brief delay to ensure file write completes
+            # Brief delay before showing alert
+            time.sleep(0.1)
             self.platform.bring_app_to_front()
-            # Show alert with brief delay
-            time.sleep(0.1)  # Brief delay before showing alert
             self.platform.show_alert(success_msg, msg)
 
 def main():
