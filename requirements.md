@@ -17,6 +17,7 @@ This document lists the runtime and development dependencies for ActivityTracker
 | `pyobjc-core` | Core PyObjC bindings for Cocoa |
 | `pyobjc-framework-Cocoa` | PyObjC Cocoa framework bindings |
 | `pyobjc-framework-Quartz` | PyObjC Quartz framework bindings (idle detection) |
+| `std-nslog` | Captures stdout/stderr in macOS app logs |
 
 ## Development Dependencies
 
