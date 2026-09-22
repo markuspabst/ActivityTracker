@@ -25,6 +25,9 @@
       "label": "Release: Create GitHub Release",
       "type": "shell",
       "command": "${workspaceFolder}/scripts/release.sh",
+      "args": [
+        "${input:releaseType}"
+      ],
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -87,6 +90,15 @@
         "Run Dashboard Script"
       ],
       "dependsOrder": "sequence"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "releaseType",
+      "type": "pickString",
+      "description": "Release version increment",
+      "options": ["patch", "minor", "major"],
+      "default": "patch"
     }
   ]
 }

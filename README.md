@@ -132,12 +132,13 @@ Update this value before creating a release, then run the build or release scrip
 
 To publish a GitHub release from VS Code:
 
-1. Update `[project].version` in `pyproject.toml`.
-2. Commit all changes.
-3. Open **Terminal → Run Task...**.
-4. Select **Release: Create GitHub Release**.
+1. Commit all current changes.
+2. Open **Terminal → Run Task...**.
+3. Select **Release: Create GitHub Release**.
+4. Choose `patch`, `minor`, or `major` when prompted.
 
-The task builds the macOS app, creates a `v<version>` tag, and pushes it.
+The task increments `[project].version` in `pyproject.toml`, commits the change,
+builds the macOS app, creates a `v<version>` tag, and pushes it.
 The GitHub Actions workflow then creates the release automatically with both the
 macOS DMG and a source-code ZIP. GitHub's automatic source archives are also
 available. It requires
