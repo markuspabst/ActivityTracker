@@ -1,6 +1,6 @@
 [project]
 name = "ActivityTracker"
-version = "1.0.10"
+version = "1.0.11"
 description = "A menu-bar application that tracks active and idle time."
 requires-python = ">=3.9"
 license = "MIT"
