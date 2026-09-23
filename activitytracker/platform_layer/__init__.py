@@ -8,7 +8,9 @@ New platforms (Windows, Linux, etc.) simply implement this interface.
 from __future__ import annotations
 
 import abc
+import os
 import sys
+import time
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -145,12 +147,6 @@ def get_platform() -> PlatformABC:
     if detected == "macos":
         from activitytracker.platform_layer.macos import MacOSPlatform
         _platform_instance = MacOSPlatform()
-    elif detected == "windows":
-        from activitytracker.platform_layer.windows import WindowsPlatform
-        _platform_instance = WindowsPlatform()
-    elif detected == "linux":
-        from activitytracker.platform_layer.linux import LinuxPlatform
-        _platform_instance = LinuxPlatform()
     else:
         _platform_instance = FallbackPlatform()
 
