@@ -253,6 +253,42 @@ def test_session_tracker_load_finalizes_orphaned_open_segment(tmp_path, patch_al
     assert s.days[today].segments[0].end_time == datetime(2026, 7, 15, 7, 30, 0)
 
 
+def test_session_tracker_load_orphaned_segment_when_last_write_is_none(tmp_path, patch_all_datetimes):
+    pm = MagicMock(spec=PersistenceManager)
+    today = date(2026, 7, 15)
+    orphan = TimeSegment(state='active', start_time=datetime(2026, 7, 15, 9, 0, 0), end_time=None)
+    pm.read_segments_for_day.return_value = [orphan]
+    pm.read_last_segment_write.return_value = None
+
+    s = SessionTracker(pm)
+    patch_all_datetimes.set_now(datetime(2026, 7, 15, 10, 0, 0))
+    s.load_current_day_segments()
+
+    assert s.current_segment is None
+    assert len(s.days[today].segments) == 1
+    # When no last_write is available, closes conservatively at start_time
+    assert s.days[today].segments[0].end_time == datetime(2026, 7, 15, 9, 0, 0)
+
+
+def test_session_tracker_load_orphaned_segment_when_last_write_is_invalid(tmp_path, patch_all_datetimes, caplog):
+    import logging
+    pm = MagicMock(spec=PersistenceManager)
+    today = date(2026, 7, 15)
+    orphan = TimeSegment(state='active', start_time=datetime(2026, 7, 15, 9, 0, 0), end_time=None)
+    pm.read_segments_for_day.return_value = [orphan]
+    pm.read_last_segment_write.return_value = "not-a-datetime"
+
+    s = SessionTracker(pm)
+    patch_all_datetimes.set_now(datetime(2026, 7, 15, 10, 0, 0))
+    with caplog.at_level(logging.WARNING):
+        s.load_current_day_segments()
+
+    assert s.current_segment is None
+    assert len(s.days[today].segments) == 1
+    assert s.days[today].segments[0].end_time == datetime(2026, 7, 15, 9, 0, 0)
+    assert "Invalid last_segment_write timestamp: not-a-datetime" in caplog.text
+
+
 def test_on_tick_records_sleep_gap_as_idle(patch_all_datetimes):
     s = make_session()
     patch_all_datetimes.set_now(datetime(2026, 7, 15, 9, 0, 0))

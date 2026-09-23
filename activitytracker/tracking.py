@@ -8,6 +8,7 @@ It can be imported by the menu app, the dashboard generator, tests, etc.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 from datetime import datetime, date, timedelta
@@ -17,6 +18,8 @@ from activitytracker.persistence import PersistenceManager
 from activitytracker.models import TimeSegment, Day
 
 import platformdirs
+
+logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------
 # CONSTANTS
@@ -263,7 +266,7 @@ class SessionTracker:
             open_segments = [s for s in self.days[today].segments if s.end_time is None]
             if open_segments:
                 last_write = self.pm.read_last_segment_write()
-                if not isinstance(last_write, _dt_module.datetime):
+                if last_write is not None and not isinstance(last_write, _dt_module.datetime):
                     logger.warning("Invalid last_segment_write timestamp: %s", last_write)
                     last_write = None
                 now = datetime.now().replace(microsecond=0)
