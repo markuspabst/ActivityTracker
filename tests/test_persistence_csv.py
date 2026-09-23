@@ -730,3 +730,71 @@ def test_filter_idle_boundary_segments_idle_after_last_active(pm, tmp_path):
     # Idle starting exactly when last active ends should be filtered
     assert len(filtered) == 1
     assert filtered[0].state == "active"
+
+
+def test_filter_idle_boundary_segments_preserves_lunch_break_when_afternoon_active_is_ongoing(pm, tmp_path):
+    """Lunch break between morning and ongoing afternoon session must be preserved."""
+    d = Day(date=date(2026, 7, 1))
+    d.segments.append(TimeSegment(
+        state="active",
+        start_time=datetime(2026, 7, 1, 9, 0, 0),
+        end_time=datetime(2026, 7, 1, 12, 0, 0),
+    ))
+    d.segments.append(TimeSegment(
+        state="idle",
+        start_time=datetime(2026, 7, 1, 12, 0, 0),
+        end_time=datetime(2026, 7, 1, 13, 0, 0),
+    ))
+    d.segments.append(TimeSegment(
+        state="active",
+        start_time=datetime(2026, 7, 1, 13, 0, 0),
+        end_time=None,  # ongoing afternoon session
+    ))
+    filtered = pm._filter_idle_boundary_segments(d.segments)
+    assert len(filtered) == 3
+    assert filtered[0].state == "active"
+    assert filtered[1].state == "idle"
+    assert filtered[1].start_time == datetime(2026, 7, 1, 12, 0, 0)
+    assert filtered[1].end_time == datetime(2026, 7, 1, 13, 0, 0)
+    assert filtered[2].state == "active"
+    assert filtered[2].end_time is None
+
+
+def test_filter_idle_boundary_segments_preserves_multiple_breaks_with_ongoing_active(pm, tmp_path):
+    """Multiple intermediate breaks (coffee, lunch) must all be preserved with ongoing active."""
+    d = Day(date=date(2026, 7, 1))
+    d.segments.append(TimeSegment(
+        state="idle",
+        start_time=datetime(2026, 7, 1, 8, 0, 0),
+        end_time=datetime(2026, 7, 1, 8, 30, 0),  # before first active -> filter
+    ))
+    d.segments.append(TimeSegment(
+        state="active",
+        start_time=datetime(2026, 7, 1, 9, 0, 0),
+        end_time=datetime(2026, 7, 1, 10, 30, 0),
+    ))
+    d.segments.append(TimeSegment(
+        state="idle",
+        start_time=datetime(2026, 7, 1, 10, 30, 0),
+        end_time=datetime(2026, 7, 1, 10, 45, 0),  # coffee break -> keep
+    ))
+    d.segments.append(TimeSegment(
+        state="active",
+        start_time=datetime(2026, 7, 1, 10, 45, 0),
+        end_time=datetime(2026, 7, 1, 12, 30, 0),
+    ))
+    d.segments.append(TimeSegment(
+        state="idle",
+        start_time=datetime(2026, 7, 1, 12, 30, 0),
+        end_time=datetime(2026, 7, 1, 13, 30, 0),  # lunch break -> keep
+    ))
+    d.segments.append(TimeSegment(
+        state="active",
+        start_time=datetime(2026, 7, 1, 13, 30, 0),
+        end_time=None,  # ongoing afternoon session -> keep
+    ))
+    filtered = pm._filter_idle_boundary_segments(d.segments)
+    assert len(filtered) == 5
+    states = [s.state for s in filtered]
+    assert states == ["active", "idle", "active", "idle", "active"]
+

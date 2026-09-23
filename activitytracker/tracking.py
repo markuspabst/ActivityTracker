@@ -219,19 +219,25 @@ class SessionTracker:
                 for seg in self.days[current_date].segments:
                     if seg.start_time == self.current_segment.start_time:
                         # This is the current segment - reset end_time for continued tracking
-                        updated_segments.append(TimeSegment(
+                        cur_seg = TimeSegment(
                             state=seg.state,
                             start_time=seg.start_time,
                             end_time=None
-                        ))
+                        )
+                        self.current_segment = cur_seg
+                        updated_segments.append(cur_seg)
                     else:
                         # Keep historical segments as-is
                         updated_segments.append(seg)
 
-                # Filter idle segments that are before first active or after last active
-                updated_segments = self.pm._filter_idle_boundary_segments(updated_segments)
+                # Filter idle segments that are before first active or after last active,
+                # ensuring the live current segment is never discarded from memory.
+                filtered = self.pm._filter_idle_boundary_segments(updated_segments)
+                if self.current_segment not in filtered:
+                    filtered.append(self.current_segment)
+                    filtered.sort(key=lambda s: s.start_time)
 
-                self.days = {current_date: Day(date=current_date, segments=updated_segments)}
+                self.days = {current_date: Day(date=current_date, segments=filtered)}
             else:
                 self.days = {}
 

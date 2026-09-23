@@ -433,3 +433,55 @@ def test_weekly_logging_with_ongoing_segment_today(patch_all_datetimes, temp_dat
 
     active, idle = pm.get_minutes_for_date(date(2026, 7, 19))
     assert active == 30
+
+
+def test_save_all_days_preserves_lunch_break_in_memory_when_active_ongoing(patch_all_datetimes, temp_data_dir):
+    pm = PersistenceManager(lambda: str(temp_data_dir))
+    s = SessionTracker(pm)
+    today = date(2026, 7, 15)
+
+    patch_all_datetimes.set_now(datetime(2026, 7, 15, 14, 0, 0))
+    s.days[today] = Day(date=today, segments=[
+        TimeSegment(state='active', start_time=datetime(2026, 7, 15, 9, 0, 0), end_time=datetime(2026, 7, 15, 12, 0, 0)),
+        TimeSegment(state='idle', start_time=datetime(2026, 7, 15, 12, 0, 0), end_time=datetime(2026, 7, 15, 13, 0, 0)),
+        TimeSegment(state='active', start_time=datetime(2026, 7, 15, 13, 0, 0), end_time=None),
+    ])
+    s.current_segment = s.days[today].segments[-1]
+
+    assert s.days[today].idle_minutes == 60
+
+    # Periodic save happens during afternoon work
+    s.save_all_days()
+
+    # Lunch break must still be present in memory and idle_minutes preserved
+    assert len(s.days[today].segments) == 3
+    assert s.days[today].idle_minutes == 60
+    assert s.days[today].segments[1].state == 'idle'
+    assert s.days[today].segments[1].start_time == datetime(2026, 7, 15, 12, 0, 0)
+    assert s.days[today].segments[1].end_time == datetime(2026, 7, 15, 13, 0, 0)
+    assert s.days[today].segments[2].state == 'active'
+    assert s.days[today].segments[2].end_time is None
+
+
+def test_save_all_days_preserves_ongoing_idle_break_in_memory(patch_all_datetimes, temp_data_dir):
+    pm = PersistenceManager(lambda: str(temp_data_dir))
+    s = SessionTracker(pm)
+    today = date(2026, 7, 15)
+
+    patch_all_datetimes.set_now(datetime(2026, 7, 15, 12, 30, 0))
+    s.days[today] = Day(date=today, segments=[
+        TimeSegment(state='active', start_time=datetime(2026, 7, 15, 9, 0, 0), end_time=datetime(2026, 7, 15, 12, 0, 0)),
+        TimeSegment(state='idle', start_time=datetime(2026, 7, 15, 12, 0, 0), end_time=None),
+    ])
+    s.current_segment = s.days[today].segments[-1]
+
+    # Hourly save runs while user is away at lunch
+    s.save_all_days()
+
+    # In-memory session must not discard the live ongoing idle segment
+    assert len(s.days[today].segments) == 2
+    assert s.days[today].segments[1].state == 'idle'
+    assert s.days[today].segments[1].start_time == datetime(2026, 7, 15, 12, 0, 0)
+    assert s.days[today].segments[1].end_time is None
+    assert s.current_segment == s.days[today].segments[1]
+

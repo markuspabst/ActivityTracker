@@ -264,20 +264,20 @@ class PersistenceManager:
         if not segments:
             return []
 
-        # Find the first active start and last active end
-        first_active = None
-        last_active_end = None
-        for seg in segments:
-            if seg.state == 'active':
-                if first_active is None:
-                    first_active = seg.start_time
-                if seg.end_time:
-                    if last_active_end is None or seg.end_time > last_active_end:
-                        last_active_end = seg.end_time
-
-        # If no active segments, return empty list (per user request)
-        if first_active is None:
+        active_segments = [seg for seg in segments if seg.state == 'active' and seg.start_time is not None]
+        if not active_segments:
             return []
+
+        first_active = min(seg.start_time for seg in active_segments)
+
+        # Check if an active segment is ongoing (end_time is None) or starts later
+        has_ongoing_active = any(seg.end_time is None for seg in active_segments)
+        latest_active_start = max(seg.start_time for seg in active_segments)
+
+        last_active_end = None
+        active_with_end = [seg.end_time for seg in active_segments if seg.end_time is not None]
+        if active_with_end:
+            last_active_end = max(active_with_end)
 
         # Filter out idle segments outside the active window
         filtered = []
@@ -290,9 +290,12 @@ class PersistenceManager:
                 if seg_end and seg_end <= first_active:
                     continue
 
-                # Skip idle segments that start after last active ends
-                if seg_start and last_active_end and seg_start >= last_active_end:
-                    continue
+                # Skip idle segments that start after the last active segment ended.
+                # If an active segment is ongoing or starts after this idle segment,
+                # this idle segment is NOT after the last active period.
+                if not has_ongoing_active or (seg_start and seg_start > latest_active_start):
+                    if seg_start and last_active_end and seg_start >= last_active_end:
+                        continue
 
             # Keep non-idle segments and relevant idle segments
             filtered.append(seg)
