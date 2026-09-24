@@ -470,6 +470,19 @@ def test_get_minutes_for_date_rounds_like_duration_minutes(pm, tmp_path):
     assert idle == 0
 
 
+def test_get_minutes_for_date_aggregates_exact_seconds_before_rounding(pm, tmp_path):
+    _write_raw(
+        pm, 2026,
+        ["date", "state", "start", "end", "duration_min", "duration_seconds"],
+        [
+            ["2026-07-01", "active", f"09:{index:02d}:00", f"09:{index:02d}:31", "1", "31"]
+            for index in range(10)
+        ],
+    )
+
+    assert pm.get_minutes_for_date(date(2026, 7, 1)) == (5, 0)
+
+
 def test_get_weekly_minutes_sums_days_from_activities_log(pm, tmp_path):
     d1 = Day(date=date(2026, 7, 1))
     d1.segments.append(TimeSegment(
@@ -526,6 +539,34 @@ def test_readers_survive_unreadable_log_file(pm, tmp_path):
     # get_minutes_for_date / read_segments_for_day should return empty, not raise
     assert pm.get_minutes_for_date(date(2026, 7, 1)) == (0, 0)
     assert pm.read_segments_for_day(date(2026, 7, 1)) == []
+
+
+def test_readers_tolerate_missing_state_column(pm, tmp_path):
+    """A file without a 'state' column must not raise KeyError in any reader."""
+    _write_raw(
+        pm, 2026,
+        ["date", "start", "end", "duration_min", "duration_seconds"],
+        [["2026-07-01", "09:00:00", "10:00:00", "60", "3600"]],
+    )
+    assert pm.get_minutes_for_date(date(2026, 7, 1)) == (0, 0)
+    assert pm.read_segments_for_day(date(2026, 7, 1)) == []
+    assert pm.get_weekly_minutes(date(2026, 6, 29)) == (0, 0)
+
+
+def test_readers_skip_malformed_rows_but_keep_valid_ones(pm, tmp_path):
+    """Truncated/blank rows are skipped individually; valid rows still count."""
+    path = pm.get_log_file_path("activities", 2026)
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        f.write("date,state,start,end,duration_min,duration_seconds\n")
+        f.write("2026-07-01,active,09:00:00,10:00:00,60,3600\n")
+        f.write("2026-07-01,active\n")  # truncated -> missing start
+        f.write(",active,11:00:00,12:00:00,60,3600\n")  # missing date
+
+    assert pm.get_minutes_for_date(date(2026, 7, 1)) == (60, 0)
+    segs = pm.read_segments_for_day(date(2026, 7, 1))
+    assert len(segs) == 1
+    assert segs[0].start_time == datetime(2026, 7, 1, 9, 0, 0)
+    assert segs[0].end_time == datetime(2026, 7, 1, 10, 0, 0)
 
 
 # ------------------------------------------------------------
@@ -797,4 +838,3 @@ def test_filter_idle_boundary_segments_preserves_multiple_breaks_with_ongoing_ac
     assert len(filtered) == 5
     states = [s.state for s in filtered]
     assert states == ["active", "idle", "active", "idle", "active"]
-

@@ -110,6 +110,20 @@ def test_quit_app(app):
     assert app._running is False
 
 
+def test_update_loop_continues_saving_while_screen_is_locked(app):
+    app._running = True
+    app._stop_event = MagicMock()
+    app._stop_event.wait.side_effect = [False, True]
+    app.platform.is_screen_locked.return_value = True
+    app.session.set_locked = MagicMock()
+    app.update = MagicMock()
+
+    app._update_loop()
+
+    app.session.set_locked.assert_called_once_with(True)
+    app.update.assert_called_once()
+
+
 def test_update_ui_computes_and_calls_menu(app, monkeypatch):
     D = datetime(2026, 7, 15, 12, 0, 0)
     monkeypatch.setattr(app_module, "datetime", MagicMock(wraps=datetime))

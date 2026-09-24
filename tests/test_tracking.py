@@ -129,6 +129,35 @@ def test_session_tracker_midnight_rollover(patch_all_datetimes):
     assert date(2026, 7, 2) in s.days
     assert date(2026, 7, 1) not in s.days
 
+
+def test_midnight_rollover_splits_before_state_transition(patch_all_datetimes):
+    s = make_session()
+    s.pm._filter_idle_boundary_segments.side_effect = lambda segments: segments
+    patch_all_datetimes.set_now(datetime(2026, 7, 1, 23, 59, 58))
+    s.on_tick(idle_time=0, idle_threshold=300)
+
+    patch_all_datetimes.set_now(datetime(2026, 7, 2, 0, 0, 3))
+    s.on_tick(idle_time=400, idle_threshold=300)
+
+    previous_day = s.pm.save_segments.call_args.args[0][date(2026, 7, 1)]
+    assert previous_day.segments[0].end_time == datetime(2026, 7, 1, 23, 59, 59)
+    today_segments = s.days[date(2026, 7, 2)].segments
+    assert today_segments[0].start_time == datetime(2026, 7, 2, 0, 0, 0)
+    assert today_segments[0].end_time == datetime(2026, 7, 2, 0, 0, 3)
+    assert today_segments[1].state == 'idle'
+
+
+def test_sleep_gap_ending_exactly_at_midnight_does_not_crash(patch_all_datetimes):
+    s = make_session()
+    patch_all_datetimes.set_now(datetime(2026, 7, 1, 23, 58, 59))
+    s.on_tick(idle_time=0, idle_threshold=300)
+
+    patch_all_datetimes.set_now(datetime(2026, 7, 2, 0, 0, 0))
+    s.on_tick(idle_time=0, idle_threshold=300)
+
+    assert date(2026, 7, 2) in s.days
+    assert s.current_segment.start_time == datetime(2026, 7, 2, 0, 0, 0)
+
 def test_session_tracker_finalize(patch_all_datetimes):
     s = make_session()
     patch_all_datetimes.set_now(FROZEN_DAY1)
@@ -334,6 +363,28 @@ def test_save_all_days_propagates_write_error_and_retains_memory():
     assert len(s.days[today].segments) == 1
 
 
+def test_failed_save_keeps_current_segment_open_and_tracking_advances(patch_all_datetimes):
+    from activitytracker.persistence import PersistenceWriteError
+
+    s = make_session()
+    today = date(2026, 7, 15)
+    segment = TimeSegment('active', datetime(2026, 7, 15, 9, 0, 0))
+    s.days[today] = Day(date=today, segments=[segment])
+    s.current_segment = segment
+    s.pm.save_segments.side_effect = PersistenceWriteError("disk full")
+
+    patch_all_datetimes.set_now(datetime(2026, 7, 15, 10, 0, 0))
+    with pytest.raises(PersistenceWriteError):
+        s.save_all_days()
+
+    assert segment.end_time is None
+    patch_all_datetimes.set_now(datetime(2026, 7, 15, 10, 10, 0))
+    s.on_tick(idle_time=0, idle_threshold=300)
+
+    assert segment.end_time is None
+    assert s.days[today].total_active_seconds() == 70 * 60
+
+
 # ============================================================
 #  DAILY AND WEEKLY LOGGING TESTS
 # ============================================================
@@ -484,4 +535,3 @@ def test_save_all_days_preserves_ongoing_idle_break_in_memory(patch_all_datetime
     assert s.days[today].segments[1].start_time == datetime(2026, 7, 15, 12, 0, 0)
     assert s.days[today].segments[1].end_time is None
     assert s.current_segment == s.days[today].segments[1]
-

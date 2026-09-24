@@ -43,6 +43,20 @@ def test_time_segment_duration_minutes_open_uses_now():
         assert seg.duration_minutes == 25
 
 
+def test_day_active_minutes_rounds_after_summing_segments():
+    day = Day(date=date(2026, 7, 1), segments=[
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, index, 0),
+            end_time=datetime(2026, 7, 1, 9, index, 31),
+        )
+        for index in range(10)
+    ])
+
+    # Ten 31-second intervals are 310 seconds total, rounded once to 5 minutes.
+    assert day.active_minutes == 5
+
+
 def test_day_active_and_idle_minutes():
     d = Day(date=date(2026, 7, 1))
     d.segments.append(TimeSegment(

@@ -107,38 +107,50 @@ class PersistenceManager:
             return self._totals_cache[year]
 
         path = str(self.get_log_file_path(ACTIVITIES_LOG_PREFIX, year))
-        totals: Dict[str, Tuple[int, int]] = {}
+        totals_seconds: Dict[str, Tuple[int, int]] = {}
         if not os.path.exists(path):
-            self._cache_year_totals(year, totals)
-            return totals
+            self._cache_year_totals(year, {})
+            return {}
         try:
             with open(path, "r", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    date_str = row['date']
-                    # Prefer the stored duration_min column (which uses the same
-                    # rounding as the model), falling back to duration_seconds // 60
-                    # for legacy CSV files that predate the column.
-                    dur_str = row.get('duration_min', '')
-                    if dur_str and dur_str.strip():
+                    # Skip rows lacking the columns needed to classify them
+                    # (corrupt/hand-edited/legacy files) instead of aborting the
+                    # whole read with a KeyError.
+                    date_str = row.get('date')
+                    state = row.get('state')
+                    if not date_str or not state:
+                        continue
+                    # Aggregate precise seconds and round only the daily total.
+                    # Fall back to legacy duration_min rows when seconds are absent
+                    # or malformed.
+                    seconds_str = row.get('duration_seconds', '')
+                    if seconds_str and seconds_str.strip():
                         try:
-                            dur = int(dur_str)
+                            duration_seconds = int(float(seconds_str))
                         except (ValueError, TypeError):
-                            dur = 0
+                            duration_seconds = None
                     else:
+                        duration_seconds = None
+                    if duration_seconds is None:
+                        dur_str = row.get('duration_min', '')
                         try:
-                            dur_seconds = int(float(row.get('duration_seconds', '0') or '0'))
-                            dur = (dur_seconds + 30) // 60  # round to nearest
+                            duration_seconds = int(dur_str) * 60 if dur_str and dur_str.strip() else 0
                         except (ValueError, TypeError):
-                            dur = 0
-                    active, idle = totals.get(date_str, (0, 0))
-                    if row['state'] == 'active':
-                        active += dur
+                            duration_seconds = 0
+                    active, idle = totals_seconds.get(date_str, (0, 0))
+                    if state == 'active':
+                        active += duration_seconds
                     else:
-                        idle += dur
-                    totals[date_str] = (active, idle)
+                        idle += duration_seconds
+                    totals_seconds[date_str] = (active, idle)
         except (IOError, csv.Error, OSError) as exc:
             logger.warning("Failed to read activities log for %s: %s", year, exc)
+        totals = {
+            date_str: ((active_seconds + 30) // 60, (idle_seconds + 30) // 60)
+            for date_str, (active_seconds, idle_seconds) in totals_seconds.items()
+        }
         self._cache_year_totals(year, totals)
         return totals
 
@@ -153,9 +165,11 @@ class PersistenceManager:
             with open(path, "r", newline="", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    if row['date'] != target_str:
+                    if row.get('date') != target_str:
                         continue
                     try:
+                        # Missing columns (corrupt/hand-edited/legacy files) are
+                        # skipped rather than raising KeyError and aborting the read.
                         parts = row['start'].split(':')
                         start_dt = datetime(target_date.year, target_date.month, target_date.day,
                                             int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 0)
@@ -165,7 +179,7 @@ class PersistenceManager:
                             end_dt = datetime(target_date.year, target_date.month, target_date.day,
                                             int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 0)
                         segments.append(TimeSegment(state=row['state'], start_time=start_dt, end_time=end_dt))
-                    except (ValueError, TypeError):
+                    except (ValueError, TypeError, KeyError, AttributeError):
                         continue
         except (IOError, csv.Error, OSError) as exc:
             logger.warning("Failed to read segments for %s: %s", target_date, exc)

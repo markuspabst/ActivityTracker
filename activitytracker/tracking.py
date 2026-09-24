@@ -133,6 +133,21 @@ class SessionTracker:
             if current_date not in self.days:
                 self.days[current_date] = Day(date=current_date)
 
+            # Split an existing segment at midnight before processing a state
+            # change. Otherwise a transition on the first tick of a new day
+            # closes the previous day's segment using the new day's timestamp.
+            if self.current_segment and self.current_segment.start_time.date() != current_date:
+                previous_day = self.current_segment.start_time.date()
+                midnight = datetime.combine(previous_day, datetime.max.time()).replace(microsecond=0)
+                self.current_segment.end_time = midnight
+
+                new_day_start = datetime.combine(current_date, datetime.min.time()).replace(microsecond=0)
+                self.current_segment = TimeSegment(state=self.current_segment.state, start_time=new_day_start)
+                self.days[current_date].segments.append(self.current_segment)
+
+                # Save the completed day as well as the new day's initial segment.
+                self.save_all_days()
+
             is_idle_by_time = idle_time > idle_threshold
             current_state = 'idle' if is_idle_by_time or self.is_locked else 'active'
 
@@ -147,20 +162,6 @@ class SessionTracker:
                 self.days[current_date].segments.append(self.current_segment)
             # else: state hasn't changed, continue with existing segment (end_time will be set on save)
 
-            if self.current_segment.start_time.date() != current_date:
-                # Round midnight to the exact start of the day
-                midnight = datetime.combine(self.current_segment.start_time.date(), datetime.max.time())
-                midnight = midnight.replace(microsecond=0)
-                self.current_segment.end_time = midnight
-
-                new_day_start = datetime.combine(current_date, datetime.min.time())
-                new_day_start = new_day_start.replace(microsecond=0)
-                self.current_segment = TimeSegment(state=self.current_segment.state, start_time=new_day_start)
-                self.days[current_date].segments.append(self.current_segment)
-
-                # Save data for the previous day when midnight crosses
-                self.save_all_days()
-
     def _insert_sleep_gap(self, gap_start: datetime, gap_end: datetime) -> None:
         """Record a sleep/suspend interval [gap_start, gap_end) as Idle segments.
 
@@ -172,16 +173,19 @@ class SessionTracker:
             self.current_segment.end_time = gap_start
 
         cur = gap_start
+        last_segment = None
         while cur < gap_end:
             day = cur.date()
             day_end = datetime.combine(day, datetime.max.time()).replace(microsecond=0)
             seg_end = gap_end if gap_end <= day_end else day_end
             segment = TimeSegment(state="idle", start_time=cur, end_time=seg_end)
             self.days.setdefault(day, Day(date=day)).segments.append(segment)
+            last_segment = segment
             if gap_end <= day_end:
                 break
             cur = datetime.combine(day, datetime.min.time()).replace(microsecond=0) + timedelta(days=1)
-        self.current_segment = self.days[cur.date()].segments[-1]
+        if last_segment is not None:
+            self.current_segment = last_segment
 
     def finalize_session(self):
         if self.current_segment and self.current_segment.end_time is None:
@@ -194,13 +198,22 @@ class SessionTracker:
             # Set end_time for all ongoing segments using current time
             # This ensures we save accurate duration data
             now = datetime.now().replace(microsecond=0)
+            open_segments = []
             for day_obj in self.days.values():
                 for seg in day_obj.segments:
                     if seg.end_time is None:
+                        open_segments.append(seg)
                         seg.end_time = now
 
             idle_threshold = getattr(self, "idle_threshold", 300)
-            self.pm.save_segments(self.days, idle_threshold=idle_threshold)
+            try:
+                self.pm.save_segments(self.days, idle_threshold=idle_threshold)
+            except Exception:
+                # Persistence may fail after temporarily finalizing open segments.
+                # Restore their live state so subsequent ticks keep advancing them.
+                for seg in open_segments:
+                    seg.end_time = None
+                raise
             # Persist the last successful write time so an orphaned open segment
             # from an abnormal shutdown can be finalized to a known timestamp (FR-2.6).
             self.pm.save_last_segment_write(now)
@@ -293,4 +306,3 @@ def format_hours(seconds: float) -> str:
     h = s // 3600
     m = (s % 3600) // 60
     return f"{h:02d}:{m:02d}"
-

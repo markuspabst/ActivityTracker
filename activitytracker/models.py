@@ -36,13 +36,21 @@ class Day:
 
     @property
     def active_minutes(self) -> int:
-        """Calculate total active minutes, always floored."""
-        return sum(seg.duration_minutes for seg in self.segments if seg.state == 'active')
+        """Calculate total active minutes, rounded after summing precise durations."""
+        return _round_minutes(self._state_duration_seconds('active'))
 
     @property
     def idle_minutes(self) -> int:
-        """Calculate total idle minutes, always floored."""
-        return sum(seg.duration_minutes for seg in self.segments if seg.state == 'idle')
+        """Calculate total idle minutes, rounded after summing precise durations."""
+        return _round_minutes(self._state_duration_seconds('idle'))
+
+    def _state_duration_seconds(self, state: str) -> float:
+        total = float(sum(
+            seg.duration_seconds for seg in self.segments if seg.state == state
+        ))
+        if self.segments and self.segments[-1].state == state and self.segments[-1].end_time is None:
+            total += max(0.0, (datetime.now() - self.segments[-1].start_time).total_seconds())
+        return total
 
     @property
     def session_start(self) -> Optional[datetime]:

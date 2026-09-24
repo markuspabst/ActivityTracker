@@ -65,8 +65,10 @@ class ActivityTrackerApp:
             if self.session.is_locked != is_locked:
                 self.session.set_locked(is_locked)
 
-            if not is_locked:
-                self.update()
+            # Continue polling/saving while locked. SessionTracker.is_locked
+            # forces the sampled state to idle, while update() also performs
+            # the configured periodic persistence.
+            self.update()
 
     def update(self):
         idle_time = self.platform.get_idle_time()

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import functools
 import os
+import plistlib
 import subprocess
 import sys
 import time
