@@ -239,11 +239,34 @@ class ActivityTrackerApp:
         self.update_ui()
 
     def optimize_csv(self, silent: bool = False):
+        # Serialize the file transaction, then release it before acquiring the
+        # session lock for the in-memory reload. This avoids lock inversion with
+        # save_all_days(), which takes the session lock before the CSV lock.
+        with self.pm.csv_transaction():
+            result = self._optimize_csv_locked(silent)
+        if result is None:
+            return
+
+        today, original_count, merged_count, reduced_count = result
+        self.session.load_current_day_segments(preserve_current_segment=True)
+
+        msg = i18n.t("OPTIMIZE_SUCCESS_MSG").format(
+            original=original_count,
+            merged=merged_count,
+            reduced=reduced_count
+        )
+        success_msg = i18n.t("OPTIMIZE_SUCCESS")
+
+        if not silent:
+            time.sleep(0.1)
+            self.platform.bring_app_to_front()
+            self.platform.show_alert(success_msg, msg)
+
+    def _optimize_csv_locked(self, silent: bool = False):
         """Merge consecutive same-state segments with small gaps in the CSV file.
 
-        Optimization runs automatically after every successful save (see
-        ``update`` / ``force_save``), so the on-disk log stays compact without
-        user action. When *silent* is True no alert is shown and the app is not
+        Optimization runs after successful interval-triggered saves and Force
+        Save actions. When *silent* is True no alert is shown and the app is not
         brought to the front.
         """
         import csv
@@ -273,6 +296,9 @@ class ActivityTrackerApp:
                 for row in reader:
                     original_count += 1
                     try:
+                        state = row.get('state')
+                        if state not in ('active', 'idle'):
+                            continue
                         parts = row['start'].split(':')
                         start_dt = datetime(int(row['date'][:4]), int(row['date'][5:7]),
                                           int(row['date'][8:10]),
@@ -290,7 +316,7 @@ class ActivityTrackerApp:
                                 end_dt += timedelta(days=1)
 
                         all_segments.append(TimeSegment(
-                            state=row['state'],
+                            state=state,
                             start_time=start_dt,
                             end_time=end_dt
                         ))
@@ -344,25 +370,7 @@ class ActivityTrackerApp:
         # Invalidate the totals cache so the next read picks up the optimised data
         self.pm.invalidate_totals_cache(today.year)
 
-        # Reload the optimized segments into memory (the file is now authoritative).
-        # The optimized file already contains every day/segment, so re-writing it
-        # via save_all_days() would be a redundant second pass; load_current_day_segments
-        # repopulates in-memory state (including the live ongoing segment) directly.
-        self.session.load_current_day_segments(preserve_current_segment=True)
-
-        # Show success message with optimization results
-        msg = i18n.t("OPTIMIZE_SUCCESS_MSG").format(
-            original=original_count,
-            merged=merged_count,
-            reduced=reduced_count
-        )
-        success_msg = i18n.t("OPTIMIZE_SUCCESS")
-
-        if not silent:
-            # Brief delay before showing alert
-            time.sleep(0.1)
-            self.platform.bring_app_to_front()
-            self.platform.show_alert(success_msg, msg)
+        return today, original_count, merged_count, reduced_count
 
 def main():
     """Entry point for Briefcase and direct execution."""

@@ -35,8 +35,8 @@ A macOS menu-bar app that classifies computer-use time as **Active** or **Idle**
 - **FR-3.9** Each CSV row's `date` identifies the calendar day of its segment start. Consumers shall use this field to assign a segment to a day; the implementation does not use a `24:00` sentinel, and segments are split at midnight.
 - **FR-3.10** The application shall automatically compact the segment log after each successful interval-triggered save or Force Save action. Consecutive same-state segments separated by a gap no larger than the configured idle threshold shall be merged; a short Idle gap between Active intervals may be absorbed into the Active interval. Compaction shall not merge across calendar days, create negative-duration rows from overlapping data, or interrupt the live segment.
   - *Implemented after scheduled and user-initiated saves.*
-- **FR-3.11** Reading the segment log shall tolerate malformed and legacy rows without aborting or discarding valid rows. Rows missing required fields or with unparseable timestamps shall be skipped. Invalid or absent `duration_seconds` shall fall back to `duration_min`, then zero if neither parses.
-  - *Implemented: unusable rows are skipped; invalid `duration_seconds` falls back to `duration_min`, then zero if neither parses.*
+- **FR-3.11** Reading the segment log shall tolerate malformed and legacy rows without aborting or discarding valid rows. Rows missing required fields, using an unknown state, or with unparseable timestamps shall be skipped. Invalid, negative, or absent `duration_seconds` shall fall back to non-negative `duration_min`, then zero if neither parses; legacy minutes shall be converted to seconds when migrated.
+  - *Implemented: unusable rows are skipped, and invalid durations fall back safely.*
 
 ### FR-4 Configuration
 - **FR-4.1** The user shall be able to set **daily** and **weekly** targets for active time.
@@ -108,6 +108,8 @@ A macOS menu-bar app that classifies computer-use time as **Active** or **Idle**
   - *Implemented while the app is running: failed saves retain data for retry; automatic failures alert once per episode, manual saves always alert, and folder changes abort. A failed final save cancels quitting so the app can retry.*
 - **NFR-5.3** An unreadable, truncated, or manually edited log file shall not crash the application or lose unrelated valid rows. Reads return what is usable; writes preserve existing valid rows and only skip entries that cannot be identified.
   - *Partial: I/O and CSV parse failures are handled, and malformed readable rows are skipped (FR-3.11). Invalid UTF-8 input is not explicitly handled.*
+- **NFR-5.4** Concurrent operations that read, modify, or rewrite the activity CSV shall be serialized so that simultaneous saves and optimization cannot overwrite one another's rows.
+  - *Implemented with a shared reentrant CSV transaction lock.*
 
 ## Assumptions
 - **A-1 (DST):** Daylight Saving Time transitions are *not handled explicitly*. DST switches occur on weekends outside normal working hours, so their impact on daily/weekly duration calculations is considered negligible. All times are recorded in local wall-clock time.
@@ -139,7 +141,7 @@ References point to automated tests under `tests/`. “Not covered” means no d
 | FR-3.8 | `test_tracking.py::test_midnight_rollover_splits_before_state_transition`, `test_persistence_csv.py::test_read_segments_roundtrips_exclusive_midnight_end`, `test_app.py::test_optimize_csv_preserves_exclusive_midnight_end` |
 | FR-3.9 | `test_persistence_csv.py::test_save_segments_splits_by_year`, `test_read_segments_only_target_day` |
 | FR-3.10 | `test_app.py::test_optimize_csv_merges_and_reports`, `test_merge_segments_to_save_does_not_cross_midnight`, `test_optimize_csv_preserves_live_segment_continuity` |
-| FR-3.11 | `test_persistence_csv.py::test_readers_tolerate_missing_state_column`, `test_readers_skip_malformed_rows_but_keep_valid_ones`, `test_save_segments_skips_rows_missing_date_or_start` |
+| FR-3.11 | `test_persistence_csv.py::test_readers_tolerate_missing_state_column`, `test_readers_skip_malformed_rows_but_keep_valid_ones`, `test_day_totals_skip_unknown_states_and_reject_negative_durations`, `test_save_segments_skips_rows_missing_date_or_start`, `test_save_segments_legacy_migration_adds_duration_seconds` |
 | FR-4.1 | `test_app.py::test_set_target`, `test_set_weekly_target` |
 | FR-4.2 | `test_app.py::test_set_idle_threshold` |
 | FR-4.3 | `test_app.py::test_set_save_interval`, `test_app.py::test_update_triggers_save_when_interval_elapsed` |
@@ -170,3 +172,4 @@ References point to automated tests under `tests/`. “Not covered” means no d
 | NFR-5.1 | `test_single_instance.py::test_second_instance_is_blocked`, `test_acquire_and_release` |
 | NFR-5.2 | `test_tracking.py::test_save_all_days_propagates_write_error_and_retains_memory`, `test_finalize_session_keeps_live_segment_open_when_save_fails`, `test_app.py::test_force_save_reports_persistence_failure`, `test_quit_app_stays_running_if_final_save_fails`, `test_select_data_folder_aborts_if_save_fails`, `test_reset_data_folder_aborts_if_save_fails` |
 | NFR-5.3 | `test_persistence_csv.py::test_readers_survive_unreadable_log_file`, `test_read_segments_skips_malformed_rows`, `test_save_segments_skips_rows_missing_date_or_start` |
+| NFR-5.4 | `test_persistence_csv.py::test_save_segments_serializes_csv_transactions`, `test_app.py::test_optimize_csv_serializes_with_other_csv_transactions` |

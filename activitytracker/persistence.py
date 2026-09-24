@@ -1,7 +1,10 @@
 import csv
 import json
 import logging
+import math
 import os
+import threading
+from contextlib import contextmanager
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -35,14 +38,42 @@ def _hms_to_seconds(value: str) -> Optional[int]:
     return h * 3600 + m * 60 + s
 
 
+def _non_negative_int(value: Optional[str]) -> Optional[int]:
+    """Parse a non-negative integer-like CSV value, or return None."""
+    try:
+        numeric = float(value)
+        if not math.isfinite(numeric) or numeric < 0:
+            return None
+        parsed = int(numeric)
+    except (ValueError, TypeError, AttributeError, OverflowError):
+        return None
+    return parsed
+
+
+def _row_duration_seconds(row: dict) -> int:
+    """Read precise duration, falling back to the legacy minute column."""
+    seconds = _non_negative_int(row.get("duration_seconds"))
+    if seconds is not None:
+        return seconds
+    minutes = _non_negative_int(row.get("duration_min"))
+    return minutes * 60 if minutes is not None else 0
+
+
 class PersistenceManager:
-    __slots__ = ('_get_data_dir', '_get_state_file_path', '_path_cache', '_totals_cache')
+    __slots__ = ('_get_data_dir', '_get_state_file_path', '_path_cache', '_totals_cache', '_file_lock')
 
     def __init__(self, data_dir_fn, state_file_path_fn=None) -> None:
         self._get_data_dir = data_dir_fn
         self._get_state_file_path = state_file_path_fn
         self._path_cache: Dict[str, str] = {}
         self._totals_cache: Dict[int, Dict[str, Tuple[int, int]]] = {}
+        self._file_lock = threading.RLock()
+
+    @contextmanager
+    def csv_transaction(self):
+        """Serialize CSV read/modify/write operations within this process."""
+        with self._file_lock:
+            yield
 
     def _state_file_path(self) -> str:
         if self._get_state_file_path is not None:
@@ -51,10 +82,11 @@ class PersistenceManager:
 
     def invalidate_totals_cache(self, year: Optional[int] = None) -> None:
         """Invalidate the day-totals cache for *year*, or all years if omitted."""
-        if year is None:
-            self._totals_cache.clear()
-        else:
-            self._totals_cache.pop(year, None)
+        with self._file_lock:
+            if year is None:
+                self._totals_cache.clear()
+            else:
+                self._totals_cache.pop(year, None)
 
     def invalidate_path_cache(self) -> None:
         """Invalidate cached log file paths after a data-dir switch."""
@@ -98,6 +130,10 @@ class PersistenceManager:
         )
 
     def _day_totals_for_year(self, year: int) -> Dict[str, Tuple[int, int]]:
+        with self._file_lock:
+            return self._day_totals_for_year_locked(year)
+
+    def _day_totals_for_year_locked(self, year: int) -> Dict[str, Tuple[int, int]]:
         """Read one year's activities log once and return {date: (active_min, idle_min)}.
 
         Results are cached per year; call ``invalidate_totals_cache(year)``
@@ -120,25 +156,11 @@ class PersistenceManager:
                     # whole read with a KeyError.
                     date_str = row.get('date')
                     state = row.get('state')
-                    if not date_str or not state:
+                    if not date_str or state not in ('active', 'idle'):
                         continue
-                    # Aggregate precise seconds and round only the daily total.
-                    # Fall back to legacy duration_min rows when seconds are absent
-                    # or malformed.
-                    seconds_str = row.get('duration_seconds', '')
-                    if seconds_str and seconds_str.strip():
-                        try:
-                            duration_seconds = int(float(seconds_str))
-                        except (ValueError, TypeError):
-                            duration_seconds = None
-                    else:
-                        duration_seconds = None
-                    if duration_seconds is None:
-                        dur_str = row.get('duration_min', '')
-                        try:
-                            duration_seconds = int(dur_str) * 60 if dur_str and dur_str.strip() else 0
-                        except (ValueError, TypeError):
-                            duration_seconds = 0
+                    # Aggregate precise, non-negative seconds and round only the
+                    # daily total; legacy minutes are converted back to seconds.
+                    duration_seconds = _row_duration_seconds(row)
                     active, idle = totals_seconds.get(date_str, (0, 0))
                     if state == 'active':
                         active += duration_seconds
@@ -155,6 +177,10 @@ class PersistenceManager:
         return totals
 
     def read_segments_for_day(self, target_date: date) -> List[TimeSegment]:
+        with self._file_lock:
+            return self._read_segments_for_day_locked(target_date)
+
+    def _read_segments_for_day_locked(self, target_date: date) -> List[TimeSegment]:
         """Optimized: minimal parsing, direct list construction."""
         segments: List[TimeSegment] = []
         path = self.get_log_file_path(ACTIVITIES_LOG_PREFIX, target_date.year)
@@ -168,6 +194,9 @@ class PersistenceManager:
                     if row.get('date') != target_str:
                         continue
                     try:
+                        state = row.get('state')
+                        if state not in ('active', 'idle'):
+                            continue
                         # Missing columns (corrupt/hand-edited/legacy files) are
                         # skipped rather than raising KeyError and aborting the read.
                         parts = row['start'].split(':')
@@ -180,7 +209,7 @@ class PersistenceManager:
                                             int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 0)
                             if end_dt < start_dt and end_dt.time() == datetime.min.time():
                                 end_dt += timedelta(days=1)
-                        segments.append(TimeSegment(state=row['state'], start_time=start_dt, end_time=end_dt))
+                        segments.append(TimeSegment(state=state, start_time=start_dt, end_time=end_dt))
                     except (ValueError, TypeError, KeyError, AttributeError):
                         continue
         except (IOError, csv.Error, OSError) as exc:
@@ -188,6 +217,10 @@ class PersistenceManager:
         return segments
 
     def save_segments(self, segments_by_day, idle_threshold: int = 300) -> None:
+        with self._file_lock:
+            self._save_segments_locked(segments_by_day, idle_threshold)
+
+    def _save_segments_locked(self, segments_by_day, idle_threshold: int = 300) -> None:
         """Save segment-level data to a CSV file, by year."""
         if not segments_by_day:
             return
@@ -224,14 +257,13 @@ class PersistenceManager:
                         for row in reader:
                             date_str = row.get('date')
                             start_str = row.get('start')
-                            if not date_str or not start_str:
+                            if not date_str or not start_str or row.get('state') not in ('active', 'idle'):
                                 # A truncated row or a file missing either
-                                # identifying column cannot be merged safely.
+                                # identifying column/state cannot be merged safely.
                                 # Skip it without discarding other valid rows.
                                 continue
                             key = f"{date_str} {start_str}"
-                            if "duration_seconds" not in row:
-                                row["duration_seconds"] = row.get('duration_min', '0') or '0'
+                            row["duration_seconds"] = str(_row_duration_seconds(row))
                             existing_segments[key] = row
                 except (IOError, csv.Error, OSError) as exc:
                     logger.warning("Could not read existing %s, starting fresh: %s", path, exc)

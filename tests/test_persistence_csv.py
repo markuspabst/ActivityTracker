@@ -2,6 +2,7 @@
 
 import csv
 import os
+import threading
 from datetime import datetime, date, timedelta
 from pathlib import Path
 
@@ -202,7 +203,7 @@ def test_save_segments_legacy_migration_adds_duration_seconds(pm, tmp_path):
         rows = {r["start"]: r for r in reader}
     # The legacy 09:00:00 row must now carry a migrated duration_seconds field
     assert "duration_seconds" in rows["09:00:00"]
-    assert rows["09:00:00"]["duration_seconds"] == "60"
+    assert rows["09:00:00"]["duration_seconds"] == "3600"
 
 
 def test_save_segments_skips_rows_missing_date_or_start(pm, tmp_path):
@@ -231,6 +232,72 @@ def test_save_segments_skips_rows_missing_date_or_start(pm, tmp_path):
         ("2026-07-01", "09:00:00"),
         ("2026-07-01", "11:00:00"),
     ]
+
+
+def test_day_totals_skip_unknown_states_and_reject_negative_durations(pm, tmp_path):
+    _write_raw(
+        pm, 2026,
+        ["date", "state", "start", "end", "duration_min", "duration_seconds"],
+        [
+            ["2026-07-01", "active", "09:00:00", "09:05:00", "5", "-3600"],
+            ["2026-07-01", "idle", "09:05:00", "09:06:00", "-1", "-60"],
+            ["2026-07-01", "active", "09:06:00", "09:08:00", "2", "inf"],
+            ["2026-07-01", "unknown", "09:08:00", "10:08:00", "60", "3600"],
+        ],
+    )
+
+    assert pm.get_minutes_for_date(date(2026, 7, 1)) == (7, 0)
+    assert [segment.state for segment in pm.read_segments_for_day(date(2026, 7, 1))] == [
+        "active", "idle", "active",
+    ]
+
+
+def test_save_segments_drops_existing_unknown_state_rows(pm, tmp_path):
+    _write_raw(
+        pm, 2026,
+        ["date", "state", "start", "end", "duration_min", "duration_seconds"],
+        [
+            ["2026-07-01", "unknown", "08:00:00", "09:00:00", "60", "3600"],
+            ["2026-07-01", "active", "09:00:00", "10:00:00", "60", "3600"],
+        ],
+    )
+    day = Day(date(2026, 7, 1), [TimeSegment(
+        state="active",
+        start_time=datetime(2026, 7, 1, 11, 0, 0),
+        end_time=datetime(2026, 7, 1, 12, 0, 0),
+    )])
+
+    pm.save_segments({date(2026, 7, 1): day})
+
+    with open(pm.get_log_file_path("activities", 2026), newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert [row["state"] for row in rows] == ["active", "active"]
+
+
+def test_save_segments_serializes_csv_transactions(pm):
+    started = threading.Event()
+    finished = threading.Event()
+    day_date = date(2026, 7, 1)
+    day = Day(day_date, [TimeSegment(
+        state="active",
+        start_time=datetime(2026, 7, 1, 9, 0, 0),
+        end_time=datetime(2026, 7, 1, 10, 0, 0),
+    )])
+
+    def save():
+        started.set()
+        pm.save_segments({day_date: day})
+        finished.set()
+
+    with pm.csv_transaction():
+        writer = threading.Thread(target=save)
+        writer.start()
+        assert started.wait(timeout=1)
+        assert not finished.wait(timeout=0.05)
+
+    writer.join(timeout=1)
+    assert not writer.is_alive()
+    assert finished.is_set()
 
 
 # ------------------------------------------------------------

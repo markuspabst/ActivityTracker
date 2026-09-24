@@ -6,6 +6,7 @@ logic can be exercised without a real UI, filesystem config dir, or platform API
 
 from datetime import datetime, date, timedelta
 import os
+import threading
 import time
 from unittest.mock import MagicMock, patch
 
@@ -389,6 +390,33 @@ def test_optimize_csv_handles_read_oserror(app, optimize_ready, silent):
         )
 
 
+def test_optimize_csv_serializes_with_other_csv_transactions(app, optimize_ready):
+    today = optimize_ready.date()
+    day = Day(today, [TimeSegment(
+        "active",
+        datetime.combine(today, datetime.min.time()) + timedelta(hours=9),
+        datetime.combine(today, datetime.min.time()) + timedelta(hours=10),
+    )])
+    app.pm.save_segments({today: day})
+    started = threading.Event()
+    finished = threading.Event()
+
+    def optimize():
+        started.set()
+        app.optimize_csv(silent=True)
+        finished.set()
+
+    with app.pm.csv_transaction():
+        worker = threading.Thread(target=optimize)
+        worker.start()
+        assert started.wait(timeout=1)
+        assert not finished.wait(timeout=0.05)
+
+    worker.join(timeout=2)
+    assert not worker.is_alive()
+    assert finished.is_set()
+
+
 def test_optimize_csv_merges_and_reports(app, tmp_path, optimize_ready):
     from activitytracker.persistence import PersistenceManager
     pm = PersistenceManager(lambda: str(tmp_path))
@@ -473,6 +501,7 @@ def test_optimize_csv_skips_malformed_rows(app, tmp_path, optimize_ready):
         f.write("date,state,start,end,duration_min,duration_seconds\n")
         f.write("2026-07-15,active,badtime,10:00:00,60,3600\n")
         f.write("2026-07-15,idle,11:00:00,11:15:00,15,900\n")
+        f.write("2026-07-15,unknown,12:00:00,13:00:00,60,3600\n")
 
     app.pm = pm
     app.optimize_csv()
