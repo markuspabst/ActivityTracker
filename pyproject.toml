@@ -2,7 +2,7 @@
 name = "ActivityTracker"
 version = "1.0.25"
 description = "A menu-bar application that tracks active and idle time."
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "Markus" }]
 dependencies = [
