@@ -236,32 +236,41 @@ class ActivityTrackerApp:
         # Read all segments from the year file
         all_segments = []
         original_count = 0
-        with open(segments_file, "r", newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                original_count += 1
-                try:
-                    parts = row['start'].split(':')
-                    start_dt = datetime(int(row['date'][:4]), int(row['date'][5:7]),
-                                      int(row['date'][8:10]),
-                                      int(parts[0]), int(parts[1]),
-                                      int(parts[2]) if len(parts) > 2 else 0)
+        try:
+            with open(segments_file, "r", newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    original_count += 1
+                    try:
+                        parts = row['start'].split(':')
+                        start_dt = datetime(int(row['date'][:4]), int(row['date'][5:7]),
+                                          int(row['date'][8:10]),
+                                          int(parts[0]), int(parts[1]),
+                                          int(parts[2]) if len(parts) > 2 else 0)
 
-                    end_dt = None
-                    if row['end']:
-                        parts = row['end'].split(':')
-                        end_dt = datetime(int(row['date'][:4]), int(row['date'][5:7]),
-                                        int(row['date'][8:10]),
-                                        int(parts[0]), int(parts[1]),
-                                        int(parts[2]) if len(parts) > 2 else 0)
+                        end_dt = None
+                        if row['end']:
+                            parts = row['end'].split(':')
+                            end_dt = datetime(int(row['date'][:4]), int(row['date'][5:7]),
+                                            int(row['date'][8:10]),
+                                            int(parts[0]), int(parts[1]),
+                                            int(parts[2]) if len(parts) > 2 else 0)
 
-                    all_segments.append(TimeSegment(
-                        state=row['state'],
-                        start_time=start_dt,
-                        end_time=end_dt
-                    ))
-                except (ValueError, TypeError, KeyError, AttributeError):
-                    continue
+                        all_segments.append(TimeSegment(
+                            state=row['state'],
+                            start_time=start_dt,
+                            end_time=end_dt
+                        ))
+                    except (ValueError, TypeError, KeyError, AttributeError):
+                        continue
+        except (OSError, csv.Error, UnicodeError) as exc:
+            logger.error("Optimize failed to read %s: %s", segments_file, exc)
+            if not silent:
+                self.platform.show_alert(
+                    i18n.t("OPTIMIZE_READ_ERROR"),
+                    i18n.t("OPTIMIZE_READ_ERROR_MSG"),
+                )
+            return
 
         if not all_segments:
             if not silent:

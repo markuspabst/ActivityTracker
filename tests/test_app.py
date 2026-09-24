@@ -292,6 +292,25 @@ def test_optimize_csv_empty_file(app, tmp_path, optimize_ready):
     assert any(t == i18n.t("OPTIMIZE_EMPTY") for t in titles)
 
 
+@pytest.mark.parametrize("silent", [True, False])
+def test_optimize_csv_handles_read_oserror(app, optimize_ready, silent):
+    path = app.pm.get_log_file_path("activities", optimize_ready.year)
+    path.mkdir()
+
+    # An existing directory at the CSV path makes open(..., "r") raise
+    # IsADirectoryError. Optimization must not propagate it to the updater.
+    app.optimize_csv(silent=silent)
+
+    assert path.is_dir()
+    if silent:
+        app.platform.show_alert.assert_not_called()
+    else:
+        app.platform.show_alert.assert_called_once_with(
+            i18n.t("OPTIMIZE_READ_ERROR"),
+            i18n.t("OPTIMIZE_READ_ERROR_MSG"),
+        )
+
+
 def test_optimize_csv_merges_and_reports(app, tmp_path, optimize_ready):
     from activitytracker.persistence import PersistenceManager
     pm = PersistenceManager(lambda: str(tmp_path))
