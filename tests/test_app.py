@@ -97,8 +97,20 @@ def test_set_language(app):
 
 def test_force_save(app):
     app.session.save_all_days = MagicMock()
-    app.force_save()
+    assert app.force_save() is True
     app.session.save_all_days.assert_called_once()
+
+
+def test_force_save_reports_persistence_failure(app):
+    from activitytracker.persistence import PersistenceWriteError
+
+    # A previous automatic failure may already have shown the episode alert;
+    # a manual save attempt must still tell the user this save failed.
+    app._save_failure_shown = True
+    app.session.save_all_days = MagicMock(side_effect=PersistenceWriteError("disk full"))
+
+    assert app.force_save() is False
+    app.platform.show_alert.assert_called_once()
 
 
 def test_quit_app(app):
@@ -171,6 +183,21 @@ def test_select_data_folder(app, monkeypatch):
     app.update_ui.assert_called_once()
 
 
+def test_select_data_folder_aborts_if_save_fails(app, monkeypatch):
+    app.platform.choose_folder_dialog.return_value = "/selected/folder"
+    app.force_save = MagicMock(return_value=False)
+    app._reload_from_current_data_folder = MagicMock()
+    clear_last_segment_write = MagicMock()
+    monkeypatch.setattr(app_module.PersistenceManager, "clear_last_segment_write", clear_last_segment_write)
+
+    app.select_data_folder()
+
+    app.force_save.assert_called_once()
+    assert app._data_dir_calls == []
+    clear_last_segment_write.assert_not_called()
+    app._reload_from_current_data_folder.assert_not_called()
+
+
 def test_reset_data_folder(app, monkeypatch):
     app.force_save = MagicMock()
     app.update_ui = MagicMock()
@@ -185,6 +212,22 @@ def test_reset_data_folder(app, monkeypatch):
     clear_last_segment_write.assert_called_once()
     app.session.load_current_day_segments.assert_called_once()
     app.update_ui.assert_called_once()
+
+
+def test_reset_data_folder_aborts_if_save_fails(app, monkeypatch):
+    app.force_save = MagicMock(return_value=False)
+    app._reload_from_current_data_folder = MagicMock()
+    clear_last_segment_write = MagicMock()
+    monkeypatch.setattr(app_module.PersistenceManager, "clear_last_segment_write", clear_last_segment_write)
+    mock_reset = MagicMock()
+    monkeypatch.setattr(app_module, "reset_data_dir_to_default", mock_reset)
+
+    app.reset_data_folder()
+
+    app.force_save.assert_called_once()
+    mock_reset.assert_not_called()
+    clear_last_segment_write.assert_not_called()
+    app._reload_from_current_data_folder.assert_not_called()
 
 
 def test_select_data_folder_cancelled(app):

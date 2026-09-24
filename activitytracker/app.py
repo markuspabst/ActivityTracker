@@ -89,10 +89,10 @@ class ActivityTrackerApp:
 
         self.update_ui()
 
-    def _alert_save_failure(self):
+    def _alert_save_failure(self, force_show: bool = False):
         # NFR-5.2: data is retained in memory; alert once per failure episode.
         logger.error("Saving tracking data failed; data is retained in memory and will retry.")
-        if not getattr(self, "_save_failure_shown", False):
+        if force_show or not getattr(self, "_save_failure_shown", False):
             self._save_failure_shown = True
             self.platform.show_alert(
                 i18n.t("SAVE_ERROR_TITLE"),
@@ -149,8 +149,12 @@ class ActivityTrackerApp:
             self.optimize_csv(silent=True)
             self.last_write_time = time.time()
             self._clear_save_failure()
+            return True
         except PersistenceWriteError:
-            self._alert_save_failure()
+            # A user-initiated save should always make the failure visible,
+            # even if an automatic save already alerted during this episode.
+            self._alert_save_failure(force_show=True)
+            return False
 
     def set_target(self, seconds):
         self.target_work_seconds = int(seconds)
@@ -177,13 +181,15 @@ class ActivityTrackerApp:
         folder = self.platform.choose_folder_dialog(prompt=i18n.t("SELECT_DATA_FOLDER"))
         if not folder:
             return
-        self.force_save()
+        if not self.force_save():
+            return
         set_data_dir(folder, persist=True)
         self.pm.clear_last_segment_write()
         self._reload_from_current_data_folder()
 
     def reset_data_folder(self):
-        self.force_save()
+        if not self.force_save():
+            return
         reset_data_dir_to_default()
         self.pm.clear_last_segment_write()
         self._reload_from_current_data_folder()
