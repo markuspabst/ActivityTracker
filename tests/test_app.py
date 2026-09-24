@@ -246,6 +246,28 @@ def test_update_calls_tick_and_ui(app):
     app.update_ui.assert_called_once()
 
 
+def test_idle_detection_failure_pauses_and_alerts_once_then_resumes(app):
+    app.platform.get_idle_time.side_effect = [None, None, 0]
+    app.session.pause_tracking = MagicMock()
+    app.session.on_tick = MagicMock()
+    app.update_ui = MagicMock()
+
+    app.update()
+    app.update()
+
+    assert app.session.pause_tracking.call_count == 2
+    app.session.on_tick.assert_not_called()
+    app.platform.show_alert.assert_called_once_with(
+        i18n.t("IDLE_DETECTION_ERROR_TITLE"),
+        i18n.t("IDLE_DETECTION_ERROR_MSG"),
+    )
+
+    app.update()
+
+    app.session.on_tick.assert_called_once_with(0, app.idle_threshold)
+    assert app._idle_detection_failure_shown is False
+
+
 def test_update_triggers_save_when_interval_elapsed(app):
     app.platform.get_idle_time.return_value = 0
     app.session.on_tick = MagicMock()
@@ -338,7 +360,7 @@ def test_optimize_csv_merges_and_reports(app, tmp_path, optimize_ready):
 
 
 def test_optimize_csv_preserves_live_segment_continuity(app, optimize_ready):
-    now = datetime.now().replace(microsecond=0)
+    now = datetime.combine(datetime.now().date(), datetime.min.time()) + timedelta(hours=12)
     tracking.datetime.now.return_value = now
     today = now.date()
     initial_segment = TimeSegment("active", now - timedelta(minutes=5))

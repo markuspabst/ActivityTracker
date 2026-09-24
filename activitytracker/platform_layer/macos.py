@@ -5,6 +5,7 @@ macOS platform implementation for ActivityTracker.
 from __future__ import annotations
 
 import functools
+import math
 import os
 import plistlib
 import subprocess
@@ -115,7 +116,7 @@ except Exception:
 
 class MacOSPlatform(PlatformABC):
 
-    _idle_cache: dict = {"time": 0.0, "value": 0.0}
+    _idle_cache: dict = {"time": 0.0, "value": None}
     IDLE_CACHE_TTL: float = 1.0
     _can_run_on_main = _CAN_RUN_ON_MAIN
     _run_on_main = staticmethod(_run_on_main)
@@ -134,29 +135,37 @@ class MacOSPlatform(PlatformABC):
             pass
         return False
 
-    def get_idle_time(self) -> float:
+    def get_idle_time(self) -> Optional[float]:
         now = time.time()
         if now - self._idle_cache["time"] < self.IDLE_CACHE_TTL:
             return self._idle_cache["value"]
 
+        value = None
         try:
             import Quartz
-            value = Quartz.CGEventSourceSecondsSinceLastEventType(
+            candidate = Quartz.CGEventSourceSecondsSinceLastEventType(
                 Quartz.kCGEventSourceStateHIDSystemState,
                 Quartz.kCGAnyInputEventType,
             )
+            candidate = float(candidate)
+            if math.isfinite(candidate) and candidate >= 0:
+                value = candidate
         except Exception:
+            pass
+
+        if value is None:
             try:
                 output = subprocess.check_output(
                     ["ioreg", "-c", "IOHIDSystem"], stderr=subprocess.DEVNULL
                 ).decode()
-                value = 0.0
                 for line in output.split("\n"):
                     if "HIDIdleTime" in line:
-                        value = int(line.split("=")[-1].strip()) / 1_000_000_000
+                        candidate = int(line.split("=")[-1].strip()) / 1_000_000_000
+                        if math.isfinite(candidate) and candidate >= 0:
+                            value = candidate
                         break
             except Exception:
-                value = 0.0
+                pass
 
         self._idle_cache.update(time=now, value=value)
         return value

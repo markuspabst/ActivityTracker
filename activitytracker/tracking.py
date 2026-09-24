@@ -193,6 +193,18 @@ class SessionTracker:
             self.current_segment.end_time = self.current_segment.start_time if now < self.current_segment.start_time else now
         self.save_all_days()
 
+    def pause_tracking(self) -> None:
+        """Close tracked time at the last valid sample and stop the live segment."""
+        with self._lock:
+            if self.current_segment is not None and self.current_segment.end_time is None:
+                last_sample = self._last_tick_time or self.current_segment.start_time
+                self.current_segment.end_time = max(self.current_segment.start_time, last_sample)
+
+            self.current_segment = None
+            self._last_tick_time = None
+            if self.days:
+                self.save_all_days()
+
     def save_all_days(self):
         with self._lock:
             # Set end_time for all ongoing segments using current time

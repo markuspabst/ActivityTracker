@@ -25,8 +25,8 @@ class PlatformABC(abc.ABC):
     # ── Idle detection ──────────────────────────────────────
 
     @abc.abstractmethod
-    def get_idle_time(self) -> float:
-        """Seconds since last HID input event."""
+    def get_idle_time(self) -> Optional[float]:
+        """Seconds since last HID input event, or None when unavailable."""
         ...
 
     @abc.abstractmethod
@@ -166,16 +166,16 @@ def set_platform(platform: PlatformABC) -> None:
 class FallbackPlatform(PlatformABC):
     """Generic implementation that works anywhere but has no native niceties."""
 
-    _idle_cache: dict = {"time": 0.0, "value": 0.0}
+    _idle_cache: dict = {"time": 0.0, "value": None}
     IDLE_CACHE_TTL: float = 1.0
 
-    def get_idle_time(self) -> float:
+    def get_idle_time(self) -> Optional[float]:
         now = time.time()
         if now - self._idle_cache["time"] < self.IDLE_CACHE_TTL:
             return self._idle_cache["value"]
-        # No reliable cross-platform idle detection without dependencies
-        self._idle_cache.update(time=now, value=0.0)
-        return 0.0
+        # No reliable cross-platform idle detection without a native backend.
+        self._idle_cache.update(time=now, value=None)
+        return None
 
     def is_screen_locked(self) -> bool:
         return False

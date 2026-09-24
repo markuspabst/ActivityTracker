@@ -346,6 +346,31 @@ def test_on_tick_no_false_sleep_gap_for_normal_interval(patch_all_datetimes):
     assert not idle_segs
 
 
+def test_pause_tracking_closes_at_last_valid_sample_and_resumes_cleanly(patch_all_datetimes):
+    s = make_session()
+    first_sample = datetime(2026, 7, 15, 9, 0, 0)
+    last_sample = first_sample + timedelta(seconds=10)
+    resume_time = first_sample + timedelta(minutes=1)
+
+    patch_all_datetimes.set_now(first_sample)
+    s.on_tick(idle_time=0, idle_threshold=300)
+    patch_all_datetimes.set_now(last_sample)
+    s.on_tick(idle_time=0, idle_threshold=300)
+    paused_segment = s.current_segment
+
+    # Sensor failure is detected later; the unknown interval is not credited.
+    patch_all_datetimes.set_now(resume_time - timedelta(seconds=1))
+    s.pause_tracking()
+
+    assert paused_segment.end_time == last_sample
+    assert s.current_segment is None
+
+    patch_all_datetimes.set_now(resume_time)
+    s.on_tick(idle_time=0, idle_threshold=300)
+    assert s.current_segment is not paused_segment
+    assert s.current_segment.start_time == resume_time
+
+
 def test_save_all_days_propagates_write_error_and_retains_memory():
     from activitytracker.persistence import PersistenceWriteError
     s = make_session()

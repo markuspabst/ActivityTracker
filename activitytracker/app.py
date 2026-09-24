@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+import math
 import os
 import threading
 import time
@@ -47,6 +48,7 @@ class ActivityTrackerApp:
         self._running = False
         self._stop_event = threading.Event()
         self._save_failure_shown = False
+        self._idle_detection_failure_shown = False
 
     def run(self):
         self._running = True
@@ -71,7 +73,22 @@ class ActivityTrackerApp:
             self.update()
 
     def update(self):
-        idle_time = self.platform.get_idle_time()
+        try:
+            idle_time = self.platform.get_idle_time()
+            if idle_time is not None:
+                idle_time = float(idle_time)
+                if not math.isfinite(idle_time) or idle_time < 0:
+                    idle_time = None
+        except Exception as exc:
+            logger.warning("Idle-time detection failed: %s", exc)
+            idle_time = None
+
+        if idle_time is None:
+            self._handle_idle_detection_failure()
+            self.update_ui()
+            return
+
+        self._idle_detection_failure_shown = False
         try:
             self.session.on_tick(idle_time, self.idle_threshold)
         except PersistenceWriteError:
@@ -88,6 +105,19 @@ class ActivityTrackerApp:
                 self._alert_save_failure()
 
         self.update_ui()
+
+    def _handle_idle_detection_failure(self):
+        logger.error("Idle-time detection is unavailable; tracking is paused until it recovers.")
+        if not self._idle_detection_failure_shown:
+            self._idle_detection_failure_shown = True
+            self.platform.show_alert(
+                i18n.t("IDLE_DETECTION_ERROR_TITLE"),
+                i18n.t("IDLE_DETECTION_ERROR_MSG"),
+            )
+        try:
+            self.session.pause_tracking()
+        except PersistenceWriteError:
+            self._alert_save_failure()
 
     def _alert_save_failure(self, force_show: bool = False):
         # NFR-5.2: data is retained in memory; alert once per failure episode.

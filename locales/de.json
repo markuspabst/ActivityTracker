@@ -68,6 +68,8 @@
   "SAVE_NOW": "Daten jetzt speichern",
   "SAVE_ERROR_TITLE": "Daten konnten nicht gespeichert werden",
   "SAVE_ERROR_MSG": "Die Tracking-Daten konnten nicht auf die Festplatte geschrieben werden (volle Festplatte oder fehlender Ordner). Ihre Daten bleiben sicher im Arbeitsspeicher und werden automatisch gespeichert, sobald das Problem behoben ist. Das Tracking läuft weiter.",
+  "IDLE_DETECTION_ERROR_TITLE": "Leerlauferkennung nicht verfügbar",
+  "IDLE_DETECTION_ERROR_MSG": "ActivityTracker kann nicht feststellen, ob Sie aktiv oder inaktiv sind. Die Erfassung wird pausiert; währenddessen wird keine Zeit gezählt. Sie wird fortgesetzt, sobald die Leerlauferkennung wieder verfügbar ist.",
   "CHANGE_DATA_LOCATION": "Datenort ändern...",
   "RESET_FACTORY_DEFAULT": "Auf Werkseinstellungen zurücksetzen"
 }
