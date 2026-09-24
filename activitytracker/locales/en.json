@@ -48,6 +48,8 @@
   "OPTIMIZE_SUCCESS_MSG": "Optimized {original} segments to {merged} segments. Reduced by {reduced} segments.",
   "OPTIMIZE_ERROR_NO_FILE": "Optimization Failed",
   "OPTIMIZE_ERROR_NO_FILE_MSG": "No activities data file found.",
+  "OPTIMIZE_READ_ERROR": "Could Not Read Data File",
+  "OPTIMIZE_READ_ERROR_MSG": "The activities data file could not be read, so it was not optimized. Tracking data was not changed.",
   "OPTIMIZE_EMPTY": "Nothing to Optimize",
   "OPTIMIZE_EMPTY_MSG": "No segments found in the data file.",
   "TODAY_PROGRESS": "Today: {active} / {target} ({percentage:.0f}%)",

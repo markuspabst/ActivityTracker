@@ -41,6 +41,14 @@ def test_set_locale_german():
     assert isinstance(val, str)
 
 
+def test_optimize_read_error_is_translated_in_both_locales():
+    i18n.set_locale("en")
+    assert i18n.t("OPTIMIZE_READ_ERROR") == "Could Not Read Data File"
+
+    i18n.set_locale("de")
+    assert i18n.t("OPTIMIZE_READ_ERROR") == "Datendatei konnte nicht gelesen werden"
+
+
 def test_set_locale_falls_back_to_english_for_unknown():
     i18n.set_locale("fr")  # no fr.json -> falls back to en
     assert i18n._lang == "en"
