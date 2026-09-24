@@ -315,7 +315,7 @@ class ActivityTrackerApp:
         # The optimized file already contains every day/segment, so re-writing it
         # via save_all_days() would be a redundant second pass; load_current_day_segments
         # repopulates in-memory state (including the live ongoing segment) directly.
-        self.session.load_current_day_segments()
+        self.session.load_current_day_segments(preserve_current_segment=True)
 
         # Show success message with optimization results
         msg = i18n.t("OPTIMIZE_SUCCESS_MSG").format(

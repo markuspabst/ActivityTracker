@@ -254,13 +254,19 @@ class SessionTracker:
             else:
                 self.days = {}
 
-    def load_current_day_segments(self):
+    def load_current_day_segments(self, preserve_current_segment: bool = False):
         """
         Loads all segments for the current day from CSV into memory (self.days).
         This is called on startup to ensure historical data for today is present.
-        Also sets current_segment to the last ongoing segment if any.
+        Also finalizes orphaned open segments, unless the current live segment is
+        explicitly being preserved during an in-process reload.
         """
+        with self._lock:
+            self._load_current_day_segments(preserve_current_segment)
+
+    def _load_current_day_segments(self, preserve_current_segment: bool) -> None:
         today = datetime.now().date()
+        live_segment = self.current_segment if preserve_current_segment else None
         segments_for_today = self.pm.read_segments_for_day(today)
 
         if segments_for_today:
@@ -282,7 +288,10 @@ class SessionTracker:
             # If no write time is known, conservatively close it at its own start
             # (no unknown time is credited). The segment is finalized and not
             # resumed as the current (ongoing) segment.
-            open_segments = [s for s in self.days[today].segments if s.end_time is None]
+            open_segments = [
+                s for s in self.days[today].segments
+                if s.end_time is None and s is not live_segment
+            ]
             if open_segments:
                 last_write = self.pm.read_last_segment_write()
                 if last_write is not None and not isinstance(last_write, _dt_module.datetime):
@@ -293,6 +302,14 @@ class SessionTracker:
                     seg.end_time = max(seg.start_time, min(last_write, now)) if last_write else seg.start_time
                 # Orphan finalized; do not resume it as the current segment.
                 self.current_segment = None
+
+        if live_segment is not None:
+            live_day = self.days.setdefault(live_segment.start_time.date(), Day(date=live_segment.start_time.date()))
+            if not any(segment is live_segment for segment in live_day.segments):
+                live_day.segments.append(live_segment)
+                live_day.segments.sort(key=lambda segment: segment.start_time)
+            live_segment.end_time = None
+            self.current_segment = live_segment
 
     def set_locked(self, is_locked: bool):
         self.is_locked = is_locked

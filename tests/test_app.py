@@ -337,6 +337,31 @@ def test_optimize_csv_merges_and_reports(app, tmp_path, optimize_ready):
     assert segs[0].end_time == datetime(2026, 7, 15, 10, 0, 0)
 
 
+def test_optimize_csv_preserves_live_segment_continuity(app, optimize_ready):
+    now = datetime.now().replace(microsecond=0)
+    tracking.datetime.now.return_value = now
+    today = now.date()
+    initial_segment = TimeSegment("active", now - timedelta(minutes=5))
+    app.session.days = {today: Day(today, [initial_segment])}
+    app.session.current_segment = initial_segment
+
+    # A normal save closes rows on disk but leaves the live segment open in memory.
+    app.session.save_all_days()
+    live_segment = app.session.current_segment
+    assert live_segment is not None and live_segment.end_time is None
+
+    app.optimize_csv(silent=True)
+
+    assert app.session.current_segment is live_segment
+    assert live_segment.end_time is None
+
+    # The next poll should continue this segment instead of starting a new one.
+    tracking.datetime.now.return_value = now + timedelta(seconds=10)
+    app.session.on_tick(idle_time=0, idle_threshold=app.idle_threshold)
+    assert app.session.current_segment is live_segment
+    assert live_segment.end_time is None
+
+
 def test_optimize_csv_skips_malformed_rows(app, tmp_path, optimize_ready):
     from activitytracker.persistence import PersistenceManager
     pm = PersistenceManager(lambda: str(tmp_path))
