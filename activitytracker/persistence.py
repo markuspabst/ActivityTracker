@@ -220,7 +220,14 @@ class PersistenceManager:
                     with open(path, "r", newline="", encoding="utf-8") as f:
                         reader = csv.DictReader(f)
                         for row in reader:
-                            key = f"{row['date']} {row['start']}"
+                            date_str = row.get('date')
+                            start_str = row.get('start')
+                            if not date_str or not start_str:
+                                # A truncated row or a file missing either
+                                # identifying column cannot be merged safely.
+                                # Skip it without discarding other valid rows.
+                                continue
+                            key = f"{date_str} {start_str}"
                             if "duration_seconds" not in row:
                                 row["duration_seconds"] = row.get('duration_min', '0') or '0'
                             existing_segments[key] = row

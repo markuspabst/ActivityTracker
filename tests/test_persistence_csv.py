@@ -205,6 +205,34 @@ def test_save_segments_legacy_migration_adds_duration_seconds(pm, tmp_path):
     assert rows["09:00:00"]["duration_seconds"] == "60"
 
 
+def test_save_segments_skips_rows_missing_date_or_start(pm, tmp_path):
+    """Malformed existing rows must not abort saves or discard valid rows."""
+    _write_raw(
+        pm, 2026,
+        ["date", "state", "start", "end", "duration_min", "duration_seconds"],
+        [
+            ["2026-07-01", "active"],  # truncated: missing start and later fields
+            ["2026-07-01", "active", "09:00:00", "10:00:00", "60", "3600"],
+            ["", "active", "10:00:00", "10:15:00", "15", "900"],  # missing date
+        ],
+    )
+
+    day = Day(date=date(2026, 7, 1))
+    day.segments.append(TimeSegment(
+        state="active",
+        start_time=datetime(2026, 7, 1, 11, 0, 0),
+        end_time=datetime(2026, 7, 1, 12, 0, 0),
+    ))
+    pm.save_segments({date(2026, 7, 1): day})
+
+    with open(pm.get_log_file_path("activities", 2026), newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert [(row["date"], row["start"]) for row in rows] == [
+        ("2026-07-01", "09:00:00"),
+        ("2026-07-01", "11:00:00"),
+    ]
+
+
 # ------------------------------------------------------------
 # Reading
 # ------------------------------------------------------------
