@@ -10,7 +10,7 @@ A macOS menu-bar app that classifies computer-use time as **Active** or **Idle**
 - **FR-1.3** The application shall classify time as **Idle** when no user input has occurred for a configurable inactivity threshold (see FR-4.2).
 - **FR-1.4** The application shall classify time as **Idle** whenever the screen is locked, regardless of the inactivity threshold.
 - **FR-1.5** The application shall classify the entire duration of a **system sleep** interval as **Idle**, consistent with locked-screen handling (FR-1.4).
-  - *Partial: sleep is inferred from polling gaps >60 seconds and recorded as Idle only if the user is active at wake. There is no native sleep/wake event integration.*
+  - *Partial: a gap over 60 seconds is explicitly inserted as Idle only when the user is active at wake. Otherwise, the gap inherits the previous segment's state. There is no native sleep/wake event integration.*
 
 ### FR-2 Session Management
 - **FR-2.1** The application shall track each day as a continuous sequence of segments, each classified as **Active** or **Idle** (per FR-1). Locked-screen and system-sleep intervals shall always be recorded as Idle.
@@ -26,15 +26,15 @@ A macOS menu-bar app that classifies computer-use time as **Active** or **Idle**
 ### FR-3 Data Persistence
 - **FR-3.1** All tracked time data shall be saved to local CSV files.
 - **FR-3.2** The application shall maintain a **segment-level log** with this schema: `date (YYYY-MM-DD), state, start (HH:MM:SS), end (HH:MM:SS), duration_min, duration_seconds`.
-- **FR-3.3** Per-day and per-week active/idle totals shall be **derived from the segment-level log** (no separate summary file). Exact seconds are summed per state per day and each state total is rounded to the nearest whole minute, with half minutes rounded up. Older rows without usable `duration_seconds` may fall back to `duration_min`; days without records return zero.
+- **FR-3.3** Per-day and per-week active/idle totals shall be **derived from the segment-level log** (no separate summary file). Exact seconds are summed per state per day, then each daily state total is rounded to the nearest whole minute, with half minutes rounded up; weekly totals sum those daily minute totals. Older rows without usable `duration_seconds` may fall back to `duration_min`; days without records return zero.
 - **FR-3.4** Data shall be saved automatically at user-configurable intervals (see FR-4.3).
 - **FR-3.5** Data shall be saved automatically when the application is quit.
 - **FR-3.6** CSV files shall be **UTF-8** encoded, **comma-delimited**, and include a **header row**. The segment log shall be written to its own file, rotated **per calendar year** (e.g., `activities-2026.csv`).
 - **FR-3.7** Days with no recorded activity shall contribute **zero** active/idle minutes to the derived daily summary (no explicit row is stored).
 - **FR-3.8** Segment timestamps shall use second resolution (`HH:MM:SS`) and represent half-open intervals `[start, end)`. At midnight, the prior day's segment ends at the exclusive boundary `00:00:00` on the next date, where the same state may begin its next segment. The day stream shall have no artificial gaps or overlaps.
 - **FR-3.9** Each CSV row's `date` identifies the calendar day of its segment start. Consumers shall use this field to assign a segment to a day; the implementation does not use a `24:00` sentinel, and segments are split at midnight.
-- **FR-3.10** The application shall automatically compact the segment log after every successful save. Consecutive same-state segments separated by a gap no larger than the configured idle threshold shall be merged into a single row; a short Idle gap between Active intervals may be absorbed into the surrounding Active interval. Compaction shall never merge across a calendar-day boundary and shall never create a row with `end` earlier than `start`, even if the existing file contains overlapping rows. Compaction shall not interrupt the currently tracked segment.
-  - *Implemented after successful saves; compaction preserves the live segment.*
+- **FR-3.10** The application shall automatically compact the segment log after each successful interval-triggered save or Force Save action. Consecutive same-state segments separated by a gap no larger than the configured idle threshold shall be merged; a short Idle gap between Active intervals may be absorbed into the Active interval. Compaction shall not merge across calendar days, create negative-duration rows from overlapping data, or interrupt the live segment.
+  - *Implemented after scheduled and user-initiated saves.*
 - **FR-3.11** Reading the segment log shall tolerate malformed and legacy rows without aborting or discarding valid rows. Rows missing required fields or with unparseable timestamps shall be skipped. Invalid or absent `duration_seconds` shall fall back to `duration_min`, then zero if neither parses.
   - *Implemented: unusable rows are skipped; invalid `duration_seconds` falls back to `duration_min`, then zero if neither parses.*
 
@@ -95,7 +95,7 @@ A macOS menu-bar app that classifies computer-use time as **Active** or **Idle**
 
 ### NFR-3 Reliability
 - **NFR-3.1** The application shall be stable and avoid crashes or data loss during normal use and abnormal shutdowns.
-  - *Partial: save failures during quit cannot be retried after the application exits; see NFR-5.2.*
+  - *Partial: startup recovery reloads saved data for the current day; unsaved data from earlier days is not recovered after a crash (FR-2.5).*
 - **NFR-3.2** Tracking and automatic saving shall continue while the screen is locked. The tracked state shall be Idle until unlock.
 
 ### NFR-4 Privacy
@@ -105,9 +105,9 @@ A macOS menu-bar app that classifies computer-use time as **Active** or **Idle**
 - **NFR-5.1** The application shall enforce a single running instance.
   - *Implemented with an exclusive runtime lock file.*
 - **NFR-5.2** On save failure (disk full, unwritable directory, directory deleted mid-session), the application shall retain data in memory, alert the user, and retry without data loss.
-  - *Partial: failed saves retain data and retry while the app is running; automatic failures alert once per episode, manual saves always alert, and folder changes abort. Quitting after a save failure still exits, so in-memory data cannot then be retried.*
+  - *Implemented while the app is running: failed saves retain data for retry; automatic failures alert once per episode, manual saves always alert, and folder changes abort. A failed final save cancels quitting so the app can retry.*
 - **NFR-5.3** An unreadable, truncated, or manually edited log file shall not crash the application or lose unrelated valid rows. Reads return what is usable; writes preserve existing valid rows and only skip entries that cannot be identified.
-  - *Implemented; see FR-3.11.*
+  - *Partial: I/O and CSV parse failures are handled, and malformed readable rows are skipped (FR-3.11). Invalid UTF-8 input is not explicitly handled.*
 
 ## Assumptions
 - **A-1 (DST):** Daylight Saving Time transitions are *not handled explicitly*. DST switches occur on weekends outside normal working hours, so their impact on daily/weekly duration calculations is considered negligible. All times are recorded in local wall-clock time.
@@ -160,9 +160,8 @@ References point to automated tests under `tests/`. “Not covered” means no d
 | FR-8.1 | `test_i18n.py::test_available_locales_includes_en_and_de`, `test_set_locale_german` |
 | FR-8.2 | `test_i18n.py::test_set_locale_english_and_translate`, `test_set_locale_german` |
 | FR-8.3 | `test_app.py::test_set_language`, `test_i18n.py::test_get_system_locale_from_env`, `test_get_system_locale_default_when_unset`, `test_get_system_locale_via_platform`, `test_set_locale_falls_back_to_english_for_unknown` |
-| NFR-1.1 | Not covered by an automated macOS integration test |
-| NFR-1.2 | Not covered by an automated bundle-configuration test |
-| NFR-1.3 | `test_requirements.py::test_macos_bundle_minimum_version_is_10_15` (configuration only; OS compatibility not run on macOS 10.15) |
+| NFR-1.1 | `test_platform_integration.py::test_macos_platform_is_wired_to_status_menu` (wiring test; real macOS GUI launch remains untested) |
+| NFR-1.2 | `test_requirements.py::test_macos_bundle_is_configured_as_menu_bar_only`, `test_app.py::test_app_menu_creates_status_icon` (configuration/UI construction; runtime Dock behavior not integration-tested) |
 | NFR-2.1 | Not covered by an automated performance benchmark |
 | NFR-2.2 | `test_persistence_csv.py::test_totals_cache_is_bounded_to_recent_years` |
 | NFR-3.1 | `test_tracking.py::test_failed_save_keeps_current_segment_open_and_tracking_advances`, `test_session_tracker_load_finalizes_orphaned_open_segment` |

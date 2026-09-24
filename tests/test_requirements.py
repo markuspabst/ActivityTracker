@@ -10,13 +10,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 class TestRequirements(unittest.TestCase):
 
-    def test_macos_bundle_minimum_version_is_10_15(self):
+    def test_macos_bundle_is_configured_as_menu_bar_only(self):
         project_file = os.path.join(os.path.dirname(__file__), "..", "pyproject.toml")
         with open(project_file, "rb") as stream:
             project = tomllib.load(stream)
 
-        minimum_version = project["tool"]["briefcase"]["app"]["activitytracker"]["macOS"]["app"]["LSMinimumSystemVersion"]
-        self.assertEqual(minimum_version, "10.15")
+        app_config = project["tool"]["briefcase"]["app"]["activitytracker"]["macOS"]["app"]
+        self.assertIs(app_config["info"]["LSUIElement"], True)
 
     @pytest.mark.fr('4.1')
     def test_fr_4_1_language_settings(self):
