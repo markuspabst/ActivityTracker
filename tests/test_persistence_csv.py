@@ -260,6 +260,26 @@ def test_read_segments_for_day_roundtrip(pm, tmp_path):
     assert segs[0].end_time == datetime(2026, 7, 1, 10, 0, 0)
 
 
+def test_read_segments_roundtrips_exclusive_midnight_end(pm, tmp_path):
+    day_date = date(2026, 7, 1)
+    day = Day(day_date, [TimeSegment(
+        state="active",
+        start_time=datetime(2026, 7, 1, 23, 59, 58),
+        end_time=datetime(2026, 7, 2, 0, 0, 0),
+    )])
+    pm.save_segments({day_date: day})
+
+    segments = pm.read_segments_for_day(day_date)
+    assert len(segments) == 1
+    assert segments[0].end_time == datetime(2026, 7, 2, 0, 0, 0)
+    assert segments[0].duration_seconds == 2
+
+    with open(pm.get_log_file_path("activities", day_date.year), newline="", encoding="utf-8") as f:
+        row = next(csv.DictReader(f))
+    assert row["end"] == "00:00:00"
+    assert row["duration_seconds"] == "2"
+
+
 def test_read_segments_ongoing_has_no_end_time(pm, tmp_path):
     d = Day(date=date(2026, 7, 1))
     d.segments.append(TimeSegment(

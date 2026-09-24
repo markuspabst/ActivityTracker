@@ -178,6 +178,8 @@ class PersistenceManager:
                             parts = row['end'].split(':')
                             end_dt = datetime(target_date.year, target_date.month, target_date.day,
                                             int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 0)
+                            if end_dt < start_dt and end_dt.time() == datetime.min.time():
+                                end_dt += timedelta(days=1)
                         segments.append(TimeSegment(state=row['state'], start_time=start_dt, end_time=end_dt))
                     except (ValueError, TypeError, KeyError, AttributeError):
                         continue

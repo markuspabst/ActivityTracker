@@ -122,6 +122,62 @@ def test_quit_app(app):
     assert app._running is False
 
 
+def test_quit_app_stays_running_if_final_save_fails(app):
+    from activitytracker.persistence import PersistenceWriteError
+
+    app._running = True
+    app._stop_event = MagicMock()
+    app.session.finalize_session = MagicMock(side_effect=PersistenceWriteError("disk full"))
+    app.menu.stop = MagicMock()
+
+    app.quit_app()
+
+    assert app._running is True
+    app._stop_event.set.assert_not_called()
+    app.menu.stop.assert_not_called()
+    app.platform.show_alert.assert_called_once()
+
+
+def test_app_menu_creates_status_icon(monkeypatch):
+    from activitytracker import activity_tracker_menu as menu_module
+
+    icon_image = object()
+    icon_instance = object()
+    menu_instance = object()
+    icon_factory = MagicMock(return_value=icon_instance)
+    menu_factory = MagicMock(return_value=menu_instance)
+    monkeypatch.setattr(menu_module, "Icon", icon_factory)
+    monkeypatch.setattr(menu_module, "Menu", menu_factory)
+    monkeypatch.setattr(menu_module, "create_icon", MagicMock(return_value=icon_image))
+    monkeypatch.setattr(menu_module, "get_platform", lambda: MagicMock())
+    monkeypatch.setattr(menu_module, "run_on_main_thread", lambda callback, *args: callback(*args))
+
+    menu = menu_module.AppMenu(MagicMock())
+
+    menu_factory.assert_called_once_with(menu._generate_menu_items)
+    icon_factory.assert_called_once_with("ActivityTracker", icon_image, "ActivityTracker", menu_instance)
+    assert menu.icon is icon_instance
+
+
+def test_open_data_folder_menu_action_uses_configured_directory(monkeypatch):
+    from activitytracker import activity_tracker_menu as menu_module
+
+    i18n.set_locale("en")
+    platform = MagicMock()
+    monkeypatch.setattr(menu_module, "get_platform", lambda: platform)
+    monkeypatch.setattr(menu_module, "run_on_main_thread", lambda callback, *args: callback(*args))
+    app = MagicMock()
+    app.pm.get_data_dir.return_value = "/tmp/activity-data"
+
+    menu = menu_module.AppMenu(app)
+    settings = menu._create_global_settings_submenu()
+    folder_entry = next(item for item in settings.items if item.text == i18n.t("DATA_FOLDER"))
+    open_folder = next(item for item in folder_entry.submenu.items if item.text == i18n.t("OPEN_DATA_FOLDER"))
+    open_folder._action()
+
+    platform.open_file_manager.assert_called_once_with("/tmp/activity-data")
+
+
 def test_update_loop_continues_saving_while_screen_is_locked(app):
     app._running = True
     app._stop_event = MagicMock()
@@ -357,6 +413,29 @@ def test_optimize_csv_merges_and_reports(app, tmp_path, optimize_ready):
     segs = pm.read_segments_for_day(D.date())
     assert len(segs) == 1
     assert segs[0].end_time == datetime(2026, 7, 15, 10, 0, 0)
+
+
+def test_optimize_csv_preserves_exclusive_midnight_end(app, tmp_path, optimize_ready):
+    from activitytracker.persistence import PersistenceManager
+
+    pm = PersistenceManager(lambda: str(tmp_path))
+    today = optimize_ready.date()
+    previous_day = today - timedelta(days=1)
+    segment = TimeSegment(
+        "active",
+        datetime.combine(today, datetime.min.time()) - timedelta(seconds=2),
+        datetime.combine(today, datetime.min.time()),
+    )
+    pm.save_segments({previous_day: Day(previous_day, [segment])})
+    app.pm = pm
+    app.session.pm = pm
+
+    app.optimize_csv(silent=True)
+
+    saved = pm.read_segments_for_day(previous_day)
+    assert len(saved) == 1
+    assert saved[0].end_time == datetime.combine(today, datetime.min.time())
+    assert saved[0].duration_seconds == 2
 
 
 def test_optimize_csv_preserves_live_segment_continuity(app, optimize_ready):

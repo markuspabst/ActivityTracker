@@ -137,8 +137,7 @@ class SessionTracker:
             # change. Otherwise a transition on the first tick of a new day
             # closes the previous day's segment using the new day's timestamp.
             if self.current_segment and self.current_segment.start_time.date() != current_date:
-                previous_day = self.current_segment.start_time.date()
-                midnight = datetime.combine(previous_day, datetime.max.time()).replace(microsecond=0)
+                midnight = datetime.combine(current_date, datetime.min.time()).replace(microsecond=0)
                 self.current_segment.end_time = midnight
 
                 new_day_start = datetime.combine(current_date, datetime.min.time()).replace(microsecond=0)
@@ -176,7 +175,7 @@ class SessionTracker:
         last_segment = None
         while cur < gap_end:
             day = cur.date()
-            day_end = datetime.combine(day, datetime.max.time()).replace(microsecond=0)
+            day_end = datetime.combine(day + timedelta(days=1), datetime.min.time()).replace(microsecond=0)
             seg_end = gap_end if gap_end <= day_end else day_end
             segment = TimeSegment(state="idle", start_time=cur, end_time=seg_end)
             self.days.setdefault(day, Day(date=day)).segments.append(segment)
@@ -188,9 +187,8 @@ class SessionTracker:
             self.current_segment = last_segment
 
     def finalize_session(self):
-        if self.current_segment and self.current_segment.end_time is None:
-            now = datetime.now().replace(microsecond=0)
-            self.current_segment.end_time = self.current_segment.start_time if now < self.current_segment.start_time else now
+        # save_all_days closes live segments for persistence and restores them
+        # open if the write fails, allowing a failed quit to be retried.
         self.save_all_days()
 
     def pause_tracking(self) -> None:

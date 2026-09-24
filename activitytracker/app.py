@@ -165,12 +165,13 @@ class ActivityTrackerApp:
         self.menu.update_ui(is_idle, active_today, total_weekly_active, self.weekly_target_seconds, total_weekly_idle, idle_today, session_start)
 
     def quit_app(self):
-        self._running = False
-        self._stop_event.set()
         try:
             self.session.finalize_session()
         except PersistenceWriteError:
-            self._alert_save_failure()
+            self._alert_save_failure(force_show=True)
+            return
+        self._running = False
+        self._stop_event.set()
         self.menu.stop()
 
     def force_save(self):
@@ -285,6 +286,8 @@ class ActivityTrackerApp:
                                             int(row['date'][8:10]),
                                             int(parts[0]), int(parts[1]),
                                             int(parts[2]) if len(parts) > 2 else 0)
+                            if end_dt < start_dt and end_dt.time() == datetime.min.time():
+                                end_dt += timedelta(days=1)
 
                         all_segments.append(TimeSegment(
                             state=row['state'],

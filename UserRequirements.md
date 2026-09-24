@@ -17,7 +17,7 @@ A macOS menu-bar app that classifies computer-use time as **Active** or **Idle**
 - **FR-2.2** The **session start** for a day shall be the start timestamp of the first Active segment of that day (local time); the **session end** shall be the end timestamp of the last Active segment of that day.
 - **FR-2.3** Idle time shall be counted only within the daily working window (between session start and session end); time outside this window is untracked.
   - *Implemented: boundary Idle segments are filtered; Idle intervals between Active periods are kept.*
-- **FR-2.4** All segments shall be bounded by the calendar day; no segment may span more than one date. See FR-3.8 for the boundary representation.
+- **FR-2.4** Segments shall be assigned to a day by their start date and cover only that day's interval. The end boundary is exclusive; see FR-3.8.
 - **FR-2.5** The application shall reload segment data for the current day from the local log at startup so tracking continues without data loss.
   - *Partial: today's saved data is reloaded; unsaved data from earlier days is not recovered.*
 - **FR-2.6** At application startup, any segment left open (end_time is empty) by a previous run shall be finalized at the last known successful write time so time during the unobserved shutdown interval is not credited. If no write time is available, it shall be closed at its start time.
@@ -31,8 +31,7 @@ A macOS menu-bar app that classifies computer-use time as **Active** or **Idle**
 - **FR-3.5** Data shall be saved automatically when the application is quit.
 - **FR-3.6** CSV files shall be **UTF-8** encoded, **comma-delimited**, and include a **header row**. The segment log shall be written to its own file, rotated **per calendar year** (e.g., `activities-2026.csv`).
 - **FR-3.7** Days with no recorded activity shall contribute **zero** active/idle minutes to the derived daily summary (no explicit row is stored).
-- **FR-3.8** Segment timestamps shall use second resolution (`HH:MM:SS`). At midnight, an open segment ends at `23:59:59` and the same state starts at `00:00:00` on the next day. The daily stream shall contain no artificial gaps or overlaps.
-  - *Implementation note: because segment durations use end-minus-start arithmetic, the current `23:59:59`/`00:00:00` representation leaves one second uncounted at each midnight boundary. This is a known deviation from the no-gaps requirement.*
+- **FR-3.8** Segment timestamps shall use second resolution (`HH:MM:SS`) and represent half-open intervals `[start, end)`. At midnight, the prior day's segment ends at the exclusive boundary `00:00:00` on the next date, where the same state may begin its next segment. The day stream shall have no artificial gaps or overlaps.
 - **FR-3.9** Each CSV row's `date` identifies the calendar day of its segment start. Consumers shall use this field to assign a segment to a day; the implementation does not use a `24:00` sentinel, and segments are split at midnight.
 - **FR-3.10** The application shall automatically compact the segment log after every successful save. Consecutive same-state segments separated by a gap no larger than the configured idle threshold shall be merged into a single row; a short Idle gap between Active intervals may be absorbed into the surrounding Active interval. Compaction shall never merge across a calendar-day boundary and shall never create a row with `end` earlier than `start`, even if the existing file contains overlapping rows. Compaction shall not interrupt the currently tracked segment.
   - *Implemented after successful saves; compaction preserves the live segment.*
@@ -87,8 +86,7 @@ A macOS menu-bar app that classifies computer-use time as **Active** or **Idle**
 
 ### NFR-1 Platform Support
 - **NFR-1.1** The application shall run on **macOS** with a native menu-bar experience.
-- **NFR-1.2** The application shall be a **menu-bar only** application: it shall not show a Dock icon or a main window. The macOS bundle declares `LSUIElement = true`.
-- **NFR-1.3** The application shall run on macOS 10.15 or later.
+- **NFR-1.2** The application shall be a **menu-bar only** application: it shall not show a Dock icon or a main window.
 
 ### NFR-2 Performance
 - **NFR-2.1** The application shall have minimal impact on system performance (low CPU/memory footprint during idle polling).
@@ -138,7 +136,7 @@ References point to automated tests under `tests/`. “Not covered” means no d
 | FR-3.5 | `test_tracking_config.py::test_finalize_session_sets_end_time_and_saves` |
 | FR-3.6 | `test_persistence_csv.py::test_save_segments_writes_header_and_rows`, `test_save_segments_splits_by_year` |
 | FR-3.7 | `test_persistence_csv.py::test_get_minutes_for_date_missing_file`, `test_get_weekly_minutes_missing_file` |
-| FR-3.8 | `test_tracking.py::test_midnight_rollover_splits_before_state_transition`, `test_sleep_gap_ending_exactly_at_midnight_does_not_crash` (the one-second gap itself is not asserted) |
+| FR-3.8 | `test_tracking.py::test_midnight_rollover_splits_before_state_transition`, `test_persistence_csv.py::test_read_segments_roundtrips_exclusive_midnight_end`, `test_app.py::test_optimize_csv_preserves_exclusive_midnight_end` |
 | FR-3.9 | `test_persistence_csv.py::test_save_segments_splits_by_year`, `test_read_segments_only_target_day` |
 | FR-3.10 | `test_app.py::test_optimize_csv_merges_and_reports`, `test_merge_segments_to_save_does_not_cross_midnight`, `test_optimize_csv_preserves_live_segment_continuity` |
 | FR-3.11 | `test_persistence_csv.py::test_readers_tolerate_missing_state_column`, `test_readers_skip_malformed_rows_but_keep_valid_ones`, `test_save_segments_skips_rows_missing_date_or_start` |
@@ -147,11 +145,11 @@ References point to automated tests under `tests/`. “Not covered” means no d
 | FR-4.3 | `test_app.py::test_set_save_interval`, `test_app.py::test_update_triggers_save_when_interval_elapsed` |
 | FR-4.4 | `test_app.py::test_select_data_folder`, `test_reset_data_folder` |
 | FR-4.5 | `test_tracking_config.py::test_save_and_load_config_roundtrip`, `test_load_config_missing_returns_empty`, `test_load_config_invalid_json_returns_empty` |
-| FR-5.1 | `test_tray_icon.py::test_create_icon_returns_rgba_image` (native menu-bar integration not covered) |
+| FR-5.1 | `test_app.py::test_app_menu_creates_status_icon`, `test_tray_icon.py::test_create_icon_returns_rgba_image` (native macOS integration not covered) |
 | FR-5.2 | `test_tray_icon.py::test_get_status_icon_idle`, `test_get_status_icon_active_daily_goal_met`, `test_get_status_icon_active_weekly_goal_met`, `test_get_status_icon_active_neither_goal_met` |
 | FR-5.3 | `test_app.py::test_update_ui_computes_and_calls_menu` |
 | FR-5.4 | `test_tracking.py::test_weekly_logging_multiple_days`, `test_weekly_logging_with_ongoing_segment_today` |
-| FR-5.5 | `test_app.py::test_force_save`, `test_select_data_folder`, `test_quit_app` (opening the folder is not covered) |
+| FR-5.5 | `test_app.py::test_force_save`, `test_select_data_folder`, `test_quit_app`, `test_open_data_folder_menu_action_uses_configured_directory` |
 | FR-5.6 | `test_tracking.py::test_format_hours` |
 | FR-5.7 | `test_app.py::test_report_menu_day_includes_statistics`, `test_report_menu_omits_days_without_activity`, `test_report_menu_shows_no_activity_message_when_empty` |
 | FR-5.8 | `test_app.py::test_general_settings_menu_shows_version` |
@@ -164,12 +162,12 @@ References point to automated tests under `tests/`. “Not covered” means no d
 | FR-8.3 | `test_app.py::test_set_language`, `test_i18n.py::test_get_system_locale_from_env`, `test_get_system_locale_default_when_unset`, `test_get_system_locale_via_platform`, `test_set_locale_falls_back_to_english_for_unknown` |
 | NFR-1.1 | Not covered by an automated macOS integration test |
 | NFR-1.2 | Not covered by an automated bundle-configuration test |
-| NFR-1.3 | Not covered by an OS-version compatibility test |
+| NFR-1.3 | `test_requirements.py::test_macos_bundle_minimum_version_is_10_15` (configuration only; OS compatibility not run on macOS 10.15) |
 | NFR-2.1 | Not covered by an automated performance benchmark |
 | NFR-2.2 | `test_persistence_csv.py::test_totals_cache_is_bounded_to_recent_years` |
 | NFR-3.1 | `test_tracking.py::test_failed_save_keeps_current_segment_open_and_tracking_advances`, `test_session_tracker_load_finalizes_orphaned_open_segment` |
 | NFR-3.2 | `test_app.py::test_update_loop_continues_saving_while_screen_is_locked`, `test_tracking_config.py::test_set_locked_true_creates_idle_segment` |
 | NFR-4.1 | Not covered by an automated privacy test |
 | NFR-5.1 | `test_single_instance.py::test_second_instance_is_blocked`, `test_acquire_and_release` |
-| NFR-5.2 | `test_tracking.py::test_save_all_days_propagates_write_error_and_retains_memory`, `test_app.py::test_force_save_reports_persistence_failure`, `test_select_data_folder_aborts_if_save_fails`, `test_reset_data_folder_aborts_if_save_fails` |
+| NFR-5.2 | `test_tracking.py::test_save_all_days_propagates_write_error_and_retains_memory`, `test_finalize_session_keeps_live_segment_open_when_save_fails`, `test_app.py::test_force_save_reports_persistence_failure`, `test_quit_app_stays_running_if_final_save_fails`, `test_select_data_folder_aborts_if_save_fails`, `test_reset_data_folder_aborts_if_save_fails` |
 | NFR-5.3 | `test_persistence_csv.py::test_readers_survive_unreadable_log_file`, `test_read_segments_skips_malformed_rows`, `test_save_segments_skips_rows_missing_date_or_start` |

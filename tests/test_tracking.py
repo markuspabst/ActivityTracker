@@ -140,11 +140,12 @@ def test_midnight_rollover_splits_before_state_transition(patch_all_datetimes):
     s.on_tick(idle_time=400, idle_threshold=300)
 
     previous_day = s.pm.save_segments.call_args.args[0][date(2026, 7, 1)]
-    assert previous_day.segments[0].end_time == datetime(2026, 7, 1, 23, 59, 59)
+    assert previous_day.segments[0].end_time == datetime(2026, 7, 2, 0, 0, 0)
     today_segments = s.days[date(2026, 7, 2)].segments
     assert today_segments[0].start_time == datetime(2026, 7, 2, 0, 0, 0)
     assert today_segments[0].end_time == datetime(2026, 7, 2, 0, 0, 3)
     assert today_segments[1].state == 'idle'
+    assert previous_day.segments[0].duration_seconds + today_segments[0].duration_seconds == 5
 
 
 def test_sleep_gap_ending_exactly_at_midnight_does_not_crash(patch_all_datetimes):
@@ -386,6 +387,23 @@ def test_save_all_days_propagates_write_error_and_retains_memory():
     # In-memory data must be retained (not cleared) so it can be retried (NFR-5.2).
     assert today in s.days
     assert len(s.days[today].segments) == 1
+
+
+def test_finalize_session_keeps_live_segment_open_when_save_fails():
+    from activitytracker.persistence import PersistenceWriteError
+
+    s = make_session()
+    today = date(2026, 7, 15)
+    segment = TimeSegment("active", datetime(2026, 7, 15, 9, 0, 0))
+    s.days[today] = Day(today, [segment])
+    s.current_segment = segment
+    s.pm.save_segments.side_effect = PersistenceWriteError("disk full")
+
+    with pytest.raises(PersistenceWriteError):
+        s.finalize_session()
+
+    assert s.current_segment is segment
+    assert segment.end_time is None
 
 
 def test_failed_save_keeps_current_segment_open_and_tracking_advances(patch_all_datetimes):
