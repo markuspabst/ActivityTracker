@@ -6,6 +6,7 @@ import os
 import threading
 from contextlib import contextmanager
 from datetime import datetime, date, timedelta
+from itertools import groupby
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from activitytracker.models import TimeSegment, Day
@@ -57,6 +58,43 @@ def _row_duration_seconds(row: dict) -> int:
         return seconds
     minutes = _non_negative_int(row.get("duration_min"))
     return minutes * 60 if minutes is not None else 0
+
+
+def _parse_activities_row(row: dict, target_date: Optional[date] = None) -> Optional[TimeSegment]:
+    """Parse a single activities CSV row into a ``TimeSegment``.
+
+    If *target_date* is provided, rows for other dates are ignored. Malformed
+    or unsupported rows are skipped by returning ``None``.
+    """
+    date_str = row.get('date')
+    state = row.get('state')
+    if not date_str or state not in ('active', 'idle'):
+        return None
+    if target_date is not None and date_str != target_date.strftime("%Y-%m-%d"):
+        return None
+    try:
+        year = int(date_str[:4])
+        month = int(date_str[5:7])
+        day = int(date_str[8:10])
+        parts = row['start'].split(':')
+        start_dt = datetime(
+            year, month, day,
+            int(parts[0]), int(parts[1]),
+            int(parts[2]) if len(parts) > 2 else 0,
+        )
+        end_dt = None
+        if row.get('end'):
+            parts = row['end'].split(':')
+            end_dt = datetime(
+                year, month, day,
+                int(parts[0]), int(parts[1]),
+                int(parts[2]) if len(parts) > 2 else 0,
+            )
+            if end_dt < start_dt and end_dt.time() == datetime.min.time():
+                end_dt += timedelta(days=1)
+        return TimeSegment(state=state, start_time=start_dt, end_time=end_dt)
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return None
 
 
 class PersistenceManager:
@@ -186,34 +224,36 @@ class PersistenceManager:
         path = self.get_log_file_path(ACTIVITIES_LOG_PREFIX, target_date.year)
         if not os.path.exists(path):
             return segments
-        target_str = target_date.strftime("%Y-%m-%d")
         try:
             with open(path, "r", newline="", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    if row.get('date') != target_str:
-                        continue
-                    try:
-                        state = row.get('state')
-                        if state not in ('active', 'idle'):
-                            continue
-                        # Missing columns (corrupt/hand-edited/legacy files) are
-                        # skipped rather than raising KeyError and aborting the read.
-                        parts = row['start'].split(':')
-                        start_dt = datetime(target_date.year, target_date.month, target_date.day,
-                                            int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 0)
-                        end_dt = None
-                        if row.get('end'):
-                            parts = row['end'].split(':')
-                            end_dt = datetime(target_date.year, target_date.month, target_date.day,
-                                            int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 0)
-                            if end_dt < start_dt and end_dt.time() == datetime.min.time():
-                                end_dt += timedelta(days=1)
-                        segments.append(TimeSegment(state=state, start_time=start_dt, end_time=end_dt))
-                    except (ValueError, TypeError, KeyError, AttributeError):
-                        continue
+                for row in csv.DictReader(f):
+                    seg = _parse_activities_row(row, target_date)
+                    if seg is not None:
+                        segments.append(seg)
         except (IOError, csv.Error, OSError) as exc:
             logger.warning("Failed to read segments for %s: %s", target_date, exc)
+        return segments
+
+    def read_segments_for_year(self, year: int) -> List[TimeSegment]:
+        """Read every valid segment from a year's activities log."""
+        with self._file_lock:
+            return self._read_segments_for_year_locked(year)
+
+    def _read_segments_for_year_locked(self, year: int) -> List[TimeSegment]:
+        """Read all valid segments from a year's log.
+
+        Propagates read errors so callers (e.g. CSV optimization) can surface
+        them to the user. Use ``read_segments_for_year`` for the public API.
+        """
+        segments: List[TimeSegment] = []
+        path = self.get_log_file_path(ACTIVITIES_LOG_PREFIX, year)
+        if not os.path.exists(path):
+            return segments
+        with open(path, "r", newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                seg = _parse_activities_row(row)
+                if seg is not None:
+                    segments.append(seg)
         return segments
 
     def save_segments(self, segments_by_day, idle_threshold: int = 300) -> None:
@@ -224,85 +264,115 @@ class PersistenceManager:
         """Save segment-level data to a CSV file, by year."""
         if not segments_by_day:
             return
-        segments_by_year: Dict[int, List[dict]] = {}
+        segments_by_year: Dict[int, List[TimeSegment]] = {}
 
         for day, day_data in segments_by_day.items():
-            year = day.year
-            if year not in segments_by_year:
-                segments_by_year[year] = []
             optimized_segments = self.optimize_segments(day_data.segments, idle_threshold)
+            # Ensure the year is scheduled for rewrite even if every segment for
+            # this day was filtered out, so legacy-row migration still runs.
+            segments_by_year.setdefault(day.year, [])
             for seg in optimized_segments:
                 if seg.start_time:
-                    segments_by_year[year].append({
-                        "date": day.strftime("%Y-%m-%d"),
-                        "state": seg.state,
-                        "start": seg.start_time.strftime("%H:%M:%S"),
-                        "end": seg.end_time.strftime("%H:%M:%S") if seg.end_time else "",
-                        "duration_min": seg.duration_minutes,
-                        "duration_seconds": int((seg.end_time - seg.start_time).total_seconds()) if seg.end_time else 0,
-                    })
+                    segments_by_year[day.year].append(seg)
 
-        for year, new_segments in segments_by_year.items():
-            path = self.get_log_file_path(ACTIVITIES_LOG_PREFIX, year)
-            existing_segments: Dict[str, dict] = {}
+        for year, segments in segments_by_year.items():
+            self._write_segments_for_year(year, segments)
 
-            if os.path.exists(path):
-                try:
-                    with open(path, "r", newline="", encoding="utf-8") as f:
-                        reader = csv.DictReader(f)
-                        for row in reader:
-                            date_str = row.get('date')
-                            start_str = row.get('start')
-                            if not date_str or not start_str or row.get('state') not in ('active', 'idle'):
-                                # A truncated row or a file missing either
-                                # identifying column/state cannot be merged safely.
-                                # Skip it without discarding other valid rows.
-                                continue
-                            key = f"{date_str} {start_str}"
-                            row["duration_seconds"] = str(_row_duration_seconds(row))
-                            existing_segments[key] = row
-                except (IOError, csv.Error, OSError) as exc:
-                    logger.warning("Could not read existing %s, starting fresh: %s", path, exc)
+    def _write_segments_for_year(self, year: int, segments: List[TimeSegment]) -> None:
+        """Convert segments to rows and rewrite the year's CSV, superseding rows
+        that are fully contained within the new ones.
+        """
+        new_rows = []
+        for seg in segments:
+            if not seg.start_time:
+                continue
+            new_rows.append({
+                "date": seg.start_time.strftime("%Y-%m-%d"),
+                "state": seg.state,
+                "start": seg.start_time.strftime("%H:%M:%S"),
+                "end": seg.end_time.strftime("%H:%M:%S") if seg.end_time else "",
+                "duration_min": seg.duration_minutes,
+                "duration_seconds": int((seg.end_time - seg.start_time).total_seconds()) if seg.end_time else 0,
+            })
 
-            # A merged/extended segment can fully contain an older row of the
-            # same day (e.g. after merge_segments_to_save merged a gap). Drop the
-            # contained row so we never persist overlapping duplicate data.
-            # Only finalized segments (with an end) can contain others; an
-            # ongoing segment (end="") must not drop already-saved neighbors.
-            for seg in sorted(new_segments, key=lambda s: (s['date'], s['start'])):
-                seg_date = seg['date']
-                seg_start = _hms_to_seconds(seg['start'])
-                seg_end = _hms_to_seconds(seg['end']) if seg['end'] else None
-                if seg_end is None or seg_start is None:
-                    continue
-                for key in list(existing_segments.keys()):
-                    erow = existing_segments[key]
-                    if erow['date'] != seg_date or key == f"{seg_date} {seg['start']}":
-                        continue
-                    e_start = _hms_to_seconds(erow['start'])
-                    e_end = _hms_to_seconds(erow['end']) if erow['end'] else None
-                    if e_start is None or e_end is None:
-                        continue
-                    if e_start >= seg_start and e_end <= seg_end:
-                        del existing_segments[key]
+        path = self.get_log_file_path(ACTIVITIES_LOG_PREFIX, year)
+        existing_segments: Dict[str, dict] = {}
 
-            for seg in new_segments:
-                key = f"{seg['date']} {seg['start']}"
-                existing_segments[key] = seg
-
-            sorted_keys = sorted(existing_segments.keys())
+        if os.path.exists(path):
             try:
-                with open(path, "w", newline="", encoding="utf-8") as f:
-                    writer = csv.DictWriter(f, fieldnames=["date", "state", "start", "end", "duration_min", "duration_seconds"])
-                    writer.writeheader()
-                    for key in sorted_keys:
-                        writer.writerow(existing_segments[key])
-                # File was written successfully — invalidate the totals cache for
-                # this year so the next read picks up fresh data.
-                self._totals_cache.pop(year, None)
-            except (IOError, OSError) as exc:
-                logger.error("Failed to write %s: %s", path, exc)
-                raise PersistenceWriteError(f"Could not write {path}: {exc}") from exc
+                with open(path, "r", newline="", encoding="utf-8") as f:
+                    for row in csv.DictReader(f):
+                        date_str = row.get('date')
+                        start_str = row.get('start')
+                        if not date_str or not start_str or row.get('state') not in ('active', 'idle'):
+                            # A truncated row or a file missing either
+                            # identifying column/state cannot be merged safely.
+                            # Skip it without discarding other valid rows.
+                            continue
+                        key = f"{date_str} {start_str}"
+                        row["duration_seconds"] = str(_row_duration_seconds(row))
+                        existing_segments[key] = row
+            except (IOError, csv.Error, OSError) as exc:
+                logger.warning("Could not read existing %s, starting fresh: %s", path, exc)
+
+        # A merged/extended segment can fully contain an older row of the
+        # same day (e.g. after merge_segments_to_save merged a gap). Drop the
+        # contained row so we never persist overlapping duplicate data.
+        # Only finalized segments (with an end) can contain others; an
+        # ongoing segment (end="") must not drop already-saved neighbors.
+        for seg in sorted(new_rows, key=lambda s: (s['date'], s['start'])):
+            seg_date = seg['date']
+            seg_start = _hms_to_seconds(seg['start'])
+            seg_end = _hms_to_seconds(seg['end']) if seg['end'] else None
+            if seg_end is None or seg_start is None:
+                continue
+            for key in list(existing_segments.keys()):
+                erow = existing_segments[key]
+                if erow['date'] != seg_date or key == f"{seg_date} {seg['start']}":
+                    continue
+                e_start = _hms_to_seconds(erow['start'])
+                e_end = _hms_to_seconds(erow['end']) if erow['end'] else None
+                if e_start is None or e_end is None:
+                    continue
+                if e_start >= seg_start and e_end <= seg_end:
+                    del existing_segments[key]
+
+        for seg in new_rows:
+            key = f"{seg['date']} {seg['start']}"
+            existing_segments[key] = seg
+
+        sorted_keys = sorted(existing_segments.keys())
+        try:
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=["date", "state", "start", "end", "duration_min", "duration_seconds"])
+                writer.writeheader()
+                for key in sorted_keys:
+                    writer.writerow(existing_segments[key])
+            # File was written successfully — invalidate the totals cache for
+            # this year so the next read picks up fresh data.
+            self._totals_cache.pop(year, None)
+        except (IOError, OSError) as exc:
+            logger.error("Failed to write %s: %s", path, exc)
+            raise PersistenceWriteError(f"Could not write {path}: {exc}") from exc
+
+    def optimize_year_file(self, year: int, idle_threshold: int = 300) -> Tuple[int, int]:
+        """Read, optimize per-day, and rewrite one year's activities log.
+
+        Returns ``(original_row_count, optimized_row_count)``.
+        """
+        segments = self._read_segments_for_year_locked(year)
+        if not segments:
+            return 0, 0
+
+        optimized: List[TimeSegment] = []
+        for seg_day, day_segments in groupby(
+            sorted(segments, key=lambda seg: seg.start_time),
+            key=lambda seg: seg.start_time.date(),
+        ):
+            optimized.extend(self.optimize_segments(list(day_segments), idle_threshold))
+
+        self._write_segments_for_year(year, optimized)
+        return len(segments), len(optimized)
 
     def optimize_segments(
         self, segments: List[TimeSegment], idle_threshold: int = 300

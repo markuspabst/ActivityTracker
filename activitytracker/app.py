@@ -1,4 +1,5 @@
 from __future__ import annotations
+import csv
 import logging
 import math
 import os
@@ -20,7 +21,6 @@ from activitytracker.tracking import (
     get_configured_data_dir,
     get_state_file_path,
 )
-from activitytracker.models import TimeSegment
 from activitytracker.persistence import PersistenceManager, PersistenceWriteError
 from activitytracker.activity_tracker_menu import AppMenu
 from activitytracker.single_instance import SingleInstanceLock
@@ -263,16 +263,12 @@ class ActivityTrackerApp:
             self.platform.show_alert(success_msg, msg)
 
     def _optimize_csv_locked(self, silent: bool = False):
-        """Merge consecutive same-state segments with small gaps in the CSV file.
+        """Optimize one year's CSV log by normalizing every day and compacting.
 
         Optimization runs after successful interval-triggered saves and Force
         Save actions. When *silent* is True no alert is shown and the app is not
         brought to the front.
         """
-        import csv
-        from datetime import datetime
-        from activitytracker.tracking import get_config_value
-
         today = datetime.now().date()
         segments_file = self.pm.get_log_file_path('activities', today.year)
 
@@ -287,43 +283,12 @@ class ActivityTrackerApp:
         # Get idle threshold from config (default 300 sec)
         idle_threshold = get_config_value("idle_threshold_seconds", 300)
 
-        # Read all segments from the year file
-        all_segments = []
-        original_count = 0
         try:
-            with open(segments_file, "r", newline="", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    original_count += 1
-                    try:
-                        state = row.get('state')
-                        if state not in ('active', 'idle'):
-                            continue
-                        parts = row['start'].split(':')
-                        start_dt = datetime(int(row['date'][:4]), int(row['date'][5:7]),
-                                          int(row['date'][8:10]),
-                                          int(parts[0]), int(parts[1]),
-                                          int(parts[2]) if len(parts) > 2 else 0)
-
-                        end_dt = None
-                        if row['end']:
-                            parts = row['end'].split(':')
-                            end_dt = datetime(int(row['date'][:4]), int(row['date'][5:7]),
-                                            int(row['date'][8:10]),
-                                            int(parts[0]), int(parts[1]),
-                                            int(parts[2]) if len(parts) > 2 else 0)
-                            if end_dt < start_dt and end_dt.time() == datetime.min.time():
-                                end_dt += timedelta(days=1)
-
-                        all_segments.append(TimeSegment(
-                            state=state,
-                            start_time=start_dt,
-                            end_time=end_dt
-                        ))
-                    except (ValueError, TypeError, KeyError, AttributeError):
-                        continue
+            original_count, optimized_count = self.pm.optimize_year_file(
+                today.year, int(idle_threshold)
+            )
         except (OSError, csv.Error, UnicodeError) as exc:
-            logger.error("Optimize failed to read %s: %s", segments_file, exc)
+            logger.error("Optimize failed for %s: %s", segments_file, exc)
             if not silent:
                 self.platform.show_alert(
                     i18n.t("OPTIMIZE_READ_ERROR"),
@@ -331,7 +296,7 @@ class ActivityTrackerApp:
                 )
             return
 
-        if not all_segments:
+        if original_count == 0:
             if not silent:
                 self.platform.show_alert(
                     i18n.t("OPTIMIZE_EMPTY"),
@@ -339,38 +304,8 @@ class ActivityTrackerApp:
                 )
             return
 
-        # Merge segments
-        merged_segments = self.pm.merge_segments_to_save(all_segments, int(idle_threshold))
-        merged_count = len(merged_segments)
-        reduced_count = original_count - merged_count
-
-        # Write merged segments back to CSV
-        try:
-            with open(segments_file, "w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=["date", "state", "start", "end", "duration_min", "duration_seconds"])
-                writer.writeheader()
-                for seg in merged_segments:
-                    writer.writerow({
-                        "date": seg.start_time.strftime("%Y-%m-%d"),
-                        "state": seg.state,
-                        "start": seg.start_time.strftime("%H:%M:%S"),
-                        "end": seg.end_time.strftime("%H:%M:%S") if seg.end_time else "",
-                        "duration_min": seg.duration_minutes,
-                        "duration_seconds": int((seg.end_time - seg.start_time).total_seconds()) if seg.end_time else 0,
-                    })
-        except OSError as exc:
-            logger.error("Optimize failed to write %s: %s", segments_file, exc)
-            if not silent:
-                self.platform.show_alert(
-                    i18n.t("SAVE_ERROR_TITLE"),
-                    i18n.t("SAVE_ERROR_MSG"),
-                )
-            return
-
-        # Invalidate the totals cache so the next read picks up the optimised data
-        self.pm.invalidate_totals_cache(today.year)
-
-        return today, original_count, merged_count, reduced_count
+        reduced_count = original_count - optimized_count
+        return today, original_count, optimized_count, reduced_count
 
 def main():
     """Entry point for Briefcase and direct execution."""

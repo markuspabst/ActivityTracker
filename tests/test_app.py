@@ -495,23 +495,27 @@ def test_optimize_csv_skips_malformed_rows(app, tmp_path, optimize_ready):
     from activitytracker.persistence import PersistenceManager
     pm = PersistenceManager(lambda: str(tmp_path))
     D = optimize_ready
-    # Write a CSV with one malformed row (bad start) and one valid segment
+    # Write a CSV with malformed/unknown rows plus valid active/idle/active rows.
     path = pm.get_log_file_path("activities", D.year)
     with open(path, "w", newline="", encoding="utf-8") as f:
         f.write("date,state,start,end,duration_min,duration_seconds\n")
-        f.write("2026-07-15,active,badtime,10:00:00,60,3600\n")
-        f.write("2026-07-15,idle,11:00:00,11:15:00,15,900\n")
-        f.write("2026-07-15,unknown,12:00:00,13:00:00,60,3600\n")
+        f.write("2026-07-15,active,badtime,10:00:00,60,3600\n")          # malformed start
+        f.write("2026-07-15,active,10:00:00,11:00:00,60,3600\n")        # valid active
+        f.write("2026-07-15,idle,11:00:00,11:15:00,15,900\n")           # valid idle
+        f.write("2026-07-15,active,11:15:00,12:00:00,45,2700\n")        # valid active
+        f.write("2026-07-15,unknown,12:00:00,13:00:00,60,3600\n")       # unknown state
 
     app.pm = pm
     app.optimize_csv()
 
     titles = [c.args[0] for c in app.platform.show_alert.call_args_list]
-    # Still succeeds (valid rows were processed); malformed row skipped
+    # Still succeeds (valid rows were processed); malformed/unknown rows skipped
     assert any(t == i18n.t("OPTIMIZE_SUCCESS") for t in titles)
     segs = pm.read_segments_for_day(D.date())
-    assert len(segs) == 1  # the idle segment; malformed active row dropped
-    assert segs[0].state == "idle"
+    assert len(segs) == 3
+    assert segs[0].state == "active"
+    assert segs[1].state == "idle"
+    assert segs[2].state == "active"
 
 
 # ------------------------------------------------------------
