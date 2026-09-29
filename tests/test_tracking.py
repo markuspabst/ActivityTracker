@@ -578,3 +578,169 @@ def test_save_all_days_preserves_ongoing_idle_break_in_memory(patch_all_datetime
     assert s.days[today].segments[1].start_time == datetime(2026, 7, 15, 12, 0, 0)
     assert s.days[today].segments[1].end_time is None
     assert s.current_segment == s.days[today].segments[1]
+
+
+# ============================================================
+#  FILL GAPS TESTS
+# ============================================================
+
+def test_fill_gaps_with_idle_basic(pm, temp_data_dir):
+    """Test that gaps between segments on the same day are filled with idle."""
+    from activitytracker.persistence import PersistenceManager
+    
+    # Create segments with a gap
+    segments = [
+        TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=datetime(2026, 7, 1, 9, 30, 0)),
+        TimeSegment(state='active', start_time=datetime(2026, 7, 1, 10, 0, 0), end_time=datetime(2026, 7, 1, 11, 0, 0)),
+    ]
+    
+    filled = PersistenceManager.fill_gaps_with_idle(segments)
+    
+    # Should have 3 segments now (active, idle, active)
+    assert len(filled) == 3
+    assert filled[0].state == 'active'
+    assert filled[0].end_time == datetime(2026, 7, 1, 9, 30, 0)
+    assert filled[1].state == 'idle'
+    assert filled[1].start_time == datetime(2026, 7, 1, 9, 30, 0)
+    assert filled[1].end_time == datetime(2026, 7, 1, 10, 0, 0)
+    assert filled[2].state == 'active'
+    assert filled[2].start_time == datetime(2026, 7, 1, 10, 0, 0)
+
+
+def test_fill_gaps_with_idle_no_gap(pm, temp_data_dir):
+    """Test that contiguous segments are not modified."""
+    segments = [
+        TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=datetime(2026, 7, 1, 9, 30, 0)),
+        TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 30, 0), end_time=datetime(2026, 7, 1, 10, 0, 0)),
+    ]
+    
+    filled = PersistenceManager.fill_gaps_with_idle(segments)
+    
+    # Should still have 2 segments, no idle added
+    assert len(filled) == 2
+
+
+def test_fill_gaps_with_idle_different_days(pm, temp_data_dir):
+    """Test that gaps across day boundaries are not filled."""
+    segments = [
+        TimeSegment(state='active', start_time=datetime(2026, 7, 1, 23, 0, 0), end_time=datetime(2026, 7, 1, 23, 30, 0)),
+        TimeSegment(state='active', start_time=datetime(2026, 7, 2, 9, 0, 0), end_time=datetime(2026, 7, 2, 10, 0, 0)),
+    ]
+    
+    filled = PersistenceManager.fill_gaps_with_idle(segments)
+    
+    # Should still have 2 segments, no idle added across days
+    assert len(filled) == 2
+
+
+def test_fill_gaps_with_idle_already_has_idle(pm, temp_data_dir):
+    """Test that existing idle segments are preserved."""
+    segments = [
+        TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=datetime(2026, 7, 1, 9, 30, 0)),
+        TimeSegment(state='idle', start_time=datetime(2026, 7, 1, 9, 30, 0), end_time=datetime(2026, 7, 1, 10, 0, 0)),
+        TimeSegment(state='active', start_time=datetime(2026, 7, 1, 10, 0, 0), end_time=datetime(2026, 7, 1, 11, 0, 0)),
+    ]
+    
+    filled = PersistenceManager.fill_gaps_with_idle(segments)
+    
+    # Should still have 3 segments, the existing idle is preserved
+    assert len(filled) == 3
+    assert filled[1].state == 'idle'
+
+
+def test_fill_gaps_with_idle_multiple_gaps(pm, temp_data_dir):
+    """Test that multiple gaps are filled."""
+    segments = [
+        TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=datetime(2026, 7, 1, 9, 30, 0)),
+        TimeSegment(state='active', start_time=datetime(2026, 7, 1, 10, 0, 0), end_time=datetime(2026, 7, 1, 10, 30, 0)),
+        TimeSegment(state='active', start_time=datetime(2026, 7, 1, 11, 0, 0), end_time=datetime(2026, 7, 1, 11, 30, 0)),
+    ]
+    
+    filled = PersistenceManager.fill_gaps_with_idle(segments)
+    
+    # Should have 5 segments now (active, idle, active, idle, active)
+    assert len(filled) == 5
+    assert filled[1].state == 'idle'  # First gap
+    assert filled[3].state == 'idle'  # Second gap
+
+
+def test_fill_gaps_with_idle_empty_or_single(pm, temp_data_dir):
+    """Test edge cases with empty or single segment."""
+    # Empty list
+    filled = PersistenceManager.fill_gaps_with_idle([])
+    assert len(filled) == 0
+    
+    # Single segment
+    segments = [TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=datetime(2026, 7, 1, 10, 0, 0))]
+    filled = PersistenceManager.fill_gaps_with_idle(segments)
+    assert len(filled) == 1
+
+
+def test_fill_gaps_with_idle_adjacent_idle_segments(pm, temp_data_dir):
+    """Test that gaps between idle segments are filled."""
+    segments = [
+        TimeSegment(state='idle', start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=datetime(2026, 7, 1, 9, 30, 0)),
+        TimeSegment(state='idle', start_time=datetime(2026, 7, 1, 10, 0, 0), end_time=datetime(2026, 7, 1, 10, 30, 0)),
+    ]
+    
+    filled = PersistenceManager.fill_gaps_with_idle(segments)
+    
+    # Should have 3 idle segments now (idle, idle, idle) - gap filled with idle
+    assert len(filled) == 3
+    assert all(seg.state == 'idle' for seg in filled)
+    assert filled[0].end_time == filled[1].start_time  # First and second are adjacent
+    assert filled[1].end_time == filled[2].start_time  # Second and third are adjacent
+
+
+def test_fill_gaps_with_idle_adjacent_idle_no_gap(pm, temp_data_dir):
+    """Test that contiguous idle segments are not modified."""
+    segments = [
+        TimeSegment(state='idle', start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=datetime(2026, 7, 1, 9, 30, 0)),
+        TimeSegment(state='idle', start_time=datetime(2026, 7, 1, 9, 30, 0), end_time=datetime(2026, 7, 1, 10, 0, 0)),
+    ]
+    
+    filled = PersistenceManager.fill_gaps_with_idle(segments)
+    
+    # Should still have 2 segments, no idle added
+    assert len(filled) == 2
+
+
+def test_fill_gaps_with_idle_active_idle_active(pm, temp_data_dir):
+    """Test filling gaps in active-idle-active pattern."""
+    segments = [
+        TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=datetime(2026, 7, 1, 9, 30, 0)),
+        TimeSegment(state='idle', start_time=datetime(2026, 7, 1, 10, 0, 0), end_time=datetime(2026, 7, 1, 10, 30, 0)),
+        TimeSegment(state='active', start_time=datetime(2026, 7, 1, 11, 0, 0), end_time=datetime(2026, 7, 1, 11, 30, 0)),
+    ]
+    
+    filled = PersistenceManager.fill_gaps_with_idle(segments)
+    
+    # Should have 5 segments: active, idle, idle, idle, active
+    # Gaps: 9:30-10:00 and 10:30-11:00
+    assert len(filled) == 5
+    assert filled[0].state == 'active'
+    assert filled[1].state == 'idle'  # Gap before existing idle
+    assert filled[2].state == 'idle'  # Original idle
+    assert filled[3].state == 'idle'  # Gap after existing idle
+    assert filled[4].state == 'active'
+
+
+def test_fill_gaps_integration_with_save(pm, temp_data_dir):
+    """Test that gaps are filled when saving segments."""
+    from activitytracker.models import Day
+    
+    # Create segments with gaps
+    today = date(2026, 7, 15)
+    day_data = Day(date=today)
+    day_data.segments.append(TimeSegment(state='active', start_time=datetime(2026, 7, 15, 9, 0, 0), end_time=datetime(2026, 7, 15, 9, 30, 0)))
+    day_data.segments.append(TimeSegment(state='active', start_time=datetime(2026, 7, 15, 10, 0, 0), end_time=datetime(2026, 7, 15, 11, 0, 0)))
+    
+    pm.save_segments({today: day_data})
+    
+    # Read back the segments
+    loaded_segments = pm.read_segments_for_day(today)
+    
+    # Should have active, idle, active segments after fill_gaps is applied
+    states = [seg.state for seg in loaded_segments]
+    assert 'idle' in states, "Should have idle segment filling the gap"
+    assert states == ['active', 'idle', 'active'], f"Expected ['active', 'idle', 'active'], got {states}"
