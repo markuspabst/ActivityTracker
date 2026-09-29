@@ -692,7 +692,7 @@ def test_fill_gaps_with_idle_none_start_time(pm, temp_data_dir):
 
 
 def test_fill_gaps_with_idle_gap_before_first_active(pm, temp_data_dir):
-    """Test that gaps before first active are filled but then filtered out."""
+    """Do not synthesize idle time before the first active segment."""
     # Idle before first active, with gap between them
     segments = [
         TimeSegment(state='idle', start_time=datetime(2026, 7, 1, 8, 0, 0), end_time=datetime(2026, 7, 1, 8, 30, 0)),
@@ -701,11 +701,12 @@ def test_fill_gaps_with_idle_gap_before_first_active(pm, temp_data_dir):
     
     filled = PersistenceManager.fill_gaps_with_idle(segments)
     
-    # Gap should be filled with idle (08:30-09:00)
-    assert len(filled) == 3
-    assert filled[1].state == 'idle'
-    assert filled[1].start_time == datetime(2026, 7, 1, 8, 30, 0)
-    assert filled[1].end_time == datetime(2026, 7, 1, 9, 0, 0)
+    # The pre-active gap should not be synthesized as idle.
+    assert len(filled) == 2
+    assert not any(
+        seg.state == 'idle' and seg.start_time == datetime(2026, 7, 1, 8, 30, 0)
+        for seg in filled
+    )
     
     # After filtering, only active segments remain
     filtered = pm._filter_idle_boundary_segments(filled)
@@ -715,20 +716,38 @@ def test_fill_gaps_with_idle_gap_before_first_active(pm, temp_data_dir):
     assert filtered[0].start_time == datetime(2026, 7, 1, 9, 0, 0)
 
 
+def test_fill_gaps_with_idle_does_not_fill_time_covered_by_overlap(pm, temp_data_dir):
+    """Overlapping intervals must not make the helper invent a covered gap."""
+    segments = [
+        TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 0), end_time=datetime(2026, 7, 1, 12, 0)),
+        TimeSegment(state='idle', start_time=datetime(2026, 7, 1, 10, 0), end_time=datetime(2026, 7, 1, 10, 30)),
+        TimeSegment(state='active', start_time=datetime(2026, 7, 1, 11, 0), end_time=datetime(2026, 7, 1, 11, 30)),
+    ]
+
+    filled = PersistenceManager.fill_gaps_with_idle(segments)
+
+    assert len(filled) == 3
+    assert not any(
+        seg.state == 'idle' and seg.start_time == datetime(2026, 7, 1, 10, 30)
+        for seg in filled
+    )
+
+
 def test_fill_gaps_with_idle_adjacent_idle_segments(pm, temp_data_dir):
     """Test that gaps between idle segments are filled."""
     segments = [
+        TimeSegment(state='active', start_time=datetime(2026, 7, 1, 8, 0, 0), end_time=datetime(2026, 7, 1, 9, 0, 0)),
         TimeSegment(state='idle', start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=datetime(2026, 7, 1, 9, 30, 0)),
         TimeSegment(state='idle', start_time=datetime(2026, 7, 1, 10, 0, 0), end_time=datetime(2026, 7, 1, 10, 30, 0)),
     ]
     
     filled = PersistenceManager.fill_gaps_with_idle(segments)
     
-    # Should have 3 idle segments now (idle, idle, idle) - gap filled with idle
-    assert len(filled) == 3
-    assert all(seg.state == 'idle' for seg in filled)
-    assert filled[0].end_time == filled[1].start_time  # First and second are adjacent
-    assert filled[1].end_time == filled[2].start_time  # Second and third are adjacent
+    # The gap between the two idle segments is filled, after active time began.
+    assert len(filled) == 4
+    assert [seg.state for seg in filled] == ['active', 'idle', 'idle', 'idle']
+    assert filled[1].end_time == filled[2].start_time
+    assert filled[2].end_time == filled[3].start_time
 
 
 def test_fill_gaps_with_idle_adjacent_idle_no_gap(pm, temp_data_dir):
@@ -804,3 +823,53 @@ def test_fill_gaps_first_segment_is_always_active(pm, temp_data_dir):
     assert len(loaded_segments) >= 1
     assert loaded_segments[0].state == 'active'
     assert loaded_segments[0].start_time == datetime(2026, 7, 15, 9, 0, 0)
+
+
+def test_optimize_segments_composes_full_pipeline(pm, temp_data_dir):
+    """optimize_segments applies filter -> fill gaps -> compact in one step."""
+    # Leading idle (dropped), a small internal gap (absorbed into active),
+    # and trailing idle (dropped).
+    segments = [
+        TimeSegment(state='idle', start_time=datetime(2026, 7, 15, 8, 0, 0), end_time=datetime(2026, 7, 15, 8, 30, 0)),
+        TimeSegment(state='active', start_time=datetime(2026, 7, 15, 9, 0, 0), end_time=datetime(2026, 7, 15, 9, 30, 0)),
+        TimeSegment(state='active', start_time=datetime(2026, 7, 15, 9, 31, 0), end_time=datetime(2026, 7, 15, 10, 0, 0)),
+        TimeSegment(state='idle', start_time=datetime(2026, 7, 15, 13, 0, 0), end_time=datetime(2026, 7, 15, 13, 30, 0)),
+    ]
+
+    optimized = pm.optimize_segments(segments, idle_threshold=300)
+
+    # Leading idle (8:00-8:30) filtered, trailing idle (13:00-13:30) filtered.
+    # The 60s gap 9:30-9:31 is absorbed into active (<= 300s threshold).
+    # Result: a single active segment 9:00-10:00.
+    assert len(optimized) == 1
+    assert optimized[0].state == 'active'
+    assert optimized[0].start_time == datetime(2026, 7, 15, 9, 0, 0)
+    assert optimized[0].end_time == datetime(2026, 7, 15, 10, 0, 0)
+
+
+def test_optimize_segments_keeps_large_gap_as_idle(pm, temp_data_dir):
+    """A large internal gap is filled with idle and survives compaction."""
+    segments = [
+        TimeSegment(state='active', start_time=datetime(2026, 7, 15, 9, 0, 0), end_time=datetime(2026, 7, 15, 10, 0, 0)),
+        TimeSegment(state='active', start_time=datetime(2026, 7, 15, 12, 0, 0), end_time=datetime(2026, 7, 15, 13, 0, 0)),
+    ]
+
+    optimized = pm.optimize_segments(segments, idle_threshold=300)
+
+    assert [seg.state for seg in optimized] == ['active', 'idle', 'active']
+    assert optimized[1].start_time == datetime(2026, 7, 15, 10, 0, 0)
+    assert optimized[1].end_time == datetime(2026, 7, 15, 12, 0, 0)
+
+
+def test_optimize_segments_does_not_mutate_input(pm, temp_data_dir):
+    """optimize_segments must return a new list, not mutate the caller's."""
+    segments = [
+        TimeSegment(state='active', start_time=datetime(2026, 7, 15, 9, 0, 0), end_time=datetime(2026, 7, 15, 10, 0, 0)),
+        TimeSegment(state='active', start_time=datetime(2026, 7, 15, 12, 0, 0), end_time=datetime(2026, 7, 15, 13, 0, 0)),
+    ]
+    original = list(segments)
+
+    pm.optimize_segments(segments, idle_threshold=300)
+
+    assert len(segments) == 2
+    assert segments == original

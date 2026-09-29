@@ -230,13 +230,7 @@ class PersistenceManager:
             year = day.year
             if year not in segments_by_year:
                 segments_by_year[year] = []
-            # Fill gaps between segments on the same day with idle segments
-            filled_segments = self.fill_gaps_with_idle(day_data.segments)
-            # Filter idle segments at the boundaries, then merge short idle gaps
-            # into surrounding active time so the CSV never stores idle segments
-            # shorter than the configured inactivity limit.
-            filtered_segments = self._filter_idle_boundary_segments(filled_segments)
-            optimized_segments = self.merge_segments_to_save(filtered_segments, idle_threshold)
+            optimized_segments = self.optimize_segments(day_data.segments, idle_threshold)
             for seg in optimized_segments:
                 if seg.start_time:
                     segments_by_year[year].append({
@@ -310,6 +304,26 @@ class PersistenceManager:
                 logger.error("Failed to write %s: %s", path, exc)
                 raise PersistenceWriteError(f"Could not write {path}: {exc}") from exc
 
+    def optimize_segments(
+        self, segments: List[TimeSegment], idle_threshold: int = 300
+    ) -> List[TimeSegment]:
+        """Normalize a day's segments into their final persisted form.
+
+        Composes the full pre-save pipeline in order:
+
+        1. Filter idle segments outside the active window (before the first
+           active start / after the last active end).
+        2. Fill any remaining internal gaps with idle segments.
+        3. Compact: merge same-state neighbours and absorb short idle gaps into
+           surrounding active time (FR-3.10).
+
+        Returns a new list of ``TimeSegment`` objects; the input list is never
+        mutated in place.
+        """
+        filtered = self._filter_idle_boundary_segments(segments)
+        filled = self.fill_gaps_with_idle(filtered)
+        return self.merge_segments_to_save(filled, idle_threshold)
+
     def _filter_idle_boundary_segments(self, segments: List[TimeSegment]) -> List[TimeSegment]:
         """Filter out idle segments before first active start and after last active end.
 
@@ -343,8 +357,12 @@ class PersistenceManager:
                 seg_start = seg.start_time
                 seg_end = seg.end_time
 
-                # Skip idle segments that end before first active starts
-                if seg_end and seg_end <= first_active:
+                # Skip idle segments that begin before the first active segment.
+                # This covers both idle that ends before activity begins
+                # (seg_end <= first_active) and corrupt idle that overlaps the
+                # first active start (seg_start < first_active), so no idle
+                # segment ever starts before the first active time.
+                if (seg_end and seg_end <= first_active) or (seg_start and seg_start < first_active):
                     continue
 
                 # Skip idle segments that start after the last active segment ended.
@@ -367,48 +385,73 @@ class PersistenceManager:
         is filled with an idle segment. This is useful for ensuring complete
         coverage of the day's time and making gaps visible in the data.
 
-        Only fills gaps between segments on the same day. Does not create
-        idle segments across day boundaries.
+        Rules:
+        * Only fills gaps between segments on the same day; gaps across day
+          boundaries are never filled.
+        * Never creates idle time before a day's first active segment (or when
+          a day has no active segment at all).
+        * A gap following an open (ongoing) segment is not filled, because its
+          end time is unknown.
+        * Overlapping/nested segments do not cause idle to be inserted into
+          time that is already covered.
 
         Returns a new list of ``TimeSegment`` objects; the input list is never
         mutated in place.
         """
-        if len(segments) <= 1:
-            return segments[:]
+        # Segments without a start time cannot be placed chronologically.
+        sorted_segments = sorted(
+            (seg for seg in segments if seg.start_time is not None),
+            key=lambda seg: seg.start_time,
+        )
+        if len(sorted_segments) <= 1:
+            return sorted_segments
 
-        # Sort segments by start time to ensure proper ordering
-        sorted_segments = sorted(segments, key=lambda s: s.start_time if s.start_time else datetime.min)
+        # Do not create idle time before the first active segment of each day.
+        first_active_by_day: Dict[date, datetime] = {}
+        for seg in sorted_segments:
+            if seg.state == "active":
+                day = seg.start_time.date()
+                first_active_by_day[day] = min(
+                    first_active_by_day.get(day, seg.start_time), seg.start_time
+                )
+
         result: List[TimeSegment] = []
+        current_day: Optional[date] = None
+        covered_until: Optional[datetime] = None
+        has_open_segment = False
 
-        for i, seg in enumerate(sorted_segments):
-            if not seg.start_time:
-                continue
+        for seg in sorted_segments:
+            seg_day = seg.start_time.date()
+            if seg_day != current_day:
+                current_day = seg_day
+                covered_until = None
+                has_open_segment = False
 
-            if i > 0 and result:
-                prev = result[-1]
-                if not prev.end_time:
-                    # Previous segment is ongoing, no gap to fill
-                    result.append(seg)
-                    continue
-
-                # Check if both segments are on the same day
-                prev_day = prev.start_time.date() if prev.start_time else None
-                seg_day = seg.start_time.date() if seg.start_time else None
-
-                if prev_day == seg_day and prev.end_time:
-                    # Same day - check if there's a gap
-                    gap_seconds = (seg.start_time - prev.end_time).total_seconds()
-
-                    if gap_seconds > 0:
-                        # There's a gap - fill it with an idle segment
-                        idle_seg = TimeSegment(
-                            state='idle',
-                            start_time=prev.end_time,
-                            end_time=seg.start_time
-                        )
-                        result.append(idle_seg)
+            first_active = first_active_by_day.get(seg_day)
+            if (
+                covered_until is not None
+                and not has_open_segment
+                and first_active is not None
+                and covered_until >= first_active
+                and seg.start_time > covered_until
+            ):
+                result.append(TimeSegment(
+                    state="idle",
+                    start_time=covered_until,
+                    end_time=seg.start_time,
+                ))
 
             result.append(seg)
+
+            if seg.end_time is None:
+                # An open segment has unknown coverage through the remainder of
+                # the day, so later starts cannot safely establish a gap.
+                has_open_segment = True
+            elif not has_open_segment:
+                # Track the union of prior intervals so nested/overlapping
+                # segments do not cause idle to be inserted into covered time.
+                effective_end = max(seg.start_time, seg.end_time)
+                covered_until = max(covered_until, effective_end) if covered_until else effective_end
 
         return result
 

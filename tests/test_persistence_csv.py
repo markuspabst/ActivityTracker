@@ -888,6 +888,27 @@ def test_filter_idle_boundary_segments_idle_after_last_active(pm, tmp_path):
     assert filtered[0].state == "active"
 
 
+def test_filter_idle_boundary_segments_drops_idle_overlapping_first_active(pm, tmp_path):
+    """Idle that overlaps the first active start must not survive (no idle
+    may start before the first active time)."""
+    d = Day(date=date(2026, 7, 1))
+    d.segments.append(TimeSegment(
+        state="idle",
+        start_time=datetime(2026, 7, 1, 8, 30, 0),
+        end_time=datetime(2026, 7, 1, 9, 30, 0),
+    ))
+    d.segments.append(TimeSegment(
+        state="active",
+        start_time=datetime(2026, 7, 1, 9, 0, 0),
+        end_time=datetime(2026, 7, 1, 10, 0, 0),
+    ))
+    filtered = pm._filter_idle_boundary_segments(d.segments)
+    # The overlapping idle (starts before 9:00, ends after) is dropped.
+    assert len(filtered) == 1
+    assert filtered[0].state == "active"
+    assert filtered[0].start_time == datetime(2026, 7, 1, 9, 0, 0)
+
+
 def test_filter_idle_boundary_segments_preserves_lunch_break_when_afternoon_active_is_ongoing(pm, tmp_path):
     """Lunch break between morning and ongoing afternoon session must be preserved."""
     d = Day(date=date(2026, 7, 1))
