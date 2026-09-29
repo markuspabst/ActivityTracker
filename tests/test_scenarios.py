@@ -58,7 +58,7 @@ def test_csv_format(pm, tmp_path):
     # Check header
     assert "date,state,start,end,duration_min,duration_seconds" in lines[0]
 
-    # Check content format
+    # Check content format (newest entry is written first)
     assert "2026-07-01" in lines[1]
     assert "09:00:00" in lines[1] and "10:00:00" in lines[1]  # HH:MM:SS format
     assert "active" in lines[1]

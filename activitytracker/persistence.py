@@ -341,7 +341,7 @@ class PersistenceManager:
             key = f"{seg['date']} {seg['start']}"
             existing_segments[key] = seg
 
-        sorted_keys = sorted(existing_segments.keys())
+        sorted_keys = sorted(existing_segments.keys(), reverse=True)
         try:
             with open(path, "w", newline="", encoding="utf-8") as f:
                 writer = csv.DictWriter(f, fieldnames=["date", "state", "start", "end", "duration_min", "duration_seconds"])

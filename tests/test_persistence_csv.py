@@ -111,6 +111,7 @@ def test_save_segments_writes_header_and_rows(pm, tmp_path):
     with open(path) as f:
         lines = f.readlines()
     assert lines[0].strip() == "date,state,start,end,duration_min,duration_seconds"
+    # Rows are written newest-first; with only one segment it is still at lines[1].
     assert "2026-07-01" in lines[1]
     assert "active" in lines[1]
     assert "09:00:00" in lines[1] and "10:00:00" in lines[1]
@@ -228,10 +229,32 @@ def test_save_segments_skips_rows_missing_date_or_start(pm, tmp_path):
 
     with open(pm.get_log_file_path("activities", 2026), newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
+    # Rows are written newest-first.
     assert [(row["date"], row["start"]) for row in rows] == [
-        ("2026-07-01", "09:00:00"),
         ("2026-07-01", "11:00:00"),
+        ("2026-07-01", "09:00:00"),
     ]
+
+
+def test_save_segments_writes_newest_rows_first(pm, tmp_path):
+    """Rows in the CSV are ordered newest-start-time first."""
+    day = Day(date=date(2026, 7, 1))
+    day.segments.append(TimeSegment(
+        state="active",
+        start_time=datetime(2026, 7, 1, 9, 0, 0),
+        end_time=datetime(2026, 7, 1, 10, 0, 0),
+    ))
+    day.segments.append(TimeSegment(
+        state="active",
+        start_time=datetime(2026, 7, 1, 11, 0, 0),
+        end_time=datetime(2026, 7, 1, 12, 0, 0),
+    ))
+    pm.save_segments({date(2026, 7, 1): day})
+
+    with open(pm.get_log_file_path("activities", 2026), newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    # Newest-first, including the filled idle gap between the two active segments.
+    assert [row["start"] for row in rows] == ["11:00:00", "10:00:00", "09:00:00"]
 
 
 def test_day_totals_skip_unknown_states_and_reject_negative_durations(pm, tmp_path):
