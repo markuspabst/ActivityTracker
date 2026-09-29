@@ -379,79 +379,48 @@ class PersistenceManager:
 
     @staticmethod
     def fill_gaps_with_idle(segments: List[TimeSegment]) -> List[TimeSegment]:
-        """Fill gaps between segments on the same day with idle segments.
+        """Fill internal, same-day gaps with idle segments.
 
-        This ensures that any time gap between two segments on the same day
-        is filled with an idle segment. This is useful for ensuring complete
-        coverage of the day's time and making gaps visible in the data.
-
-        Rules:
-        * Only fills gaps between segments on the same day; gaps across day
-          boundaries are never filled.
-        * Never creates idle time before a day's first active segment (or when
-          a day has no active segment at all).
-        * A gap following an open (ongoing) segment is not filled, because its
-          end time is unknown.
-        * Overlapping/nested segments do not cause idle to be inserted into
-          time that is already covered.
-
-        Returns a new list of ``TimeSegment`` objects; the input list is never
-        mutated in place.
+        Invalid-start segments are ignored. Leading idle, cross-day gaps,
+        overlaps, and gaps after an open segment are left unchanged.
         """
-        # Segments without a start time cannot be placed chronologically.
-        sorted_segments = sorted(
+        ordered = sorted(
             (seg for seg in segments if seg.start_time is not None),
             key=lambda seg: seg.start_time,
         )
-        if len(sorted_segments) <= 1:
-            return sorted_segments
+        if len(ordered) < 2:
+            return ordered
 
-        # Do not create idle time before the first active segment of each day.
-        first_active_by_day: Dict[date, datetime] = {}
-        for seg in sorted_segments:
+        first_active: Dict[date, datetime] = {}
+        for seg in ordered:
             if seg.state == "active":
                 day = seg.start_time.date()
-                first_active_by_day[day] = min(
-                    first_active_by_day.get(day, seg.start_time), seg.start_time
-                )
+                first_active[day] = min(first_active.get(day, seg.start_time), seg.start_time)
 
         result: List[TimeSegment] = []
-        current_day: Optional[date] = None
+        day: Optional[date] = None
         covered_until: Optional[datetime] = None
-        has_open_segment = False
+        open_segment = False
 
-        for seg in sorted_segments:
+        for seg in ordered:
             seg_day = seg.start_time.date()
-            if seg_day != current_day:
-                current_day = seg_day
-                covered_until = None
-                has_open_segment = False
+            if seg_day != day:
+                day, covered_until, open_segment = seg_day, None, False
 
-            first_active = first_active_by_day.get(seg_day)
             if (
                 covered_until is not None
-                and not has_open_segment
-                and first_active is not None
-                and covered_until >= first_active
+                and not open_segment
+                and covered_until >= first_active.get(seg_day, datetime.max)
                 and seg.start_time > covered_until
             ):
-                result.append(TimeSegment(
-                    state="idle",
-                    start_time=covered_until,
-                    end_time=seg.start_time,
-                ))
+                result.append(TimeSegment("idle", covered_until, seg.start_time))
 
             result.append(seg)
-
             if seg.end_time is None:
-                # An open segment has unknown coverage through the remainder of
-                # the day, so later starts cannot safely establish a gap.
-                has_open_segment = True
-            elif not has_open_segment:
-                # Track the union of prior intervals so nested/overlapping
-                # segments do not cause idle to be inserted into covered time.
-                effective_end = max(seg.start_time, seg.end_time)
-                covered_until = max(covered_until, effective_end) if covered_until else effective_end
+                open_segment = True
+            elif not open_segment:
+                end = max(seg.start_time, seg.end_time)
+                covered_until = max(covered_until, end) if covered_until else end
 
         return result
 
