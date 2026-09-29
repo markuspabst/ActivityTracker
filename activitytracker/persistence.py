@@ -384,7 +384,7 @@ class PersistenceManager:
             if not seg.start_time:
                 continue
 
-            if i > 0:
+            if i > 0 and result:
                 prev = result[-1]
                 if not prev.end_time:
                     # Previous segment is ongoing, no gap to fill

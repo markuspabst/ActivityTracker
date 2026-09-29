@@ -676,6 +676,45 @@ def test_fill_gaps_with_idle_empty_or_single(pm, temp_data_dir):
     assert len(filled) == 1
 
 
+def test_fill_gaps_with_idle_none_start_time(pm, temp_data_dir):
+    """Test handling of segments with None start_time."""
+    segments = [
+        TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=datetime(2026, 7, 1, 10, 0, 0)),
+        TimeSegment(state='idle', start_time=None, end_time=datetime(2026, 7, 1, 10, 30, 0)),  # None start_time
+    ]
+    
+    # Should not crash - None start_time segments are skipped
+    filled = PersistenceManager.fill_gaps_with_idle(segments)
+    
+    # Only the valid segment should remain
+    assert len(filled) == 1
+    assert filled[0].state == 'active'
+
+
+def test_fill_gaps_with_idle_gap_before_first_active(pm, temp_data_dir):
+    """Test that gaps before first active are filled but then filtered out."""
+    # Idle before first active, with gap between them
+    segments = [
+        TimeSegment(state='idle', start_time=datetime(2026, 7, 1, 8, 0, 0), end_time=datetime(2026, 7, 1, 8, 30, 0)),
+        TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=datetime(2026, 7, 1, 10, 0, 0)),
+    ]
+    
+    filled = PersistenceManager.fill_gaps_with_idle(segments)
+    
+    # Gap should be filled with idle (08:30-09:00)
+    assert len(filled) == 3
+    assert filled[1].state == 'idle'
+    assert filled[1].start_time == datetime(2026, 7, 1, 8, 30, 0)
+    assert filled[1].end_time == datetime(2026, 7, 1, 9, 0, 0)
+    
+    # After filtering, only active segments remain
+    filtered = pm._filter_idle_boundary_segments(filled)
+    assert len(filtered) == 1
+    assert filtered[0].state == 'active'
+    # First segment should start with the first active
+    assert filtered[0].start_time == datetime(2026, 7, 1, 9, 0, 0)
+
+
 def test_fill_gaps_with_idle_adjacent_idle_segments(pm, temp_data_dir):
     """Test that gaps between idle segments are filled."""
     segments = [
@@ -744,3 +783,24 @@ def test_fill_gaps_integration_with_save(pm, temp_data_dir):
     states = [seg.state for seg in loaded_segments]
     assert 'idle' in states, "Should have idle segment filling the gap"
     assert states == ['active', 'idle', 'active'], f"Expected ['active', 'idle', 'active'], got {states}"
+
+
+def test_fill_gaps_first_segment_is_always_active(pm, temp_data_dir):
+    """Test that after fill and filter, the first segment is always an active segment."""
+    from activitytracker.models import Day
+    
+    today = date(2026, 7, 15)
+    
+    # Test 1: Idle before active with gap
+    day_data = Day(date=today)
+    day_data.segments.append(TimeSegment(state='idle', start_time=datetime(2026, 7, 15, 8, 0, 0), end_time=datetime(2026, 7, 15, 8, 30, 0)))
+    day_data.segments.append(TimeSegment(state='active', start_time=datetime(2026, 7, 15, 9, 0, 0), end_time=datetime(2026, 7, 15, 10, 0, 0)))
+    
+    pm.save_segments({today: day_data})
+    
+    loaded_segments = pm.read_segments_for_day(today)
+    
+    # The first segment should be active (idle before first active is filtered)
+    assert len(loaded_segments) >= 1
+    assert loaded_segments[0].state == 'active'
+    assert loaded_segments[0].start_time == datetime(2026, 7, 15, 9, 0, 0)
