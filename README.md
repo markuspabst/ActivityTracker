@@ -33,6 +33,7 @@ A lightweight system tray application that tracks your active and idle time usin
 - [Quick Start](#quick-start) - Get up and running in minutes
 - [Configuration](#configuration) - Customize targets, thresholds, and behavior
 - [Testing](#testing) - Run the test suite
+- [Development Guide](#development-guide) - Coding standards and agent instructions
 
 ## Architecture
 
@@ -138,7 +139,7 @@ The application version is managed directly in `pyproject.toml`:
 
 ```toml
 [project]
-version = "1.0.4"
+version = "2.0.0"
 ```
 
 The version is incremented automatically when creating a release.
@@ -203,6 +204,12 @@ pytest tests/test_scenarios.py -v     # Integration scenarios
 ruff check activitytracker tests
 mypy activitytracker
 ```
+
+## Development Guide
+
+See [`AGENTS.md`](AGENTS.md) for the project's coding standards, architecture
+decisions, and contribution workflow. It covers style rules, error-handling
+practices, testing expectations, and the definition of done.
 
 ### Component Overview
 
