@@ -261,14 +261,16 @@ class SessionTracker:
             idle_threshold = getattr(
                 self, "idle_threshold", DEFAULT_IDLE_THRESHOLD_SECONDS
             )
+            save_succeeded = False
             try:
                 self.pm.save_segments(self.days, idle_threshold=idle_threshold)
-            except Exception:
-                # Persistence may fail after temporarily finalizing open segments.
-                # Restore their live state so subsequent ticks keep advancing them.
-                for seg in open_segments:
-                    seg.end_time = None
-                raise
+                save_succeeded = True
+            finally:
+                if not save_succeeded:
+                    # Persistence failed after temporarily finalizing open segments.
+                    # Restore their live state so subsequent ticks keep advancing them.
+                    for seg in open_segments:
+                        seg.end_time = None
             # Persist the last successful write time so an orphaned open segment
             # from an abnormal shutdown can be finalized to a known timestamp (FR-2.6).
             self.pm.save_last_segment_write(now)

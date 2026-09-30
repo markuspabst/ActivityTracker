@@ -5,6 +5,7 @@ macOS platform implementation for ActivityTracker.
 from __future__ import annotations
 
 import functools
+import logging
 import math
 import os
 import plistlib
@@ -15,6 +16,8 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from activitytracker.platform_layer import DEFAULT_SLIDER_MAX_VALUE, PlatformABC
+
+logger = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------------
@@ -163,6 +166,9 @@ except ImportError:
 _NS_ALERT_FIRST_BUTTON_RETURN = 1000
 _NS_MODAL_RESPONSE_OK = 1
 
+# Exceptions raised by pyobjc/framework calls we want to treat as fallbacks.
+_PLATFORM_API_ERRORS = (ValueError, RuntimeError, OSError)
+
 
 class MacOSPlatform(PlatformABC):
     _idle_cache: dict = {"time": 0.0, "value": None}
@@ -180,9 +186,8 @@ class MacOSPlatform(PlatformABC):
             session_info = Quartz.CGSessionCopyCurrentDictionary()
             if session_info:
                 return session_info.get("CGSSessionScreenIsLocked", False)
-        except Exception:
-            # Fallback if Quartz is not available or fails
-            pass
+        except _PLATFORM_API_ERRORS:
+            logger.debug("Quartz screen-lock check failed", exc_info=True)
         return False
 
     def get_idle_time(self) -> Optional[float]:
@@ -200,8 +205,8 @@ class MacOSPlatform(PlatformABC):
                 candidate = float(candidate)
                 if math.isfinite(candidate) and candidate >= 0:
                     value = candidate
-            except Exception:
-                pass
+            except _PLATFORM_API_ERRORS:
+                logger.debug("Quartz idle-time query failed", exc_info=True)
 
         if value is None:
             try:
@@ -214,8 +219,8 @@ class MacOSPlatform(PlatformABC):
                         if math.isfinite(candidate) and candidate >= 0:
                             value = candidate
                         break
-            except Exception:
-                pass
+            except (subprocess.SubprocessError, OSError):
+                logger.debug("ioreg idle-time fallback failed", exc_info=True)
 
         self._idle_cache.update(time=now, value=value)
         return value
@@ -239,7 +244,8 @@ class MacOSPlatform(PlatformABC):
                 return None
             with open(plist_path, "rb") as f:
                 return plistlib.load(f)
-        except Exception:
+        except (OSError, plistlib.InvalidFileException, ValueError):
+            logger.debug("Could not read bundle Info.plist", exc_info=True)
             return None
 
     @functools.lru_cache(maxsize=1)
@@ -268,8 +274,8 @@ class MacOSPlatform(PlatformABC):
             return
         try:
             NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
-        except Exception:
-            pass
+        except _PLATFORM_API_ERRORS:
+            logger.debug("Could not activate app", exc_info=True)
 
     def ask_slider_dialog(
         self,
@@ -337,7 +343,8 @@ class MacOSPlatform(PlatformABC):
             if response == _NS_ALERT_FIRST_BUTTON_RETURN:
                 return max(min(slider.doubleValue(), max_value), min_value)
             return None
-        except Exception:
+        except _PLATFORM_API_ERRORS:
+            logger.debug("Native slider dialog failed", exc_info=True)
             return None
 
     def _ask_slider_osascript(self, title, current, min_value, max_value):
@@ -392,7 +399,8 @@ class MacOSPlatform(PlatformABC):
             if panel.runModal() == _NS_MODAL_RESPONSE_OK:
                 return str(panel.URLs()[0].path()) if panel.URLs() else None
             return None
-        except Exception:
+        except _PLATFORM_API_ERRORS:
+            logger.debug("Native folder dialog failed", exc_info=True)
             return None
 
     def _choose_folder_osascript(self, prompt: str = "") -> Optional[str]:
@@ -404,8 +412,8 @@ class MacOSPlatform(PlatformABC):
                 capture_output=True,
                 check=False,
             )
-        except Exception:
-            pass
+        except (subprocess.SubprocessError, OSError):
+            logger.debug("osascript activation failed", exc_info=True)
         try:
             script = "set f to choose folder"
             if prompt:
@@ -418,7 +426,8 @@ class MacOSPlatform(PlatformABC):
                 check=False,
             )
             return r.stdout.strip() if r.returncode == 0 else None
-        except Exception:
+        except (subprocess.SubprocessError, OSError):
+            logger.debug("osascript folder dialog failed", exc_info=True)
             return None
 
     # ── Autostart (launchd) ─────────────────────────────────
@@ -517,8 +526,8 @@ class MacOSPlatform(PlatformABC):
                 text=True,
                 check=False,
             )
-        except Exception:
-            pass
+        except (subprocess.SubprocessError, OSError):
+            logger.debug("osascript alert failed", exc_info=True)
 
     def open_file_manager(self, path: str) -> None:
         subprocess.run(["open", path])
@@ -587,8 +596,8 @@ class MacOSPlatform(PlatformABC):
                 lang = str(langs[0]).split("-", maxsplit=1)[0]
                 if lang and lang.lower() != "c":
                     return lang
-        except Exception:
-            pass
+        except _PLATFORM_API_ERRORS:
+            logger.debug("Could not read system locale", exc_info=True)
         return None
 
     def locale_display_name(self, code: str) -> Optional[str]:
@@ -599,6 +608,6 @@ class MacOSPlatform(PlatformABC):
             name = loc.displayNameForKey_value_(NSLocaleIdentifier, code)
             if name:
                 return name[:1].upper() + name[1:]
-        except Exception:
-            pass
+        except _PLATFORM_API_ERRORS:
+            logger.debug("Could not resolve locale display name", exc_info=True)
         return None
