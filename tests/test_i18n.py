@@ -1,6 +1,5 @@
 """Tests for the internationalization layer (i18n.py)."""
 
-import os
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -90,6 +89,7 @@ def test_get_system_locale_default_when_unset(monkeypatch):
         monkeypatch.delenv(var, raising=False)
     # With no env vars, no stdlib locale, and a fallback platform -> 'en'
     import locale as _locale
+
     monkeypatch.setattr(_locale, "getdefaultlocale", lambda: (None, None))
     monkeypatch.setattr(_locale, "getlocale", lambda: (None, None))
     with patch.object(i18n, "get_platform") as mock_get:
@@ -110,6 +110,7 @@ def test_get_system_locale_via_platform(monkeypatch):
     for var in ("LC_ALL", "LANGUAGE", "LANG"):
         monkeypatch.delenv(var, raising=False)
     import locale as _locale
+
     monkeypatch.setattr(_locale, "getdefaultlocale", lambda: (None, None))
     monkeypatch.setattr(_locale, "getlocale", lambda: (None, None))
 

@@ -1,4 +1,3 @@
-
 import atexit
 import os
 import platformdirs
@@ -9,15 +8,17 @@ try:
 except ImportError:
     # This will cause the lock to be a no-op on non-Unix platforms,
     # which is acceptable for development on other systems.
-    fcntl = None
+    fcntl = None  # type: ignore[assignment]
 
 APP_NAME = "ActivityTracker"
 LOCK_FILE_NAME = "activity_tracker.lock"
+
 
 class SingleInstanceLock:
     """
     Enforces that only one instance of the application can be running at a time.
     """
+
     def __init__(self):
         if not fcntl:
             return
@@ -31,10 +32,10 @@ class SingleInstanceLock:
         Acquires the lock. Returns True if successful, False otherwise.
         """
         if not fcntl:
-            return True # Always succeed if fcntl is not available
+            return True  # Always succeed if fcntl is not available
 
         try:
-            self.fp = open(self.lockfile_path, 'w', encoding="utf-8")
+            self.fp = open(self.lockfile_path, "w", encoding="utf-8")
             # Try to acquire an exclusive, non-blocking lock.
             fcntl.flock(self.fp.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
 

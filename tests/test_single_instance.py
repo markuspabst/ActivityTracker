@@ -10,8 +10,9 @@ from activitytracker.single_instance import SingleInstanceLock
 def isolate_runtime(tmp_path, monkeypatch):
     # Redirect the runtime dir so we don't collide with a real running instance
     # (the production lock lives in the user's runtime dir and may be held).
-    monkeypatch.setattr(single_instance.platformdirs, "user_runtime_dir",
-                        lambda *a, **k: str(tmp_path))
+    monkeypatch.setattr(
+        single_instance.platformdirs, "user_runtime_dir", lambda *a, **k: str(tmp_path)
+    )
     yield
 
 

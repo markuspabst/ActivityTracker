@@ -8,7 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from activitytracker.persistence import PersistenceManager, _read_existing_rows, _drop_contained_rows
+from activitytracker.persistence import (
+    PersistenceManager,
+    _read_existing_rows,
+    _drop_contained_rows,
+)
 from activitytracker.models import TimeSegment, Day
 
 
@@ -31,6 +35,7 @@ def _write_raw(pm, year, header, rows):
 # ------------------------------------------------------------
 # Path handling
 # ------------------------------------------------------------
+
 
 def test_get_log_file_path_format(pm, tmp_path):
     p = pm.get_log_file_path("activities", 2026)
@@ -76,9 +81,32 @@ def test_get_data_dir(pm, tmp_path):
     assert pm.get_data_dir() == str(tmp_path)
 
 
+def test_save_segments_uses_default_idle_threshold(pm, tmp_path):
+    """When idle_threshold is omitted, the default constant is used."""
+    d = Day(date=date(2026, 7, 1))
+    d.segments.append(TimeSegment(
+        state="active",
+        start_time=datetime(2026, 7, 1, 9, 0, 0),
+        end_time=datetime(2026, 7, 1, 9, 30, 0),
+    ))
+    d.segments.append(TimeSegment(
+        state="active",
+        start_time=datetime(2026, 7, 1, 9, 31, 0),
+        end_time=datetime(2026, 7, 1, 10, 0, 0),
+    ))
+    # Save without passing idle_threshold explicitly.
+    pm.save_segments({date(2026, 7, 1): d})
+
+    # 1-minute gap is below DEFAULT_IDLE_THRESHOLD_SECONDS (300), so merge to one row.
+    segs = pm.read_segments_for_day(date(2026, 7, 1))
+    assert len(segs) == 1
+    assert segs[0].end_time == datetime(2026, 7, 1, 10, 0, 0)
+
+
 # ------------------------------------------------------------
 # Saving
 # ------------------------------------------------------------
+
 
 def test_save_segments_empty_is_noop(pm, tmp_path):
     pm.save_segments({})
@@ -100,11 +128,13 @@ def test_save_segments_skips_segments_without_start_time(pm, tmp_path):
 
 def test_save_segments_writes_header_and_rows(pm, tmp_path):
     d = Day(date=date(2026, 7, 1))
-    d.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 10, 0, 0),
-    ))
+    d.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 10, 0, 0),
+        )
+    )
     pm.save_segments({date(2026, 7, 1): d})
 
     path = pm.get_log_file_path("activities", 2026)
@@ -115,23 +145,27 @@ def test_save_segments_writes_header_and_rows(pm, tmp_path):
     assert "2026-07-01" in lines[1]
     assert "active" in lines[1]
     assert "09:00:00" in lines[1] and "10:00:00" in lines[1]
-    assert "60" in lines[1]      # duration_min
-    assert "3600" in lines[1]    # duration_seconds
+    assert "60" in lines[1]  # duration_min
+    assert "3600" in lines[1]  # duration_seconds
 
 
 def test_save_segments_splits_by_year(pm, tmp_path):
     d1 = Day(date=date(2026, 12, 31))
-    d1.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 12, 31, 23, 0, 0),
-        end_time=datetime(2026, 12, 31, 23, 30, 0),
-    ))
+    d1.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 12, 31, 23, 0, 0),
+            end_time=datetime(2026, 12, 31, 23, 30, 0),
+        )
+    )
     d2 = Day(date=date(2027, 1, 1))
-    d2.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2027, 1, 1, 0, 0, 0),
-        end_time=datetime(2027, 1, 1, 0, 30, 0),
-    ))
+    d2.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2027, 1, 1, 0, 0, 0),
+            end_time=datetime(2027, 1, 1, 0, 30, 0),
+        )
+    )
     pm.save_segments({date(2026, 12, 31): d1, date(2027, 1, 1): d2})
     assert os.path.exists(pm.get_log_file_path("activities", 2026))
     assert os.path.exists(pm.get_log_file_path("activities", 2027))
@@ -140,11 +174,13 @@ def test_save_segments_splits_by_year(pm, tmp_path):
 def test_save_segments_is_idempotent_and_merges(pm, tmp_path):
     """Re-saving the same day must not duplicate rows (keyed by date+start)."""
     d = Day(date=date(2026, 7, 1))
-    d.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 9, 30, 0),
-    ))
+    d.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 9, 30, 0),
+        )
+    )
     pm.save_segments({date(2026, 7, 1): d})
     # Save again with the same single segment
     pm.save_segments({date(2026, 7, 1): d})
@@ -155,20 +191,24 @@ def test_save_segments_is_idempotent_and_merges(pm, tmp_path):
 
 def test_save_segments_preserves_existing_and_adds_new(pm, tmp_path):
     d1 = Day(date=date(2026, 7, 1))
-    d1.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 9, 30, 0),
-    ))
+    d1.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 9, 30, 0),
+        )
+    )
     pm.save_segments({date(2026, 7, 1): d1})
 
     # Idle segment after active ends should be filtered out
     d2 = Day(date=date(2026, 7, 1))
-    d2.segments.append(TimeSegment(
-        state="idle",
-        start_time=datetime(2026, 7, 1, 10, 0, 0),
-        end_time=datetime(2026, 7, 1, 10, 15, 0),
-    ))
+    d2.segments.append(
+        TimeSegment(
+            state="idle",
+            start_time=datetime(2026, 7, 1, 10, 0, 0),
+            end_time=datetime(2026, 7, 1, 10, 15, 0),
+        )
+    )
     pm.save_segments({date(2026, 7, 1): d2})
 
     segs = pm.read_segments_for_day(date(2026, 7, 1))
@@ -185,17 +225,22 @@ def test_save_segments_legacy_migration_adds_duration_seconds(pm, tmp_path):
     path that performs the migration.
     """
     _write_raw(
-        pm, 2026,
+        pm,
+        2026,
         ["date", "state", "start", "end", "duration_min"],
-        [["2026-07-01", "active", "09:00:00", "10:00:00", "60"]],  # legacy, no duration_seconds
+        [
+            ["2026-07-01", "active", "09:00:00", "10:00:00", "60"]
+        ],  # legacy, no duration_seconds
     )
     # Save a separate segment for the same year so the merge path runs
     d = Day(date=date(2026, 7, 1))
-    d.segments.append(TimeSegment(
-        state="idle",
-        start_time=datetime(2026, 7, 1, 8, 0, 0),   # different key -> preserved
-        end_time=datetime(2026, 7, 1, 8, 15, 0),
-    ))
+    d.segments.append(
+        TimeSegment(
+            state="idle",
+            start_time=datetime(2026, 7, 1, 8, 0, 0),  # different key -> preserved
+            end_time=datetime(2026, 7, 1, 8, 15, 0),
+        )
+    )
     pm.save_segments({date(2026, 7, 1): d})
 
     path = pm.get_log_file_path("activities", 2026)
@@ -210,7 +255,8 @@ def test_save_segments_legacy_migration_adds_duration_seconds(pm, tmp_path):
 def test_save_segments_skips_rows_missing_date_or_start(pm, tmp_path):
     """Malformed existing rows must not abort saves or discard valid rows."""
     _write_raw(
-        pm, 2026,
+        pm,
+        2026,
         ["date", "state", "start", "end", "duration_min", "duration_seconds"],
         [
             ["2026-07-01", "active"],  # truncated: missing start and later fields
@@ -220,14 +266,18 @@ def test_save_segments_skips_rows_missing_date_or_start(pm, tmp_path):
     )
 
     day = Day(date=date(2026, 7, 1))
-    day.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 11, 0, 0),
-        end_time=datetime(2026, 7, 1, 12, 0, 0),
-    ))
+    day.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 11, 0, 0),
+            end_time=datetime(2026, 7, 1, 12, 0, 0),
+        )
+    )
     pm.save_segments({date(2026, 7, 1): day})
 
-    with open(pm.get_log_file_path("activities", 2026), newline="", encoding="utf-8") as f:
+    with open(
+        pm.get_log_file_path("activities", 2026), newline="", encoding="utf-8"
+    ) as f:
         rows = list(csv.DictReader(f))
     # Rows are written newest-first.
     assert [(row["date"], row["start"]) for row in rows] == [
@@ -239,19 +289,25 @@ def test_save_segments_skips_rows_missing_date_or_start(pm, tmp_path):
 def test_save_segments_writes_newest_rows_first(pm, tmp_path):
     """Rows in the CSV are ordered newest-start-time first."""
     day = Day(date=date(2026, 7, 1))
-    day.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 10, 0, 0),
-    ))
-    day.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 11, 0, 0),
-        end_time=datetime(2026, 7, 1, 12, 0, 0),
-    ))
+    day.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 10, 0, 0),
+        )
+    )
+    day.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 11, 0, 0),
+            end_time=datetime(2026, 7, 1, 12, 0, 0),
+        )
+    )
     pm.save_segments({date(2026, 7, 1): day})
 
-    with open(pm.get_log_file_path("activities", 2026), newline="", encoding="utf-8") as f:
+    with open(
+        pm.get_log_file_path("activities", 2026), newline="", encoding="utf-8"
+    ) as f:
         rows = list(csv.DictReader(f))
     # Newest-first, including the filled idle gap between the two active segments.
     assert [row["start"] for row in rows] == ["11:00:00", "10:00:00", "09:00:00"]
@@ -260,20 +316,26 @@ def test_save_segments_writes_newest_rows_first(pm, tmp_path):
 def test_save_segments_writes_multiple_days_newest_first(pm, tmp_path):
     """When segments span multiple days, newest date+time appears first."""
     day1 = Day(date=date(2026, 7, 1))
-    day1.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 10, 0, 0),
-    ))
+    day1.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 10, 0, 0),
+        )
+    )
     day2 = Day(date=date(2026, 7, 2))
-    day2.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 2, 11, 0, 0),
-        end_time=datetime(2026, 7, 2, 12, 0, 0),
-    ))
+    day2.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 2, 11, 0, 0),
+            end_time=datetime(2026, 7, 2, 12, 0, 0),
+        )
+    )
     pm.save_segments({date(2026, 7, 1): day1, date(2026, 7, 2): day2})
 
-    with open(pm.get_log_file_path("activities", 2026), newline="", encoding="utf-8") as f:
+    with open(
+        pm.get_log_file_path("activities", 2026), newline="", encoding="utf-8"
+    ) as f:
         rows = list(csv.DictReader(f))
 
     assert [(row["date"], row["start"]) for row in rows] == [
@@ -284,7 +346,8 @@ def test_save_segments_writes_multiple_days_newest_first(pm, tmp_path):
 
 def test_day_totals_skip_unknown_states_and_reject_negative_durations(pm, tmp_path):
     _write_raw(
-        pm, 2026,
+        pm,
+        2026,
         ["date", "state", "start", "end", "duration_min", "duration_seconds"],
         [
             ["2026-07-01", "active", "09:00:00", "09:05:00", "5", "-3600"],
@@ -295,29 +358,41 @@ def test_day_totals_skip_unknown_states_and_reject_negative_durations(pm, tmp_pa
     )
 
     assert pm.get_minutes_for_date(date(2026, 7, 1)) == (7, 0)
-    assert [segment.state for segment in pm.read_segments_for_day(date(2026, 7, 1))] == [
-        "active", "idle", "active",
+    assert [
+        segment.state for segment in pm.read_segments_for_day(date(2026, 7, 1))
+    ] == [
+        "active",
+        "idle",
+        "active",
     ]
 
 
 def test_save_segments_drops_existing_unknown_state_rows(pm, tmp_path):
     _write_raw(
-        pm, 2026,
+        pm,
+        2026,
         ["date", "state", "start", "end", "duration_min", "duration_seconds"],
         [
             ["2026-07-01", "unknown", "08:00:00", "09:00:00", "60", "3600"],
             ["2026-07-01", "active", "09:00:00", "10:00:00", "60", "3600"],
         ],
     )
-    day = Day(date(2026, 7, 1), [TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 11, 0, 0),
-        end_time=datetime(2026, 7, 1, 12, 0, 0),
-    )])
+    day = Day(
+        date(2026, 7, 1),
+        [
+            TimeSegment(
+                state="active",
+                start_time=datetime(2026, 7, 1, 11, 0, 0),
+                end_time=datetime(2026, 7, 1, 12, 0, 0),
+            )
+        ],
+    )
 
     pm.save_segments({date(2026, 7, 1): day})
 
-    with open(pm.get_log_file_path("activities", 2026), newline="", encoding="utf-8") as f:
+    with open(
+        pm.get_log_file_path("activities", 2026), newline="", encoding="utf-8"
+    ) as f:
         rows = list(csv.DictReader(f))
     assert [row["state"] for row in rows] == ["active", "active"]
 
@@ -326,11 +401,16 @@ def test_save_segments_serializes_csv_transactions(pm):
     started = threading.Event()
     finished = threading.Event()
     day_date = date(2026, 7, 1)
-    day = Day(day_date, [TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 10, 0, 0),
-    )])
+    day = Day(
+        day_date,
+        [
+            TimeSegment(
+                state="active",
+                start_time=datetime(2026, 7, 1, 9, 0, 0),
+                end_time=datetime(2026, 7, 1, 10, 0, 0),
+            )
+        ],
+    )
 
     def save():
         started.set()
@@ -352,19 +432,24 @@ def test_save_segments_serializes_csv_transactions(pm):
 # Reading
 # ------------------------------------------------------------
 
+
 def test_read_segments_for_day_roundtrip(pm, tmp_path):
     d = Day(date=date(2026, 7, 1))
-    d.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 10, 0, 0),
-    ))
+    d.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 10, 0, 0),
+        )
+    )
     # Idle segment after active ends should be filtered out
-    d.segments.append(TimeSegment(
-        state="idle",
-        start_time=datetime(2026, 7, 1, 10, 0, 0),
-        end_time=datetime(2026, 7, 1, 10, 30, 0),
-    ))
+    d.segments.append(
+        TimeSegment(
+            state="idle",
+            start_time=datetime(2026, 7, 1, 10, 0, 0),
+            end_time=datetime(2026, 7, 1, 10, 30, 0),
+        )
+    )
     pm.save_segments({date(2026, 7, 1): d})
 
     segs = pm.read_segments_for_day(date(2026, 7, 1))
@@ -377,11 +462,16 @@ def test_read_segments_for_day_roundtrip(pm, tmp_path):
 
 def test_read_segments_roundtrips_exclusive_midnight_end(pm, tmp_path):
     day_date = date(2026, 7, 1)
-    day = Day(day_date, [TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 23, 59, 58),
-        end_time=datetime(2026, 7, 2, 0, 0, 0),
-    )])
+    day = Day(
+        day_date,
+        [
+            TimeSegment(
+                state="active",
+                start_time=datetime(2026, 7, 1, 23, 59, 58),
+                end_time=datetime(2026, 7, 2, 0, 0, 0),
+            )
+        ],
+    )
     pm.save_segments({day_date: day})
 
     segments = pm.read_segments_for_day(day_date)
@@ -389,7 +479,9 @@ def test_read_segments_roundtrips_exclusive_midnight_end(pm, tmp_path):
     assert segments[0].end_time == datetime(2026, 7, 2, 0, 0, 0)
     assert segments[0].duration_seconds == 2
 
-    with open(pm.get_log_file_path("activities", day_date.year), newline="", encoding="utf-8") as f:
+    with open(
+        pm.get_log_file_path("activities", day_date.year), newline="", encoding="utf-8"
+    ) as f:
         row = next(csv.DictReader(f))
     assert row["end"] == "00:00:00"
     assert row["duration_seconds"] == "2"
@@ -397,11 +489,13 @@ def test_read_segments_roundtrips_exclusive_midnight_end(pm, tmp_path):
 
 def test_read_segments_ongoing_has_no_end_time(pm, tmp_path):
     d = Day(date=date(2026, 7, 1))
-    d.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=None,
-    ))
+    d.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=None,
+        )
+    )
     pm.save_segments({date(2026, 7, 1): d})
 
     segs = pm.read_segments_for_day(date(2026, 7, 1))
@@ -416,10 +510,11 @@ def test_read_segments_missing_file_returns_empty(pm, tmp_path):
 
 def test_read_segments_skips_malformed_rows(pm, tmp_path):
     _write_raw(
-        pm, 2026,
+        pm,
+        2026,
         ["date", "state", "start", "end", "duration_min", "duration_seconds"],
         [
-            ["2026-07-01", "active", "badtime", "", "0", "0"],   # malformed start
+            ["2026-07-01", "active", "badtime", "", "0", "0"],  # malformed start
             ["2026-07-01", "active", "09:00:00", "10:00:00", "60", "3600"],  # valid
         ],
     )
@@ -430,17 +525,21 @@ def test_read_segments_skips_malformed_rows(pm, tmp_path):
 
 def test_read_segments_only_target_day(pm, tmp_path):
     d1 = Day(date=date(2026, 7, 1))
-    d1.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 9, 30, 0),
-    ))
+    d1.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 9, 30, 0),
+        )
+    )
     d2 = Day(date=date(2026, 7, 2))
-    d2.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 2, 9, 0, 0),
-        end_time=datetime(2026, 7, 2, 9, 30, 0),
-    ))
+    d2.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 2, 9, 0, 0),
+            end_time=datetime(2026, 7, 2, 9, 30, 0),
+        )
+    )
     pm.save_segments({date(2026, 7, 1): d1, date(2026, 7, 2): d2})
 
     segs = pm.read_segments_for_day(date(2026, 7, 1))
@@ -459,23 +558,28 @@ def test_read_segments_for_day_path_is_a_directory(pm, tmp_path):
 # get_minutes_for_date
 # ------------------------------------------------------------
 
+
 def test_get_minutes_for_date_missing_file(pm, tmp_path):
     assert pm.get_minutes_for_date(date(2026, 1, 1)) == (0, 0)
 
 
 def test_get_minutes_for_date_filters_by_state(pm, tmp_path):
     d = Day(date=date(2026, 7, 1))
-    d.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 9, 30, 0),
-    ))
+    d.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 9, 30, 0),
+        )
+    )
     # Idle segment after active ends should be filtered out
-    d.segments.append(TimeSegment(
-        state="idle",
-        start_time=datetime(2026, 7, 1, 10, 0, 0),
-        end_time=datetime(2026, 7, 1, 10, 15, 0),
-    ))
+    d.segments.append(
+        TimeSegment(
+            state="idle",
+            start_time=datetime(2026, 7, 1, 10, 0, 0),
+            end_time=datetime(2026, 7, 1, 10, 15, 0),
+        )
+    )
     pm.save_segments({date(2026, 7, 1): d})
     active, idle = pm.get_minutes_for_date(date(2026, 7, 1))
     # Only active time is logged; idle after active is filtered
@@ -489,7 +593,8 @@ def test_get_minutes_for_date_bad_duration_is_ignored(pm, tmp_path):
     even when duration_seconds is corrupt.
     """
     _write_raw(
-        pm, 2026,
+        pm,
+        2026,
         ["date", "state", "start", "end", "duration_min", "duration_seconds"],
         [["2026-07-01", "active", "09:00:00", "10:00:00", "60", "notanint"]],
     )
@@ -501,6 +606,7 @@ def test_get_minutes_for_date_bad_duration_is_ignored(pm, tmp_path):
 # get_weekly_minutes
 # ------------------------------------------------------------
 
+
 def test_get_weekly_minutes_missing_file(pm, tmp_path):
     week_start = date(2026, 7, 6)
     assert pm.get_weekly_minutes(week_start) == (0, 0)
@@ -508,17 +614,21 @@ def test_get_weekly_minutes_missing_file(pm, tmp_path):
 
 def test_get_weekly_minutes_aggregates_week(pm, tmp_path):
     d = Day(date=date(2026, 7, 1))
-    d.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 10, 0, 0),
-    ))
+    d.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 10, 0, 0),
+        )
+    )
     # Idle segment after active ends should be filtered out
-    d.segments.append(TimeSegment(
-        state="idle",
-        start_time=datetime(2026, 7, 1, 10, 0, 0),
-        end_time=datetime(2026, 7, 1, 10, 30, 0),
-    ))
+    d.segments.append(
+        TimeSegment(
+            state="idle",
+            start_time=datetime(2026, 7, 1, 10, 0, 0),
+            end_time=datetime(2026, 7, 1, 10, 30, 0),
+        )
+    )
     pm.save_segments({date(2026, 7, 1): d})
 
     week_start = date(2026, 7, 1) - timedelta(days=date(2026, 7, 1).weekday())
@@ -532,18 +642,22 @@ def test_get_weekly_minutes_only_in_range(pm, tmp_path):
     """Segments outside the week window must be excluded."""
     # In-range day
     d_in = Day(date=date(2026, 7, 1))
-    d_in.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 10, 0, 0),
-    ))
+    d_in.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 10, 0, 0),
+        )
+    )
     # Out-of-range day (different week)
     d_out = Day(date=date(2026, 7, 15))
-    d_out.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 15, 9, 0, 0),
-        end_time=datetime(2026, 7, 15, 10, 0, 0),
-    ))
+    d_out.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 15, 9, 0, 0),
+            end_time=datetime(2026, 7, 15, 10, 0, 0),
+        )
+    )
     pm.save_segments({date(2026, 7, 1): d_in, date(2026, 7, 15): d_out})
 
     week_start = date(2026, 7, 1) - timedelta(days=date(2026, 7, 1).weekday())
@@ -553,17 +667,21 @@ def test_get_weekly_minutes_only_in_range(pm, tmp_path):
 
 def test_get_weekly_minutes_spans_year_boundary(pm, tmp_path):
     d_dec = Day(date=date(2026, 12, 28))  # Monday, start of a cross-year week
-    d_dec.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 12, 28, 9, 0, 0),
-        end_time=datetime(2026, 12, 28, 10, 0, 0),
-    ))
+    d_dec.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 12, 28, 9, 0, 0),
+            end_time=datetime(2026, 12, 28, 10, 0, 0),
+        )
+    )
     d_jan = Day(date=date(2027, 1, 1))
-    d_jan.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2027, 1, 1, 9, 0, 0),
-        end_time=datetime(2027, 1, 1, 9, 30, 0),
-    ))
+    d_jan.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2027, 1, 1, 9, 0, 0),
+            end_time=datetime(2027, 1, 1, 9, 30, 0),
+        )
+    )
     pm.save_segments({date(2026, 12, 28): d_dec, date(2027, 1, 1): d_jan})
 
     week_start = date(2026, 12, 28)
@@ -573,7 +691,8 @@ def test_get_weekly_minutes_spans_year_boundary(pm, tmp_path):
 
 def test_get_weekly_minutes_bad_duration_is_ignored(pm, tmp_path):
     _write_raw(
-        pm, 2026,
+        pm,
+        2026,
         ["date", "state", "start", "end", "duration_min", "duration_seconds"],
         [["2026-07-01", "active", "09:00:00", "10:00:00", "60", "notanint"]],
     )
@@ -588,19 +707,24 @@ def test_get_weekly_minutes_bad_duration_is_ignored(pm, tmp_path):
 # separate daily-summary file anymore.
 # ------------------------------------------------------------
 
+
 def test_get_minutes_for_date_derives_from_activities_log(pm, tmp_path):
     d = Day(date=date(2026, 7, 1))
-    d.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 10, 0, 0),
-    ))
+    d.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 10, 0, 0),
+        )
+    )
     # Idle segment after active ends should be filtered out
-    d.segments.append(TimeSegment(
-        state="idle",
-        start_time=datetime(2026, 7, 1, 10, 0, 0),
-        end_time=datetime(2026, 7, 1, 10, 15, 0),
-    ))
+    d.segments.append(
+        TimeSegment(
+            state="idle",
+            start_time=datetime(2026, 7, 1, 10, 0, 0),
+            end_time=datetime(2026, 7, 1, 10, 15, 0),
+        )
+    )
     pm.save_segments({date(2026, 7, 1): d})
 
     active, idle = pm.get_minutes_for_date(date(2026, 7, 1))
@@ -614,17 +738,21 @@ def test_get_minutes_for_date_derives_from_activities_log(pm, tmp_path):
 
 def test_get_minutes_for_date_rounds_like_duration_minutes(pm, tmp_path):
     d = Day(date=date(2026, 7, 1))
-    d.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 9, 0, 59),  # 59s -> 1 minute (rounded)
-    ))
+    d.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 9, 0, 59),  # 59s -> 1 minute (rounded)
+        )
+    )
     # Idle after active - should be filtered
-    d.segments.append(TimeSegment(
-        state="idle",
-        start_time=datetime(2026, 7, 1, 9, 1, 0),
-        end_time=datetime(2026, 7, 1, 9, 1, 30),  # 30s -> 1 minute (0.5 rounds up)
-    ))
+    d.segments.append(
+        TimeSegment(
+            state="idle",
+            start_time=datetime(2026, 7, 1, 9, 1, 0),
+            end_time=datetime(2026, 7, 1, 9, 1, 30),  # 30s -> 1 minute (0.5 rounds up)
+        )
+    )
     pm.save_segments({date(2026, 7, 1): d})
 
     active, idle = pm.get_minutes_for_date(date(2026, 7, 1))
@@ -635,10 +763,18 @@ def test_get_minutes_for_date_rounds_like_duration_minutes(pm, tmp_path):
 
 def test_get_minutes_for_date_aggregates_exact_seconds_before_rounding(pm, tmp_path):
     _write_raw(
-        pm, 2026,
+        pm,
+        2026,
         ["date", "state", "start", "end", "duration_min", "duration_seconds"],
         [
-            ["2026-07-01", "active", f"09:{index:02d}:00", f"09:{index:02d}:31", "1", "31"]
+            [
+                "2026-07-01",
+                "active",
+                f"09:{index:02d}:00",
+                f"09:{index:02d}:31",
+                "1",
+                "31",
+            ]
             for index in range(10)
         ],
     )
@@ -648,21 +784,25 @@ def test_get_minutes_for_date_aggregates_exact_seconds_before_rounding(pm, tmp_p
 
 def test_get_weekly_minutes_sums_days_from_activities_log(pm, tmp_path):
     d1 = Day(date=date(2026, 7, 1))
-    d1.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 10, 0, 0),
-    ))
+    d1.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 10, 0, 0),
+        )
+    )
     d2 = Day(date=date(2026, 7, 3))
-    d2.segments.append(TimeSegment(
-        state="idle",
-        start_time=datetime(2026, 7, 3, 9, 0, 0),
-        end_time=datetime(2026, 7, 3, 9, 45, 0),
-    ))
+    d2.segments.append(
+        TimeSegment(
+            state="idle",
+            start_time=datetime(2026, 7, 3, 9, 0, 0),
+            end_time=datetime(2026, 7, 3, 9, 45, 0),
+        )
+    )
     pm.save_segments({date(2026, 7, 1): d1, date(2026, 7, 3): d2})
 
-    # d2 has only idle time (no active), so per the new behavior, nothing is logged for that day
-    # Only d1's active time counts
+    # d2 has only idle time (no active), so per the new behavior, nothing is
+    # logged for that day. Only d1's active time counts.
     active, idle = pm.get_weekly_minutes(date(2026, 6, 29))
     assert active == 60
     assert idle == 0
@@ -672,7 +812,8 @@ def test_save_segments_drops_inner_segment_covered_by_merged(pm, tmp_path):
     """A merged/extended segment must not leave an overlapping inner row behind."""
     # Seed a file with an outer segment and an inner one (e.g. legacy/corrupt overlap)
     _write_raw(
-        pm, 2026,
+        pm,
+        2026,
         ["date", "state", "start", "end", "duration_min", "duration_seconds"],
         [
             ["2026-07-01", "active", "09:00:00", "09:30:00", "30", "1800"],
@@ -681,11 +822,13 @@ def test_save_segments_drops_inner_segment_covered_by_merged(pm, tmp_path):
     )
     # Now persist an extended active segment 09:00-10:00 that covers the inner one
     d = Day(date=date(2026, 7, 1))
-    d.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 10, 0, 0),
-    ))
+    d.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 10, 0, 0),
+        )
+    )
     pm.save_segments({date(2026, 7, 1): d})
 
     segs = pm.read_segments_for_day(date(2026, 7, 1))
@@ -707,7 +850,8 @@ def test_readers_survive_unreadable_log_file(pm, tmp_path):
 def test_readers_tolerate_missing_state_column(pm, tmp_path):
     """A file without a 'state' column must not raise KeyError in any reader."""
     _write_raw(
-        pm, 2026,
+        pm,
+        2026,
         ["date", "start", "end", "duration_min", "duration_seconds"],
         [["2026-07-01", "09:00:00", "10:00:00", "60", "3600"]],
     )
@@ -736,26 +880,39 @@ def test_readers_skip_malformed_rows_but_keep_valid_ones(pm, tmp_path):
 # merge_segments_to_save (static)
 # ------------------------------------------------------------
 
+
 def test_merge_segments_to_save_empty():
     assert PersistenceManager.merge_segments_to_save([]) == []
 
 
 def test_merge_segments_to_save_different_states_not_merged():
     segs = [
-        TimeSegment(state="active", start_time=datetime(2026, 7, 1, 9, 0, 0),
-                    end_time=datetime(2026, 7, 1, 9, 30, 0)),
-        TimeSegment(state="idle", start_time=datetime(2026, 7, 1, 9, 30, 0),
-                    end_time=datetime(2026, 7, 1, 10, 0, 0)),
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 9, 30, 0),
+        ),
+        TimeSegment(
+            state="idle",
+            start_time=datetime(2026, 7, 1, 9, 30, 0),
+            end_time=datetime(2026, 7, 1, 10, 0, 0),
+        ),
     ]
     assert len(PersistenceManager.merge_segments_to_save(segs, 300)) == 2
 
 
 def test_merge_segments_to_save_merges_small_gap():
     segs = [
-        TimeSegment(state="active", start_time=datetime(2026, 7, 1, 9, 0, 0),
-                    end_time=datetime(2026, 7, 1, 9, 30, 0)),
-        TimeSegment(state="active", start_time=datetime(2026, 7, 1, 9, 31, 0),
-                    end_time=datetime(2026, 7, 1, 10, 0, 0)),
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 9, 30, 0),
+        ),
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 31, 0),
+            end_time=datetime(2026, 7, 1, 10, 0, 0),
+        ),
     ]
     merged = PersistenceManager.merge_segments_to_save(segs, 300)
     assert len(merged) == 1
@@ -764,17 +921,28 @@ def test_merge_segments_to_save_merges_small_gap():
 
 def test_merge_segments_to_save_keeps_large_gap():
     segs = [
-        TimeSegment(state="active", start_time=datetime(2026, 7, 1, 9, 0, 0),
-                    end_time=datetime(2026, 7, 1, 9, 30, 0)),
-        TimeSegment(state="active", start_time=datetime(2026, 7, 1, 10, 30, 0),
-                    end_time=datetime(2026, 7, 1, 11, 0, 0)),
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 9, 30, 0),
+        ),
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 10, 30, 0),
+            end_time=datetime(2026, 7, 1, 11, 0, 0),
+        ),
     ]
     assert len(PersistenceManager.merge_segments_to_save(segs, 300)) == 2
 
 
 def test_merge_segments_to_save_single_segment():
-    segs = [TimeSegment(state="active", start_time=datetime(2026, 7, 1, 9, 0, 0),
-                        end_time=datetime(2026, 7, 1, 9, 30, 0))]
+    segs = [
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 9, 30, 0),
+        )
+    ]
     assert len(PersistenceManager.merge_segments_to_save(segs, 300)) == 1
 
 
@@ -782,40 +950,58 @@ def test_merge_segments_to_save_uses_idle_threshold():
     """Gap is compared against the full idle_threshold."""
     # Gap of 300s, threshold 300 -> 300 <= 300 -> merge
     segs = [
-        TimeSegment(state="active", start_time=datetime(2026, 7, 1, 9, 0, 0),
-                    end_time=datetime(2026, 7, 1, 9, 0, 0)),
-        TimeSegment(state="active", start_time=datetime(2026, 7, 1, 9, 5, 0),
-                    end_time=datetime(2026, 7, 1, 9, 7, 30)),
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 9, 0, 0),
+        ),
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 5, 0),
+            end_time=datetime(2026, 7, 1, 9, 7, 30),
+        ),
     ]
     assert len(PersistenceManager.merge_segments_to_save(segs, 300)) == 1
 
     # Gap of 301s, threshold 300 -> 301 > 300 -> keep separate
     segs2 = [
-        TimeSegment(state="active", start_time=datetime(2026, 7, 1, 9, 0, 0),
-                    end_time=datetime(2026, 7, 1, 9, 0, 0)),
-        TimeSegment(state="active", start_time=datetime(2026, 7, 1, 9, 5, 1),
-                    end_time=datetime(2026, 7, 1, 9, 7, 30)),
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 9, 0, 0),
+        ),
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 5, 1),
+            end_time=datetime(2026, 7, 1, 9, 7, 30),
+        ),
     ]
     assert len(PersistenceManager.merge_segments_to_save(segs2, 300)) == 2
 
 
 def test_save_segments_does_not_write_short_idle_rows(pm, tmp_path):
     d = Day(date=date(2026, 7, 1))
-    d.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 9, 30, 0),
-    ))
-    d.segments.append(TimeSegment(
-        state="idle",
-        start_time=datetime(2026, 7, 1, 9, 30, 0),
-        end_time=datetime(2026, 7, 1, 9, 33, 0),
-    ))
-    d.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 33, 0),
-        end_time=datetime(2026, 7, 1, 10, 0, 0),
-    ))
+    d.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 9, 30, 0),
+        )
+    )
+    d.segments.append(
+        TimeSegment(
+            state="idle",
+            start_time=datetime(2026, 7, 1, 9, 30, 0),
+            end_time=datetime(2026, 7, 1, 9, 33, 0),
+        )
+    )
+    d.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 33, 0),
+            end_time=datetime(2026, 7, 1, 10, 0, 0),
+        )
+    )
 
     pm.save_segments({date(2026, 7, 1): d}, idle_threshold=300)
     segs = pm.read_segments_for_day(date(2026, 7, 1))
@@ -832,16 +1018,20 @@ def test_save_segments_does_not_write_short_idle_rows(pm, tmp_path):
 def test_filter_idle_boundary_segments_filters_before_first_active(pm, tmp_path):
     """Idle before first active should be filtered."""
     d = Day(date=date(2026, 7, 1))
-    d.segments.append(TimeSegment(
-        state="idle",
-        start_time=datetime(2026, 7, 1, 7, 0, 0),
-        end_time=datetime(2026, 7, 1, 8, 45, 0),
-    ))
-    d.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 10, 0, 0),
-    ))
+    d.segments.append(
+        TimeSegment(
+            state="idle",
+            start_time=datetime(2026, 7, 1, 7, 0, 0),
+            end_time=datetime(2026, 7, 1, 8, 45, 0),
+        )
+    )
+    d.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 10, 0, 0),
+        )
+    )
     filtered = pm._filter_idle_boundary_segments(d.segments)
     # Idle before first active should be filtered
     assert len(filtered) == 1
@@ -851,16 +1041,20 @@ def test_filter_idle_boundary_segments_filters_before_first_active(pm, tmp_path)
 def test_filter_idle_boundary_segments_filters_after_last_active(pm, tmp_path):
     """Idle after last active should be filtered."""
     d = Day(date=date(2026, 7, 1))
-    d.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 10, 0, 0),
-    ))
-    d.segments.append(TimeSegment(
-        state="idle",
-        start_time=datetime(2026, 7, 1, 10, 0, 0),
-        end_time=datetime(2026, 7, 1, 10, 30, 0),
-    ))
+    d.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 10, 0, 0),
+        )
+    )
+    d.segments.append(
+        TimeSegment(
+            state="idle",
+            start_time=datetime(2026, 7, 1, 10, 0, 0),
+            end_time=datetime(2026, 7, 1, 10, 30, 0),
+        )
+    )
     filtered = pm._filter_idle_boundary_segments(d.segments)
     # Idle after last active should be filtered
     assert len(filtered) == 1
@@ -870,21 +1064,27 @@ def test_filter_idle_boundary_segments_filters_after_last_active(pm, tmp_path):
 def test_filter_idle_boundary_segments_preserves_between_active(pm, tmp_path):
     """Idle between active segments should be preserved (e.g., lunch break)."""
     d = Day(date=date(2026, 7, 1))
-    d.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 10, 0, 0),
-    ))
-    d.segments.append(TimeSegment(
-        state="idle",
-        start_time=datetime(2026, 7, 1, 10, 0, 0),
-        end_time=datetime(2026, 7, 1, 10, 15, 0),
-    ))
-    d.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 10, 15, 0),
-        end_time=datetime(2026, 7, 1, 11, 0, 0),
-    ))
+    d.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 10, 0, 0),
+        )
+    )
+    d.segments.append(
+        TimeSegment(
+            state="idle",
+            start_time=datetime(2026, 7, 1, 10, 0, 0),
+            end_time=datetime(2026, 7, 1, 10, 15, 0),
+        )
+    )
+    d.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 10, 15, 0),
+            end_time=datetime(2026, 7, 1, 11, 0, 0),
+        )
+    )
     filtered = pm._filter_idle_boundary_segments(d.segments)
     # Idle between active should be preserved
     assert len(filtered) == 3
@@ -896,16 +1096,20 @@ def test_filter_idle_boundary_segments_preserves_between_active(pm, tmp_path):
 def test_filter_idle_boundary_segments_no_active_returns_empty(pm, tmp_path):
     """If no active segments, return empty list."""
     d = Day(date=date(2026, 7, 1))
-    d.segments.append(TimeSegment(
-        state="idle",
-        start_time=datetime(2026, 7, 1, 7, 0, 0),
-        end_time=datetime(2026, 7, 1, 8, 0, 0),
-    ))
-    d.segments.append(TimeSegment(
-        state="idle",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 10, 0, 0),
-    ))
+    d.segments.append(
+        TimeSegment(
+            state="idle",
+            start_time=datetime(2026, 7, 1, 7, 0, 0),
+            end_time=datetime(2026, 7, 1, 8, 0, 0),
+        )
+    )
+    d.segments.append(
+        TimeSegment(
+            state="idle",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 10, 0, 0),
+        )
+    )
     filtered = pm._filter_idle_boundary_segments(d.segments)
     # No active segments - return empty
     assert len(filtered) == 0
@@ -920,36 +1124,46 @@ def test_filter_idle_boundary_segments_empty_segments(pm, tmp_path):
 def test_filter_idle_boundary_segments_idle_after_last_active(pm, tmp_path):
     """Test idle after last active with exact boundary times."""
     d = Day(date=date(2026, 7, 1))
-    d.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 9, 30, 0),
-    ))
-    d.segments.append(TimeSegment(
-        state="idle",
-        start_time=datetime(2026, 7, 1, 9, 30, 0),
-        end_time=datetime(2026, 7, 1, 10, 0, 0),
-    ))
+    d.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 9, 30, 0),
+        )
+    )
+    d.segments.append(
+        TimeSegment(
+            state="idle",
+            start_time=datetime(2026, 7, 1, 9, 30, 0),
+            end_time=datetime(2026, 7, 1, 10, 0, 0),
+        )
+    )
     filtered = pm._filter_idle_boundary_segments(d.segments)
     # Idle starting exactly when last active ends should be filtered
     assert len(filtered) == 1
     assert filtered[0].state == "active"
 
 
-def test_filter_idle_boundary_segments_drops_idle_overlapping_first_active(pm, tmp_path):
+def test_filter_idle_boundary_segments_drops_idle_overlapping_first_active(
+    pm, tmp_path
+):
     """Idle that overlaps the first active start must not survive (no idle
     may start before the first active time)."""
     d = Day(date=date(2026, 7, 1))
-    d.segments.append(TimeSegment(
-        state="idle",
-        start_time=datetime(2026, 7, 1, 8, 30, 0),
-        end_time=datetime(2026, 7, 1, 9, 30, 0),
-    ))
-    d.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 10, 0, 0),
-    ))
+    d.segments.append(
+        TimeSegment(
+            state="idle",
+            start_time=datetime(2026, 7, 1, 8, 30, 0),
+            end_time=datetime(2026, 7, 1, 9, 30, 0),
+        )
+    )
+    d.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 10, 0, 0),
+        )
+    )
     filtered = pm._filter_idle_boundary_segments(d.segments)
     # The overlapping idle (starts before 9:00, ends after) is dropped.
     assert len(filtered) == 1
@@ -957,24 +1171,30 @@ def test_filter_idle_boundary_segments_drops_idle_overlapping_first_active(pm, t
     assert filtered[0].start_time == datetime(2026, 7, 1, 9, 0, 0)
 
 
-def test_filter_idle_boundary_segments_preserves_lunch_break_when_afternoon_active_is_ongoing(pm, tmp_path):
-    """Lunch break between morning and ongoing afternoon session must be preserved."""
+def test_filter_idle_boundary_preserves_lunch_with_ongoing_active(pm, tmp_path):
+    """Lunch break between morning and ongoing afternoon session is preserved."""
     d = Day(date=date(2026, 7, 1))
-    d.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 12, 0, 0),
-    ))
-    d.segments.append(TimeSegment(
-        state="idle",
-        start_time=datetime(2026, 7, 1, 12, 0, 0),
-        end_time=datetime(2026, 7, 1, 13, 0, 0),
-    ))
-    d.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 13, 0, 0),
-        end_time=None,  # ongoing afternoon session
-    ))
+    d.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 12, 0, 0),
+        )
+    )
+    d.segments.append(
+        TimeSegment(
+            state="idle",
+            start_time=datetime(2026, 7, 1, 12, 0, 0),
+            end_time=datetime(2026, 7, 1, 13, 0, 0),
+        )
+    )
+    d.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 13, 0, 0),
+            end_time=None,  # ongoing afternoon session
+        )
+    )
     filtered = pm._filter_idle_boundary_segments(d.segments)
     assert len(filtered) == 3
     assert filtered[0].state == "active"
@@ -985,39 +1205,53 @@ def test_filter_idle_boundary_segments_preserves_lunch_break_when_afternoon_acti
     assert filtered[2].end_time is None
 
 
-def test_filter_idle_boundary_segments_preserves_multiple_breaks_with_ongoing_active(pm, tmp_path):
-    """Multiple intermediate breaks (coffee, lunch) must all be preserved with ongoing active."""
+def test_filter_idle_boundary_preserves_multiple_breaks_with_ongoing_active(
+    pm, tmp_path
+):
+    """Multiple intermediate breaks are preserved with an ongoing active segment."""
     d = Day(date=date(2026, 7, 1))
-    d.segments.append(TimeSegment(
-        state="idle",
-        start_time=datetime(2026, 7, 1, 8, 0, 0),
-        end_time=datetime(2026, 7, 1, 8, 30, 0),  # before first active -> filter
-    ))
-    d.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 9, 0, 0),
-        end_time=datetime(2026, 7, 1, 10, 30, 0),
-    ))
-    d.segments.append(TimeSegment(
-        state="idle",
-        start_time=datetime(2026, 7, 1, 10, 30, 0),
-        end_time=datetime(2026, 7, 1, 10, 45, 0),  # coffee break -> keep
-    ))
-    d.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 10, 45, 0),
-        end_time=datetime(2026, 7, 1, 12, 30, 0),
-    ))
-    d.segments.append(TimeSegment(
-        state="idle",
-        start_time=datetime(2026, 7, 1, 12, 30, 0),
-        end_time=datetime(2026, 7, 1, 13, 30, 0),  # lunch break -> keep
-    ))
-    d.segments.append(TimeSegment(
-        state="active",
-        start_time=datetime(2026, 7, 1, 13, 30, 0),
-        end_time=None,  # ongoing afternoon session -> keep
-    ))
+    d.segments.append(
+        TimeSegment(
+            state="idle",
+            start_time=datetime(2026, 7, 1, 8, 0, 0),
+            end_time=datetime(2026, 7, 1, 8, 30, 0),  # before first active -> filter
+        )
+    )
+    d.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 9, 0, 0),
+            end_time=datetime(2026, 7, 1, 10, 30, 0),
+        )
+    )
+    d.segments.append(
+        TimeSegment(
+            state="idle",
+            start_time=datetime(2026, 7, 1, 10, 30, 0),
+            end_time=datetime(2026, 7, 1, 10, 45, 0),  # coffee break -> keep
+        )
+    )
+    d.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 10, 45, 0),
+            end_time=datetime(2026, 7, 1, 12, 30, 0),
+        )
+    )
+    d.segments.append(
+        TimeSegment(
+            state="idle",
+            start_time=datetime(2026, 7, 1, 12, 30, 0),
+            end_time=datetime(2026, 7, 1, 13, 30, 0),  # lunch break -> keep
+        )
+    )
+    d.segments.append(
+        TimeSegment(
+            state="active",
+            start_time=datetime(2026, 7, 1, 13, 30, 0),
+            end_time=None,  # ongoing afternoon session -> keep
+        )
+    )
     filtered = pm._filter_idle_boundary_segments(d.segments)
     assert len(filtered) == 5
     states = [s.state for s in filtered]
@@ -1028,8 +1262,8 @@ def test_filter_idle_boundary_segments_preserves_multiple_breaks_with_ongoing_ac
 # CSV row helpers
 # ------------------------------------------------------------
 
+
 def test_read_existing_rows_skips_invalid_and_normalizes_duration(tmp_path):
-    from activitytracker.persistence import _read_existing_rows
 
     path = tmp_path / "activities-2026.csv"
     path.write_text(
@@ -1050,15 +1284,31 @@ def test_read_existing_rows_skips_invalid_and_normalizes_duration(tmp_path):
 
 
 def test_drop_contained_rows_removes_rows_inside_new_segment():
-    from activitytracker.persistence import _drop_contained_rows
 
     existing = {
-        "2026-07-01 09:00:00": {"date": "2026-07-01", "start": "09:00:00", "end": "09:30:00"},
-        "2026-07-01 09:15:00": {"date": "2026-07-01", "start": "09:15:00", "end": "09:45:00"},
-        "2026-07-01 10:00:00": {"date": "2026-07-01", "start": "10:00:00", "end": "11:00:00"},
+        "2026-07-01 09:00:00": {
+            "date": "2026-07-01",
+            "start": "09:00:00",
+            "end": "09:30:00",
+        },
+        "2026-07-01 09:15:00": {
+            "date": "2026-07-01",
+            "start": "09:15:00",
+            "end": "09:45:00",
+        },
+        "2026-07-01 10:00:00": {
+            "date": "2026-07-01",
+            "start": "10:00:00",
+            "end": "11:00:00",
+        },
     }
     new_rows = [
-        {"date": "2026-07-01", "start": "09:00:00", "end": "10:00:00", "state": "active"},
+        {
+            "date": "2026-07-01",
+            "start": "09:00:00",
+            "end": "10:00:00",
+            "state": "active",
+        },
     ]
 
     _drop_contained_rows(existing, new_rows)
@@ -1069,10 +1319,13 @@ def test_drop_contained_rows_removes_rows_inside_new_segment():
 
 
 def test_drop_contained_rows_ignores_ongoing_new_segment():
-    from activitytracker.persistence import _drop_contained_rows
 
     existing = {
-        "2026-07-01 09:00:00": {"date": "2026-07-01", "start": "09:00:00", "end": "09:30:00"},
+        "2026-07-01 09:00:00": {
+            "date": "2026-07-01",
+            "start": "09:00:00",
+            "end": "09:30:00",
+        },
     }
     new_rows = [
         {"date": "2026-07-01", "start": "09:00:00", "end": "", "state": "active"},
@@ -1086,7 +1339,9 @@ def test_drop_contained_rows_ignores_ongoing_new_segment():
 def test_segment_to_row_ongoing_segment():
     from activitytracker.persistence import _segment_to_row
 
-    seg = TimeSegment(state="active", start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=None)
+    seg = TimeSegment(
+        state="active", start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=None
+    )
     row = _segment_to_row(seg)
 
     assert row["end"] == ""
@@ -1105,9 +1360,15 @@ def test_first_active_starts_per_day():
     from activitytracker.persistence import _first_active_starts
 
     segments = [
-        TimeSegment("active", datetime(2026, 7, 1, 9, 0, 0), datetime(2026, 7, 1, 10, 0, 0)),
-        TimeSegment("active", datetime(2026, 7, 1, 8, 0, 0), datetime(2026, 7, 1, 9, 0, 0)),
-        TimeSegment("active", datetime(2026, 7, 2, 12, 0, 0), datetime(2026, 7, 2, 13, 0, 0)),
+        TimeSegment(
+            "active", datetime(2026, 7, 1, 9, 0, 0), datetime(2026, 7, 1, 10, 0, 0)
+        ),
+        TimeSegment(
+            "active", datetime(2026, 7, 1, 8, 0, 0), datetime(2026, 7, 1, 9, 0, 0)
+        ),
+        TimeSegment(
+            "active", datetime(2026, 7, 2, 12, 0, 0), datetime(2026, 7, 2, 13, 0, 0)
+        ),
     ]
 
     assert _first_active_starts(segments) == {
@@ -1120,13 +1381,14 @@ def test_first_active_starts_returns_empty_without_active():
     from activitytracker.persistence import _first_active_starts
 
     segments = [
-        TimeSegment("idle", datetime(2026, 7, 1, 9, 0, 0), datetime(2026, 7, 1, 10, 0, 0)),
+        TimeSegment(
+            "idle", datetime(2026, 7, 1, 9, 0, 0), datetime(2026, 7, 1, 10, 0, 0)
+        ),
     ]
     assert _first_active_starts(segments) == {}
 
 
 def test_read_existing_rows_missing_file_returns_empty():
-    from activitytracker.persistence import _read_existing_rows
 
     assert _read_existing_rows("/nonexistent/path.csv") == {}
 
@@ -1150,9 +1412,24 @@ def test_parse_activities_row_skips_malformed_rows():
     from activitytracker.persistence import _parse_activities_row
 
     assert _parse_activities_row({"date": "2026-07-01", "state": "active"}) is None
-    assert _parse_activities_row({"date": "2026-07-01", "state": "active", "start": "not-a-time"}) is None
-    assert _parse_activities_row({"date": "bad-date", "state": "active", "start": "09:00:00"}) is None
-    assert _parse_activities_row({"date": "2026-07-01", "state": "unknown", "start": "09:00:00"}) is None
+    assert (
+        _parse_activities_row(
+            {"date": "2026-07-01", "state": "active", "start": "not-a-time"}
+        )
+        is None
+    )
+    assert (
+        _parse_activities_row(
+            {"date": "bad-date", "state": "active", "start": "09:00:00"}
+        )
+        is None
+    )
+    assert (
+        _parse_activities_row(
+            {"date": "2026-07-01", "state": "unknown", "start": "09:00:00"}
+        )
+        is None
+    )
 
 
 def test_hms_to_seconds_accepts_hhmm_and_hhmmss():

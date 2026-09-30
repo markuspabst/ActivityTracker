@@ -8,7 +8,7 @@ from datetime import datetime, date, timedelta
 import os
 import threading
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -51,17 +51,26 @@ def app(monkeypatch, tmp_path):
 # Construction
 # ------------------------------------------------------------
 
+
 def test_app_constructs(app):
+    from activitytracker.tracking import (
+        DEFAULT_TARGET_SECONDS,
+        DEFAULT_WEEKLY_TARGET_SECONDS,
+        DEFAULT_SAVE_INTERVAL_SECONDS,
+    )
+    from activitytracker.persistence import DEFAULT_IDLE_THRESHOLD_SECONDS
+
     assert isinstance(app, ActivityTrackerApp)
-    assert isinstance(app.target_work_seconds, int)
-    assert isinstance(app.weekly_target_seconds, int)
-    assert isinstance(app.idle_threshold, int)
-    assert isinstance(app.write_interval, int)
+    assert app.target_work_seconds == DEFAULT_TARGET_SECONDS
+    assert app.weekly_target_seconds == DEFAULT_WEEKLY_TARGET_SECONDS
+    assert app.idle_threshold == DEFAULT_IDLE_THRESHOLD_SECONDS
+    assert app.write_interval == DEFAULT_SAVE_INTERVAL_SECONDS
 
 
 # ------------------------------------------------------------
 # Config setters
 # ------------------------------------------------------------
+
 
 def test_set_target(app):
     app.set_target(3600)
@@ -97,6 +106,7 @@ def test_set_language(app):
 # Save / update / quit
 # ------------------------------------------------------------
 
+
 def test_force_save(app):
     app.session.save_all_days = MagicMock()
     assert app.force_save() is True
@@ -109,7 +119,9 @@ def test_force_save_reports_persistence_failure(app):
     # A previous automatic failure may already have shown the episode alert;
     # a manual save attempt must still tell the user this save failed.
     app._save_failure_shown = True
-    app.session.save_all_days = MagicMock(side_effect=PersistenceWriteError("disk full"))
+    app.session.save_all_days = MagicMock(
+        side_effect=PersistenceWriteError("disk full")
+    )
 
     assert app.force_save() is False
     app.platform.show_alert.assert_called_once()
@@ -129,7 +141,9 @@ def test_quit_app_stays_running_if_final_save_fails(app):
 
     app._running = True
     app._stop_event = MagicMock()
-    app.session.finalize_session = MagicMock(side_effect=PersistenceWriteError("disk full"))
+    app.session.finalize_session = MagicMock(
+        side_effect=PersistenceWriteError("disk full")
+    )
     app.menu.stop = MagicMock()
 
     app.quit_app()
@@ -152,12 +166,16 @@ def test_app_menu_creates_status_icon(monkeypatch):
     monkeypatch.setattr(menu_module, "Menu", menu_factory)
     monkeypatch.setattr(menu_module, "create_icon", MagicMock(return_value=icon_image))
     monkeypatch.setattr(menu_module, "get_platform", lambda: MagicMock())
-    monkeypatch.setattr(menu_module, "run_on_main_thread", lambda callback, *args: callback(*args))
+    monkeypatch.setattr(
+        menu_module, "run_on_main_thread", lambda callback, *args: callback(*args)
+    )
 
     menu = menu_module.AppMenu(MagicMock())
 
     menu_factory.assert_called_once_with(menu._generate_menu_items)
-    icon_factory.assert_called_once_with("ActivityTracker", icon_image, "ActivityTracker", menu_instance)
+    icon_factory.assert_called_once_with(
+        "ActivityTracker", icon_image, "ActivityTracker", menu_instance
+    )
     assert menu.icon is icon_instance
 
 
@@ -167,14 +185,22 @@ def test_open_data_folder_menu_action_uses_configured_directory(monkeypatch):
     i18n.set_locale("en")
     platform = MagicMock()
     monkeypatch.setattr(menu_module, "get_platform", lambda: platform)
-    monkeypatch.setattr(menu_module, "run_on_main_thread", lambda callback, *args: callback(*args))
+    monkeypatch.setattr(
+        menu_module, "run_on_main_thread", lambda callback, *args: callback(*args)
+    )
     app = MagicMock()
     app.pm.get_data_dir.return_value = "/tmp/activity-data"
 
     menu = menu_module.AppMenu(app)
     settings = menu._create_global_settings_submenu()
-    folder_entry = next(item for item in settings.items if item.text == i18n.t("DATA_FOLDER"))
-    open_folder = next(item for item in folder_entry.submenu.items if item.text == i18n.t("OPEN_DATA_FOLDER"))
+    folder_entry = next(
+        item for item in settings.items if item.text == i18n.t("DATA_FOLDER")
+    )
+    open_folder = next(
+        item
+        for item in folder_entry.submenu.items
+        if item.text == i18n.t("OPEN_DATA_FOLDER")
+    )
     open_folder._action()
 
     platform.open_file_manager.assert_called_once_with("/tmp/activity-data")
@@ -203,7 +229,9 @@ def test_update_ui_computes_and_calls_menu(app, monkeypatch):
 
     today = D.date()
     day = Day(today)
-    seg = TimeSegment("active", datetime(2026, 7, 15, 9, 0, 0), datetime(2026, 7, 15, 10, 0, 0))
+    seg = TimeSegment(
+        "active", datetime(2026, 7, 15, 9, 0, 0), datetime(2026, 7, 15, 10, 0, 0)
+    )
     day.segments.append(seg)
     app.session.days[today] = day
     app.session.current_segment = seg
@@ -226,13 +254,18 @@ def test_update_ui_computes_and_calls_menu(app, monkeypatch):
 # Data folder management
 # ------------------------------------------------------------
 
+
 def test_select_data_folder(app, monkeypatch):
     app.platform.choose_folder_dialog.return_value = "/selected/folder"
     app.force_save = MagicMock()
     app.update_ui = MagicMock()
     app.session.load_current_day_segments = MagicMock()
     clear_last_segment_write = MagicMock()
-    monkeypatch.setattr(app_module.PersistenceManager, "clear_last_segment_write", clear_last_segment_write)
+    monkeypatch.setattr(
+        app_module.PersistenceManager,
+        "clear_last_segment_write",
+        clear_last_segment_write,
+    )
     app.select_data_folder()
     app.force_save.assert_called_once()
     assert app._data_dir_calls == ["/selected/folder"]
@@ -246,7 +279,11 @@ def test_select_data_folder_aborts_if_save_fails(app, monkeypatch):
     app.force_save = MagicMock(return_value=False)
     app._reload_from_current_data_folder = MagicMock()
     clear_last_segment_write = MagicMock()
-    monkeypatch.setattr(app_module.PersistenceManager, "clear_last_segment_write", clear_last_segment_write)
+    monkeypatch.setattr(
+        app_module.PersistenceManager,
+        "clear_last_segment_write",
+        clear_last_segment_write,
+    )
 
     app.select_data_folder()
 
@@ -261,7 +298,11 @@ def test_reset_data_folder(app, monkeypatch):
     app.update_ui = MagicMock()
     app.session.load_current_day_segments = MagicMock()
     clear_last_segment_write = MagicMock()
-    monkeypatch.setattr(app_module.PersistenceManager, "clear_last_segment_write", clear_last_segment_write)
+    monkeypatch.setattr(
+        app_module.PersistenceManager,
+        "clear_last_segment_write",
+        clear_last_segment_write,
+    )
     mock_reset = MagicMock()
     monkeypatch.setattr(app_module, "reset_data_dir_to_default", mock_reset)
     app.reset_data_folder()
@@ -276,7 +317,11 @@ def test_reset_data_folder_aborts_if_save_fails(app, monkeypatch):
     app.force_save = MagicMock(return_value=False)
     app._reload_from_current_data_folder = MagicMock()
     clear_last_segment_write = MagicMock()
-    monkeypatch.setattr(app_module.PersistenceManager, "clear_last_segment_write", clear_last_segment_write)
+    monkeypatch.setattr(
+        app_module.PersistenceManager,
+        "clear_last_segment_write",
+        clear_last_segment_write,
+    )
     mock_reset = MagicMock()
     monkeypatch.setattr(app_module, "reset_data_dir_to_default", mock_reset)
 
@@ -342,6 +387,7 @@ def test_update_triggers_save_when_interval_elapsed(app):
 # optimize_csv
 # ------------------------------------------------------------
 
+
 @pytest.fixture
 def optimize_ready(app, tmp_path, monkeypatch):
     i18n.set_locale("en")
@@ -359,7 +405,10 @@ def test_optimize_csv_no_file(app, optimize_ready):
     app.optimize_csv()
     # Alert about missing file
     titles = [c.args[0] for c in app.platform.show_alert.call_args_list]
-    assert any("OPTIMIZE_ERROR_NO_FILE" in str(t) or t == i18n.t("OPTIMIZE_ERROR_NO_FILE") for t in titles)
+    assert any(
+        "OPTIMIZE_ERROR_NO_FILE" in str(t) or t == i18n.t("OPTIMIZE_ERROR_NO_FILE")
+        for t in titles
+    )
 
 
 def test_optimize_csv_empty_file(app, tmp_path, optimize_ready):
@@ -393,11 +442,16 @@ def test_optimize_csv_handles_read_oserror(app, optimize_ready, silent):
 
 def test_optimize_csv_serializes_with_other_csv_transactions(app, optimize_ready):
     today = optimize_ready.date()
-    day = Day(today, [TimeSegment(
-        "active",
-        datetime.combine(today, datetime.min.time()) + timedelta(hours=9),
-        datetime.combine(today, datetime.min.time()) + timedelta(hours=10),
-    )])
+    day = Day(
+        today,
+        [
+            TimeSegment(
+                "active",
+                datetime.combine(today, datetime.min.time()) + timedelta(hours=9),
+                datetime.combine(today, datetime.min.time()) + timedelta(hours=10),
+            )
+        ],
+    )
     app.pm.save_segments({today: day})
     started = threading.Event()
     finished = threading.Event()
@@ -420,14 +474,21 @@ def test_optimize_csv_serializes_with_other_csv_transactions(app, optimize_ready
 
 def test_optimize_csv_merges_and_reports(app, tmp_path, optimize_ready):
     from activitytracker.persistence import PersistenceManager
+
     pm = PersistenceManager(lambda: str(tmp_path))
     D = optimize_ready
     day = Day(D.date())
     # Two consecutive active segments with a tiny gap -> should merge to 1
-    day.segments.append(TimeSegment(
-        "active", datetime(2026, 7, 15, 9, 0, 0), datetime(2026, 7, 15, 9, 30, 0)))
-    day.segments.append(TimeSegment(
-        "active", datetime(2026, 7, 15, 9, 31, 0), datetime(2026, 7, 15, 10, 0, 0)))
+    day.segments.append(
+        TimeSegment(
+            "active", datetime(2026, 7, 15, 9, 0, 0), datetime(2026, 7, 15, 9, 30, 0)
+        )
+    )
+    day.segments.append(
+        TimeSegment(
+            "active", datetime(2026, 7, 15, 9, 31, 0), datetime(2026, 7, 15, 10, 0, 0)
+        )
+    )
     pm.save_segments({D.date(): day})
 
     # Point the app's pm at the same dir and re-save via the app's real pm
@@ -452,10 +513,16 @@ def test_optimize_csv_writes_newest_first(app, tmp_path, optimize_ready):
     pm = PersistenceManager(lambda: str(tmp_path))
     D = optimize_ready
     day = Day(D.date())
-    day.segments.append(TimeSegment(
-        "active", datetime(2026, 7, 15, 9, 0, 0), datetime(2026, 7, 15, 10, 0, 0)))
-    day.segments.append(TimeSegment(
-        "active", datetime(2026, 7, 15, 11, 0, 0), datetime(2026, 7, 15, 12, 0, 0)))
+    day.segments.append(
+        TimeSegment(
+            "active", datetime(2026, 7, 15, 9, 0, 0), datetime(2026, 7, 15, 10, 0, 0)
+        )
+    )
+    day.segments.append(
+        TimeSegment(
+            "active", datetime(2026, 7, 15, 11, 0, 0), datetime(2026, 7, 15, 12, 0, 0)
+        )
+    )
     pm.save_segments({D.date(): day})
 
     app.pm = pm
@@ -491,7 +558,9 @@ def test_optimize_csv_preserves_exclusive_midnight_end(app, tmp_path, optimize_r
 
 
 def test_optimize_csv_preserves_live_segment_continuity(app, optimize_ready):
-    now = datetime.combine(datetime.now().date(), datetime.min.time()) + timedelta(hours=12)
+    now = datetime.combine(datetime.now().date(), datetime.min.time()) + timedelta(
+        hours=12
+    )
     tracking.datetime.now.return_value = now
     today = now.date()
     initial_segment = TimeSegment("active", now - timedelta(minutes=5))
@@ -517,17 +586,18 @@ def test_optimize_csv_preserves_live_segment_continuity(app, optimize_ready):
 
 def test_optimize_csv_skips_malformed_rows(app, tmp_path, optimize_ready):
     from activitytracker.persistence import PersistenceManager
+
     pm = PersistenceManager(lambda: str(tmp_path))
     D = optimize_ready
     # Write a CSV with malformed/unknown rows plus valid active/idle/active rows.
     path = pm.get_log_file_path("activities", D.year)
     with open(path, "w", newline="", encoding="utf-8") as f:
         f.write("date,state,start,end,duration_min,duration_seconds\n")
-        f.write("2026-07-15,active,badtime,10:00:00,60,3600\n")          # malformed start
-        f.write("2026-07-15,active,10:00:00,11:00:00,60,3600\n")        # valid active
-        f.write("2026-07-15,idle,11:00:00,11:15:00,15,900\n")           # valid idle
-        f.write("2026-07-15,active,11:15:00,12:00:00,45,2700\n")        # valid active
-        f.write("2026-07-15,unknown,12:00:00,13:00:00,60,3600\n")       # unknown state
+        f.write("2026-07-15,active,badtime,10:00:00,60,3600\n")  # malformed start
+        f.write("2026-07-15,active,10:00:00,11:00:00,60,3600\n")  # valid active
+        f.write("2026-07-15,idle,11:00:00,11:15:00,15,900\n")  # valid idle
+        f.write("2026-07-15,active,11:15:00,12:00:00,45,2700\n")  # valid active
+        f.write("2026-07-15,unknown,12:00:00,13:00:00,60,3600\n")  # unknown state
 
     app.pm = pm
     app.optimize_csv()
@@ -546,11 +616,17 @@ def test_optimize_csv_skips_malformed_rows(app, tmp_path, optimize_ready):
 # Regression: HIGH #1 - merge must not cross a calendar-day boundary
 # ------------------------------------------------------------
 
+
 def test_merge_segments_to_save_does_not_cross_midnight():
     from activitytracker.persistence import PersistenceManager
+
     # Two active segments with a tiny gap BUT on different days
-    seg1 = TimeSegment("active", datetime(2026, 7, 15, 23, 59, 50), datetime(2026, 7, 15, 23, 59, 59))
-    seg2 = TimeSegment("active", datetime(2026, 7, 16, 0, 0, 20), datetime(2026, 7, 16, 0, 1, 0))
+    seg1 = TimeSegment(
+        "active", datetime(2026, 7, 15, 23, 59, 50), datetime(2026, 7, 15, 23, 59, 59)
+    )
+    seg2 = TimeSegment(
+        "active", datetime(2026, 7, 16, 0, 0, 20), datetime(2026, 7, 16, 0, 1, 0)
+    )
     merged = PersistenceManager.merge_segments_to_save([seg1, seg2], idle_threshold=300)
     # Must stay as two segments (different calendar days)
     assert len(merged) == 2
@@ -558,21 +634,31 @@ def test_merge_segments_to_save_does_not_cross_midnight():
 
 def test_merge_segments_to_save_merges_same_day_small_gap():
     from activitytracker.persistence import PersistenceManager
+
     # Two active segments same day, tiny gap -> merge into one
-    seg1 = TimeSegment("active", datetime(2026, 7, 15, 9, 0, 0), datetime(2026, 7, 15, 9, 30, 0))
-    seg2 = TimeSegment("active", datetime(2026, 7, 15, 9, 31, 0), datetime(2026, 7, 15, 10, 0, 0))
+    seg1 = TimeSegment(
+        "active", datetime(2026, 7, 15, 9, 0, 0), datetime(2026, 7, 15, 9, 30, 0)
+    )
+    seg2 = TimeSegment(
+        "active", datetime(2026, 7, 15, 9, 31, 0), datetime(2026, 7, 15, 10, 0, 0)
+    )
     merged = PersistenceManager.merge_segments_to_save([seg1, seg2], idle_threshold=300)
     assert len(merged) == 1
 
 
 def test_merge_segments_to_save_handles_overlap_no_negative_duration():
     from activitytracker.persistence import PersistenceManager
+
     # Overlapping active segments (seg2 starts before seg1 ends) — e.g. from a
     # corrupt/legacy/manually-edited CSV. The merge must NOT create a segment
     # with end_time < start_time (negative duration); it should keep the later
     # end and drop the overlapping portion.
-    seg1 = TimeSegment("active", datetime(2026, 7, 15, 9, 0, 0), datetime(2026, 7, 15, 10, 0, 0))
-    seg2 = TimeSegment("active", datetime(2026, 7, 15, 9, 30, 0), datetime(2026, 7, 15, 9, 45, 0))
+    seg1 = TimeSegment(
+        "active", datetime(2026, 7, 15, 9, 0, 0), datetime(2026, 7, 15, 10, 0, 0)
+    )
+    seg2 = TimeSegment(
+        "active", datetime(2026, 7, 15, 9, 30, 0), datetime(2026, 7, 15, 9, 45, 0)
+    )
     merged = PersistenceManager.merge_segments_to_save([seg1, seg2], idle_threshold=300)
     assert len(merged) == 1
     # end_time must be >= start_time (no negative-duration segment)
@@ -582,9 +668,14 @@ def test_merge_segments_to_save_handles_overlap_no_negative_duration():
 
 def test_merge_segments_to_save_overlap_extends_to_later_end():
     from activitytracker.persistence import PersistenceManager
+
     # seg2 overlaps seg1 but extends past it -> result keeps the later end.
-    seg1 = TimeSegment("active", datetime(2026, 7, 15, 9, 0, 0), datetime(2026, 7, 15, 9, 30, 0))
-    seg2 = TimeSegment("active", datetime(2026, 7, 15, 9, 15, 0), datetime(2026, 7, 15, 10, 30, 0))
+    seg1 = TimeSegment(
+        "active", datetime(2026, 7, 15, 9, 0, 0), datetime(2026, 7, 15, 9, 30, 0)
+    )
+    seg2 = TimeSegment(
+        "active", datetime(2026, 7, 15, 9, 15, 0), datetime(2026, 7, 15, 10, 30, 0)
+    )
     merged = PersistenceManager.merge_segments_to_save([seg1, seg2], idle_threshold=300)
     assert len(merged) == 1
     assert merged[0].start_time == datetime(2026, 7, 15, 9, 0, 0)
@@ -596,6 +687,7 @@ def test_merge_segments_to_save_overlap_extends_to_later_end():
 # Automatic optimization (runs after every successful save)
 # ------------------------------------------------------------
 
+
 def test_update_optimizes_csv_after_save(app):
     app.write_interval = 0
     app.last_write_time = 0.0  # force the save branch
@@ -606,6 +698,19 @@ def test_update_optimizes_csv_after_save(app):
     app.optimize_csv.assert_called_once_with(silent=True)
 
 
+def test_update_throttles_periodic_optimization(app):
+    """Background saves do not optimize if the minimum interval has not passed."""
+    app.write_interval = 0
+    app.last_write_time = 0.0
+    app._last_optimize_time = time.time()  # optimize just happened
+    app.session.on_tick = MagicMock()
+    app.session.save_all_days = MagicMock()
+    app.optimize_csv = MagicMock()
+    app.update()
+    app.session.save_all_days.assert_called_once()
+    app.optimize_csv.assert_not_called()
+
+
 def test_force_save_optimizes_csv(app):
     app.session.save_all_days = MagicMock()
     app.optimize_csv = MagicMock()
@@ -613,8 +718,18 @@ def test_force_save_optimizes_csv(app):
     app.optimize_csv.assert_called_once_with(silent=True)
 
 
+def test_force_save_optimizes_even_when_throttled(app):
+    app._last_optimize_time = time.time()
+    app.session.save_all_days = MagicMock()
+    app.optimize_csv = MagicMock()
+    app.force_save()
+    app.optimize_csv.assert_called_once_with(silent=True)
+
+
 def test_save_and_optimize_returns_false_on_persistence_error(app):
-    app.session.save_all_days = MagicMock(side_effect=PersistenceWriteError("disk full"))
+    app.session.save_all_days = MagicMock(
+        side_effect=PersistenceWriteError("disk full")
+    )
     app.optimize_csv = MagicMock()
     app._alert_save_failure = MagicMock()
 
@@ -627,7 +742,9 @@ def test_save_and_optimize_returns_false_on_persistence_error(app):
 
 
 def test_save_and_optimize_force_alert_propagates_to_failure(app):
-    app.session.save_all_days = MagicMock(side_effect=PersistenceWriteError("disk full"))
+    app.session.save_all_days = MagicMock(
+        side_effect=PersistenceWriteError("disk full")
+    )
     app._alert_save_failure = MagicMock()
 
     result = app._save_and_optimize(force_alert=True)
@@ -640,8 +757,10 @@ def test_save_and_optimize_force_alert_propagates_to_failure(app):
 # Regression: MEDIUM #2 - optimize_csv must tolerate missing columns
 # ------------------------------------------------------------
 
+
 def test_optimize_csv_skips_missing_column_rows(app, tmp_path, optimize_ready):
     from activitytracker.persistence import PersistenceManager
+
     pm = PersistenceManager(lambda: str(tmp_path))
     D = optimize_ready
     # Row missing the 'state' column entirely -> would raise KeyError/AttributeError
@@ -650,27 +769,39 @@ def test_optimize_csv_skips_missing_column_rows(app, tmp_path, optimize_ready):
     with open(path, "w", newline="", encoding="utf-8") as f:
         f.write("date,start,end,duration_min,duration_seconds\n")  # no 'state'
         f.write("2026-07-15,11:00:00,11:15:00,15,900\n")
-        f.write("2026-07-15,active,12:00:00,12:30:00,30,1800\n")  # missing 'state' col here too
+        f.write(
+            "2026-07-15,active,12:00:00,12:30:00,30,1800\n"
+        )  # missing 'state' col here too
     app.pm = pm
     # Must not raise
     app.optimize_csv()
     titles = [c.args[0] for c in app.platform.show_alert.call_args_list]
-    assert any(t == i18n.t("OPTIMIZE_EMPTY") or t == i18n.t("OPTIMIZE_SUCCESS") for t in titles)
+    assert any(
+        t == i18n.t("OPTIMIZE_EMPTY") or t == i18n.t("OPTIMIZE_SUCCESS") for t in titles
+    )
 
 
 # ------------------------------------------------------------
 # Regression: MEDIUM #4 - ZeroDivisionError when weekly target is 0
 # ------------------------------------------------------------
 
+
 def test_update_ui_with_zero_weekly_target_does_not_crash():
     from activitytracker.activity_tracker_menu import AppMenu
+
     fake_app = MagicMock()
     fake_app.session.days = {}
     fake_app.target_work_seconds = 8 * 3600
     fake_app.weekly_target_seconds = 0  # the trigger condition
     menu = AppMenu(fake_app)
     # Should not raise ZeroDivisionError
-    menu.update_ui(is_idle=False, active_today=0, active_week=0, weekly_target=0, weekly_idle_week=0)
+    menu.update_ui(
+        is_idle=False,
+        active_today=0,
+        active_week=0,
+        weekly_target=0,
+        weekly_idle_week=0,
+    )
     # Status indicator should fall through to the default branch
     assert menu._last_status_icon is not None
 
@@ -685,8 +816,13 @@ def test_report_menu_omits_days_without_activity(tmp_path):
     yesterday = date.today() - timedelta(days=1)
     session.days[yesterday] = Day(
         yesterday,
-        [TimeSegment("active", datetime.combine(yesterday, datetime.min.time()),
-                      datetime.combine(yesterday, datetime.min.time()) + timedelta(hours=2))],
+        [
+            TimeSegment(
+                "active",
+                datetime.combine(yesterday, datetime.min.time()),
+                datetime.combine(yesterday, datetime.min.time()) + timedelta(hours=2),
+            )
+        ],
     )
     pm.save_segments(session.days)
 
@@ -718,7 +854,9 @@ def test_report_menu_day_includes_statistics(tmp_path):
         [
             TimeSegment("active", start, start + timedelta(hours=2)),
             TimeSegment("idle", start + timedelta(hours=2), start + timedelta(hours=3)),
-            TimeSegment("active", start + timedelta(hours=3), start + timedelta(hours=4)),
+            TimeSegment(
+                "active", start + timedelta(hours=3), start + timedelta(hours=4)
+            ),
         ],
     )
     pm.save_segments(session.days)
@@ -785,14 +923,24 @@ def test_report_menu_shows_no_activity_message_when_empty(tmp_path):
 # activities log (no separate daily-summary file anymore).
 # ------------------------------------------------------------
 
+
 def test_optimize_csv_keeps_aggregates_consistent(app, tmp_path, optimize_ready):
     from activitytracker.persistence import PersistenceManager
+
     pm = PersistenceManager(lambda: str(tmp_path))
     D = optimize_ready
     day = Day(D.date())
     # Two consecutive active segments with a tiny gap -> merge to 1
-    day.segments.append(TimeSegment("active", datetime(2026, 7, 15, 9, 0, 0), datetime(2026, 7, 15, 9, 30, 0)))
-    day.segments.append(TimeSegment("active", datetime(2026, 7, 15, 9, 31, 0), datetime(2026, 7, 15, 10, 0, 0)))
+    day.segments.append(
+        TimeSegment(
+            "active", datetime(2026, 7, 15, 9, 0, 0), datetime(2026, 7, 15, 9, 30, 0)
+        )
+    )
+    day.segments.append(
+        TimeSegment(
+            "active", datetime(2026, 7, 15, 9, 31, 0), datetime(2026, 7, 15, 10, 0, 0)
+        )
+    )
     pm.save_segments({D.date(): day})
     pre_summary = pm.get_minutes_for_date(D.date())
 
@@ -813,13 +961,17 @@ def test_optimize_csv_keeps_aggregates_consistent(app, tmp_path, optimize_ready)
 
 def test_optimize_csv_preserves_live_segment(app, tmp_path, optimize_ready):
     from activitytracker.persistence import PersistenceManager
+
     pm = PersistenceManager(lambda: str(tmp_path))
     D = optimize_ready
     # Simulate an in-memory ongoing (unsaved) active segment for "today"
     today = D.date()
-    app.session.days[today] = Day(today, segments=[
-        TimeSegment("active", datetime(2026, 7, 15, 9, 0, 0)),
-    ])
+    app.session.days[today] = Day(
+        today,
+        segments=[
+            TimeSegment("active", datetime(2026, 7, 15, 9, 0, 0)),
+        ],
+    )
     app.session.current_segment = app.session.days[today].segments[-1]
     app.pm = pm
     app.optimize_csv()
@@ -831,6 +983,7 @@ def test_optimize_csv_preserves_live_segment(app, tmp_path, optimize_ready):
 # ------------------------------------------------------------
 # Internal helpers
 # ------------------------------------------------------------
+
 
 def test_ongoing_seconds_clamps_to_zero_and_preserves_float(app):
     assert app._ongoing_seconds(3600.7, 60) == pytest.approx(0.7)

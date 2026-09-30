@@ -3,7 +3,7 @@
 A lightweight system tray application that tracks your active and idle time using CSV-only persistence.
 
 ![License](https://img.shields.io/github/license/markuspabst/ActivityTracker)
-![Python](https://img.shields.io/badge/python-3.9+-blue.svg)
+![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![macOS](https://img.shields.io/badge/platform-macos-lightgray)
 ![macOS 27](https://img.shields.io/badge/macOS-27+-success.svg)
 ![Tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/markuspabst/ActivityTracker/main/tests/badge.json)
@@ -48,7 +48,11 @@ A lightweight system tray application that tracks your active and idle time usin
   │
   ├─ SessionTracker.save_all_days()  │ (if save_interval met)
   │   └─ PersistenceManager.save_segments()
-  │       → activities-{year}.csv
+  │       ├─ optimize_segments(): filter → fill gaps → merge
+  │       └─ append/rewrite activities-{year}.csv (newest-first)
+  │
+  ├─ optimize_csv()                  │ (throttled: max once per 4 h for periodic saves)
+  │   └─ optimize_year_file()
   │
   └─ AppMenu.update_ui()             │ (dispatches to main thread on macOS)
       ├─ Read from session.days for active/idle
@@ -78,6 +82,9 @@ truth for all aggregates):
 | duration_min | Duration in minutes (integer, floored) |
 | duration_seconds | Duration in seconds (for precision) |
 
+Rows are stored **newest-first** (latest `date start` on top) so the most
+recent activity is immediately visible when opening the file.
+
 Per-day and per-week active/idle totals (`get_minutes_for_date`,
 `get_weekly_minutes`) are derived directly from the segment log, so there is no
 separate daily-summary file. The day's `active_min + idle_min` always matches
@@ -86,7 +93,7 @@ the sum of its segment durations. Days with no activity contribute zero.
 ## Quick Start
 
 ### Prerequisites
-- Python 3.9 or higher
+- Python 3.11 or higher
 - macOS 10.15+ (native support); Linux/Windows support via `platform_layer/`
 
 ### Installation
@@ -166,11 +173,20 @@ Access via system tray icon → Settings:
 
 ## CSV Optimization
 
-The activity log is optimized automatically: after every successful save, consecutive
-same-state segments whose gaps are within the idle threshold are merged into a
-single segment. This runs on the same cadence as the save interval, so the on-disk
-data stays compact without any manual action. (The `optimize_csv` routine is also
-available programmatically if a one-off merge is ever needed.)
+The activity log is optimized automatically in two stages:
+
+1. **Per-day optimization on every save**: before writing, each day's segments are
+   normalized through a pipeline that filters boundary idle time, fills internal
+   gaps with idle segments, and merges consecutive same-state segments whose gaps
+   are within the idle threshold.
+
+2. **Whole-year optimization (throttled)**: the entire year's file is re-read,
+   re-optimized per day, and rewritten at most once every 4 hours during automatic
+   saves. User-initiated **Force Save** optimizes immediately. This keeps the log
+   compact while avoiding unnecessary full-file rewrites every hour.
+
+The `optimize_csv` routine is also available programmatically if a one-off
+optimization is ever needed.
 
 ## Testing
 
@@ -182,6 +198,10 @@ pytest tests/ -v
 pytest tests/test_tracking.py -v      # Session tracking & persistence
 pytest tests/test_requirements.py -v  # Feature requirements
 pytest tests/test_scenarios.py -v     # Integration scenarios
+
+# Linting and type checking
+ruff check activitytracker tests
+mypy activitytracker
 ```
 
 ### Component Overview
@@ -190,7 +210,7 @@ pytest tests/test_scenarios.py -v     # Integration scenarios
 |-----------|---------------|
 | `activitytracker/app.py` | Main application controller, event loop, save scheduling |
 | `activitytracker/tracking.py` | SessionTracker: active/idle detection, sleep-gap detection, midnight rollover, orphan finalization, segment management |
-| `activitytracker/persistence.py` | CSV I/O, weekly aggregation, segment merging, data persistence resilience |
+| `activitytracker/persistence.py` | CSV I/O, weekly aggregation, segment optimization pipeline (filter → fill gaps → merge), newest-first writes, data persistence resilience |
 | `activitytracker/models.py` | TimeSegment and Day dataclasses |
 | `activitytracker/activity_tracker_menu.py` | System tray menu UI (macOS 27+: all operations dispatch to main thread) |
 | `activitytracker/platform_layer/` | Native idle detection and platform helpers |

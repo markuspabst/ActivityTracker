@@ -21,8 +21,8 @@ from activitytracker.platform_layer import PlatformABC
 # Helper for running code on the main thread
 # ------------------------------------------------------------
 try:
-    from Foundation import NSObject
-    import objc
+    from Foundation import NSObject  # type: ignore[import-untyped]
+    import objc  # type: ignore[import-untyped]
 
     class _MainThreadRunner(NSObject):
         def initWithCallable_args_kwargs_(self, callable_fn, args, kwargs):
@@ -48,18 +48,23 @@ try:
             runner = _MainThreadRunner.alloc().initWithCallable_args_kwargs_(
                 func, args, kwargs
             )
-            runner.performSelectorOnMainThread_withObject_waitUntilDone_("run", None, True)
+            runner.performSelectorOnMainThread_withObject_waitUntilDone_(
+                "run", None, True
+            )
             if runner.exception:
                 raise runner.exception
             return runner.result
+
         return wrapper
 
     _CAN_RUN_ON_MAIN = True
 
 except Exception:
-    _MainThreadRunner = None  # noqa
+    _MainThreadRunner = None  # type: ignore  # noqa
+
     def _run_on_main(func):
-        return func # Passthrough if pyobjc fails
+        return func  # Passthrough if pyobjc fails
+
     _CAN_RUN_ON_MAIN = False
 
 
@@ -72,7 +77,7 @@ def run_on_main_thread(func, *args, **kwargs):
 
 
 def _osa_escape(value: str) -> str:
-    """Escape a string for safe interpolation into an osascript double-quoted literal."""
+    """Escape a string for safe use in an osascript double-quoted literal."""
     if value is None:
         return ""
     return value.replace("\\", "\\\\").replace('"', '\\"')
@@ -110,12 +115,11 @@ try:
 
     _HAS_SLIDER_HANDLER = True
 except Exception:
-    _SliderHandler = None  # noqa
+    _SliderHandler = None  # type: ignore  # noqa
     _HAS_SLIDER_HANDLER = False
 
 
 class MacOSPlatform(PlatformABC):
-
     _idle_cache: dict = {"time": 0.0, "value": None}
     IDLE_CACHE_TTL: float = 1.0
     _can_run_on_main = _CAN_RUN_ON_MAIN
@@ -126,7 +130,8 @@ class MacOSPlatform(PlatformABC):
     def is_screen_locked(self) -> bool:
         """Check if the screen is locked."""
         try:
-            import Quartz
+            import Quartz  # type: ignore[import-untyped]
+
             session_info = Quartz.CGSessionCopyCurrentDictionary()
             if session_info:
                 return session_info.get("CGSSessionScreenIsLocked", False)
@@ -142,7 +147,8 @@ class MacOSPlatform(PlatformABC):
 
         value = None
         try:
-            import Quartz
+            import Quartz  # type: ignore[import-untyped]
+
             candidate = Quartz.CGEventSourceSecondsSinceLastEventType(
                 Quartz.kCGEventSourceStateHIDSystemState,
                 Quartz.kCGAnyInputEventType,
@@ -215,14 +221,18 @@ class MacOSPlatform(PlatformABC):
 
     def bring_app_to_front(self) -> None:
         try:
-            from AppKit import NSApplication
+            from AppKit import NSApplication  # type: ignore[import-untyped]
+
             NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
         except Exception:
             pass
 
     def ask_slider_dialog(
-        self, title: str, current: float,
-        min_value: float = 0, max_value: float = 100,
+        self,
+        title: str,
+        current: float,
+        min_value: float = 0,
+        max_value: float = 100,
     ) -> Optional[float]:
         """Native dialog with a slider.
 
@@ -240,7 +250,7 @@ class MacOSPlatform(PlatformABC):
         if not _HAS_SLIDER_HANDLER:
             return None
         try:
-            from AppKit import (
+            from AppKit import (  # type: ignore[import-untyped]
                 NSAlert,
                 NSApplication,
                 NSSlider,
@@ -286,7 +296,8 @@ class MacOSPlatform(PlatformABC):
 
             subprocess.run(
                 ["osascript", "-e", 'tell application "System Events" to activate'],
-                capture_output=True, check=False,
+                capture_output=True,
+                check=False,
             )
 
             response = alert.runModal()
@@ -300,12 +311,15 @@ class MacOSPlatform(PlatformABC):
         """osascript-based text input dialog (thread-safe)."""
         proc = subprocess.run(
             [
-                "osascript", "-e",
+                "osascript",
+                "-e",
                 f'tell application "System Events" to set response to '
                 f'display dialog "{_osa_escape(title)}" default answer "{current:.1f}" '
                 f'buttons {{"Cancel", "OK"}} default button "OK"',
             ],
-            capture_output=True, text=True, check=False,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         if proc.returncode == 0 and proc.stdout.strip():
             try:
@@ -329,7 +343,7 @@ class MacOSPlatform(PlatformABC):
     def _choose_folder_native(self, prompt: str = "") -> Optional[str]:
         """AppKit-based folder chooser (main thread only)."""
         try:
-            from AppKit import NSOpenPanel, NSApplication
+            from AppKit import NSOpenPanel, NSApplication  # type: ignore[import-untyped]
 
             # Activate to bring the panel to the front
             NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
@@ -354,18 +368,21 @@ class MacOSPlatform(PlatformABC):
         try:
             subprocess.run(
                 ["osascript", "-e", 'tell application "System Events" to activate'],
-                capture_output=True, check=False,
+                capture_output=True,
+                check=False,
             )
         except Exception:
             pass
         try:
-            script = 'set f to choose folder'
+            script = "set f to choose folder"
             if prompt:
                 script += f' with prompt "{_osa_escape(prompt)}"'
-            script += '\nreturn POSIX path of f'
+            script += "\nreturn POSIX path of f"
             r = subprocess.run(
                 ["osascript", "-e", script],
-                capture_output=True, text=True, check=False,
+                capture_output=True,
+                text=True,
+                check=False,
             )
             return r.stdout.strip() if r.returncode == 0 else None
         except Exception:
@@ -385,8 +402,7 @@ class MacOSPlatform(PlatformABC):
         if not exec_dir.exists():
             return None
         executables = [
-            str(f) for f in exec_dir.iterdir()
-            if f.is_file() and os.access(f, os.X_OK)
+            str(f) for f in exec_dir.iterdir() if f.is_file() and os.access(f, os.X_OK)
         ]
         return executables[0] if executables else None
 
@@ -394,7 +410,8 @@ class MacOSPlatform(PlatformABC):
         app_executable = self._get_app_executable_path()
         if not app_executable:
             raise RuntimeError(
-                "Autostart requires packaged ActivityTracker.app. Build with py2app first."
+                "Autostart requires packaged ActivityTracker.app. "
+                "Build with py2app first."
             )
         os.makedirs(LAUNCH_AGENT_DIR, exist_ok=True)
         os.makedirs(LOG_DIR, exist_ok=True)
@@ -418,7 +435,8 @@ class MacOSPlatform(PlatformABC):
     def autostart_loaded(self) -> bool:
         result = subprocess.run(
             ["launchctl", "print", f"{self._launchctl_domain()}/{LAUNCH_AGENT_LABEL}"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         return result.returncode == 0
 
@@ -427,21 +445,25 @@ class MacOSPlatform(PlatformABC):
         domain = self._launchctl_domain()
         subprocess.run(
             ["launchctl", "bootout", domain, LAUNCH_AGENT_FILE],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         subprocess.run(
             ["launchctl", "bootstrap", domain, LAUNCH_AGENT_FILE],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         subprocess.run(
             ["launchctl", "enable", f"{domain}/{LAUNCH_AGENT_LABEL}"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
 
     def uninstall_autostart(self) -> None:
         subprocess.run(
             ["launchctl", "bootout", self._launchctl_domain(), LAUNCH_AGENT_FILE],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         if os.path.isfile(LAUNCH_AGENT_FILE):
             os.remove(LAUNCH_AGENT_FILE)
@@ -458,7 +480,9 @@ class MacOSPlatform(PlatformABC):
             )
             subprocess.run(
                 ["osascript", "-e", script],
-                capture_output=True, text=True, check=False,
+                capture_output=True,
+                text=True,
+                check=False,
             )
         except Exception:
             pass
@@ -477,12 +501,20 @@ class MacOSPlatform(PlatformABC):
     # ── Dashboard scripting ─────────────────────────────────
 
     def find_dashboard_script(self) -> Path:
-        local = Path(__file__).resolve().parent.parent / "scripts" / "generate_dashboard.py"
+        local = (
+            Path(__file__).resolve().parent.parent / "scripts" / "generate_dashboard.py"
+        )
         if local.exists():
             return local
         app_path = self.get_app_bundle_path()
         if app_path:
-            bundle = Path(app_path) / "Contents" / "Resources" / "scripts" / "generate_dashboard.py"
+            bundle = (
+                Path(app_path)
+                / "Contents"
+                / "Resources"
+                / "scripts"
+                / "generate_dashboard.py"
+            )
             if bundle.exists():
                 return bundle
         return local
@@ -492,14 +524,20 @@ class MacOSPlatform(PlatformABC):
         if app_path:
             bundled_python = Path(app_path) / "Contents" / "MacOS" / "python"
             resources = Path(app_path) / "Contents" / "Resources"
-            lib_dir = resources / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}"
+            lib_dir = (
+                resources
+                / "lib"
+                / f"python{sys.version_info.major}.{sys.version_info.minor}"
+            )
             if bundled_python.exists() and lib_dir.exists():
                 env = os.environ.copy()
                 env["PYTHONHOME"] = str(resources)
-                env["PYTHONPATH"] = os.pathsep.join([
-                    str(lib_dir),
-                    str(lib_dir / "lib-dynload"),
-                ])
+                env["PYTHONPATH"] = os.pathsep.join(
+                    [
+                        str(lib_dir),
+                        str(lib_dir / "lib-dynload"),
+                    ]
+                )
                 return str(bundled_python), env
         return sys.executable, None
 
@@ -508,7 +546,10 @@ class MacOSPlatform(PlatformABC):
     def get_system_locale(self) -> Optional[str]:
         try:
             from Foundation import NSUserDefaults
-            langs = NSUserDefaults.standardUserDefaults().objectForKey_("AppleLanguages")
+
+            langs = NSUserDefaults.standardUserDefaults().objectForKey_(
+                "AppleLanguages"
+            )
             if langs and len(langs) > 0:
                 lang = str(langs[0]).split("-", maxsplit=1)[0]
                 if lang and lang.lower() != "c":
@@ -520,6 +561,7 @@ class MacOSPlatform(PlatformABC):
     def locale_display_name(self, code: str) -> Optional[str]:
         try:
             from Foundation import NSLocale, NSLocaleIdentifier
+
             loc = NSLocale.alloc().initWithLocaleIdentifier_(code)
             name = loc.displayNameForKey_value_(NSLocaleIdentifier, code)
             if name:

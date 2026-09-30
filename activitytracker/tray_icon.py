@@ -2,6 +2,7 @@ from __future__ import annotations
 import functools
 from PIL import Image, ImageDraw
 
+
 @functools.lru_cache(maxsize=8)
 def create_icon(emoji_char, size=64):
     color_map = {"🔴": (255, 50, 50), "🟡": (255, 200, 30), "🟢": (50, 200, 50)}
@@ -11,6 +12,7 @@ def create_icon(emoji_char, size=64):
     margin = 3
     draw.ellipse([margin, margin, size - margin, size - margin], fill=color + (255,))
     return img
+
 
 def get_status_icon(
     is_idle: bool,

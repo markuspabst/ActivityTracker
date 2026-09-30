@@ -13,8 +13,11 @@ import os
 import threading
 from datetime import datetime, date, timedelta
 import datetime as _dt_module
-from typing import Any, Dict, List, Optional
-from activitytracker.persistence import PersistenceManager, DEFAULT_IDLE_THRESHOLD_SECONDS
+from typing import Any, Dict, Optional
+from activitytracker.persistence import (
+    PersistenceManager,
+    DEFAULT_IDLE_THRESHOLD_SECONDS,
+)
 from activitytracker.models import TimeSegment, Day
 
 import platformdirs
@@ -46,7 +49,9 @@ DEFAULT_BASE_DIR = platformdirs.user_data_dir(APP_NAME)
 # custom data directory selection.
 CONFIG_DIR = DEFAULT_BASE_DIR
 CONFIG_FILE = os.path.join(CONFIG_DIR, "activity_tracker_config.json")
-LEGACY_CONFIG_FILE = os.path.join(platformdirs.user_config_dir(APP_NAME), "activity_tracker_config.json")
+LEGACY_CONFIG_FILE = os.path.join(
+    platformdirs.user_config_dir(APP_NAME), "activity_tracker_config.json"
+)
 STATE_FILE = os.path.join(DEFAULT_BASE_DIR, "state.json")
 DATA_DIR: Optional[str] = None
 
@@ -54,35 +59,41 @@ DATA_DIR: Optional[str] = None
 # CONFIG
 # ------------------------------------------------------------
 
+
 def load_config() -> Dict[str, Any]:
     if not os.path.exists(CONFIG_FILE):
         return {}
     try:
-        with open(CONFIG_FILE, 'r') as f:
+        with open(CONFIG_FILE, "r") as f:
             return json.load(f)
     except (IOError, json.JSONDecodeError):
         return {}
 
+
 def save_config(config: Dict[str, Any]) -> None:
     os.makedirs(CONFIG_DIR, exist_ok=True)
-    with open(CONFIG_FILE, 'w') as f:
+    with open(CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=2)
+
 
 def get_config_value(key: str, default: Any = None) -> Any:
     return load_config().get(key, default)
+
 
 def set_config_value(key: str, value: Any) -> None:
     config = load_config()
     config[key] = value
     save_config(config)
 
+
 def get_configured_data_dir() -> str:
-    return get_config_value('data_dir', DEFAULT_BASE_DIR)
+    return get_config_value("data_dir", DEFAULT_BASE_DIR)
 
 
 def get_state_file_path() -> str:
     os.makedirs(DEFAULT_BASE_DIR, exist_ok=True)
     return STATE_FILE
+
 
 def set_data_dir(path: str, persist: bool = False) -> None:
     global DATA_DIR
@@ -103,6 +114,7 @@ def reset_data_dir_to_default() -> None:
 # ------------------------------------------------------------
 # SESSION TRACKER
 # ------------------------------------------------------------
+
 
 class SessionTracker:
     def __init__(self, persistence_manager: PersistenceManager) -> None:
@@ -131,7 +143,10 @@ class SessionTracker:
             # resets to ~0, so this condition detects exactly the false-active case.
             if self._last_tick_time is not None:
                 gap_seconds = (now - self._last_tick_time).total_seconds()
-                if gap_seconds > SLEEP_GAP_THRESHOLD_SECONDS and idle_time <= idle_threshold:
+                if (
+                    gap_seconds > SLEEP_GAP_THRESHOLD_SECONDS
+                    and idle_time <= idle_threshold
+                ):
                     self._insert_sleep_gap(self._last_tick_time, now)
             self._last_tick_time = now
 
@@ -141,30 +156,44 @@ class SessionTracker:
             # Split an existing segment at midnight before processing a state
             # change. Otherwise a transition on the first tick of a new day
             # closes the previous day's segment using the new day's timestamp.
-            if self.current_segment and self.current_segment.start_time.date() != current_date:
-                midnight = datetime.combine(current_date, datetime.min.time()).replace(microsecond=0)
+            if (
+                self.current_segment
+                and self.current_segment.start_time.date() != current_date
+            ):
+                midnight = datetime.combine(current_date, datetime.min.time()).replace(
+                    microsecond=0
+                )
                 self.current_segment.end_time = midnight
 
-                new_day_start = datetime.combine(current_date, datetime.min.time()).replace(microsecond=0)
-                self.current_segment = TimeSegment(state=self.current_segment.state, start_time=new_day_start)
+                new_day_start = datetime.combine(
+                    current_date, datetime.min.time()
+                ).replace(microsecond=0)
+                self.current_segment = TimeSegment(
+                    state=self.current_segment.state, start_time=new_day_start
+                )
                 self.days[current_date].segments.append(self.current_segment)
 
                 # Save the completed day as well as the new day's initial segment.
                 self.save_all_days()
 
             is_idle_by_time = idle_time > idle_threshold
-            current_state = 'idle' if is_idle_by_time or self.is_locked else 'active'
+            current_state = "idle" if is_idle_by_time or self.is_locked else "active"
 
             if self.current_segment is None:
                 self.current_segment = TimeSegment(state=current_state, start_time=now)
                 self.days[current_date].segments.append(self.current_segment)
             elif self.current_segment.state != current_state:
                 # Ensure end_time is always >= start_time
-                end_time = self.current_segment.start_time if now < self.current_segment.start_time else now
+                end_time = (
+                    self.current_segment.start_time
+                    if now < self.current_segment.start_time
+                    else now
+                )
                 self.current_segment.end_time = end_time
                 self.current_segment = TimeSegment(state=current_state, start_time=now)
                 self.days[current_date].segments.append(self.current_segment)
-            # else: state hasn't changed, continue with existing segment (end_time will be set on save)
+            # else: state hasn't changed, continue with existing segment
+            # (end_time will be set on save).
 
     def _insert_sleep_gap(self, gap_start: datetime, gap_end: datetime) -> None:
         """Record a sleep/suspend interval [gap_start, gap_end) as Idle segments.
@@ -180,14 +209,18 @@ class SessionTracker:
         last_segment = None
         while cur < gap_end:
             day = cur.date()
-            day_end = datetime.combine(day + timedelta(days=1), datetime.min.time()).replace(microsecond=0)
+            day_end = datetime.combine(
+                day + timedelta(days=1), datetime.min.time()
+            ).replace(microsecond=0)
             seg_end = gap_end if gap_end <= day_end else day_end
             segment = TimeSegment(state="idle", start_time=cur, end_time=seg_end)
             self.days.setdefault(day, Day(date=day)).segments.append(segment)
             last_segment = segment
             if gap_end <= day_end:
                 break
-            cur = datetime.combine(day, datetime.min.time()).replace(microsecond=0) + timedelta(days=1)
+            cur = datetime.combine(day, datetime.min.time()).replace(
+                microsecond=0
+            ) + timedelta(days=1)
         if last_segment is not None:
             self.current_segment = last_segment
 
@@ -199,9 +232,14 @@ class SessionTracker:
     def pause_tracking(self) -> None:
         """Close tracked time at the last valid sample and stop the live segment."""
         with self._lock:
-            if self.current_segment is not None and self.current_segment.end_time is None:
+            if (
+                self.current_segment is not None
+                and self.current_segment.end_time is None
+            ):
                 last_sample = self._last_tick_time or self.current_segment.start_time
-                self.current_segment.end_time = max(self.current_segment.start_time, last_sample)
+                self.current_segment.end_time = max(
+                    self.current_segment.start_time, last_sample
+                )
 
             self.current_segment = None
             self._last_tick_time = None
@@ -220,7 +258,9 @@ class SessionTracker:
                         open_segments.append(seg)
                         seg.end_time = now
 
-            idle_threshold = getattr(self, "idle_threshold", DEFAULT_IDLE_THRESHOLD_SECONDS)
+            idle_threshold = getattr(
+                self, "idle_threshold", DEFAULT_IDLE_THRESHOLD_SECONDS
+            )
             try:
                 self.pm.save_segments(self.days, idle_threshold=idle_threshold)
             except Exception:
@@ -241,16 +281,16 @@ class SessionTracker:
             current_date = datetime.now().date()
 
             if current_date in self.days and self.current_segment:
-                # Keep ALL segments but reset end_time for the current ongoing segment
-                # This preserves historical data for today while allowing the current segment to continue
+                # Keep ALL segments but reset end_time for the current ongoing
+                # segment. This preserves historical data for today while allowing
+                # the current segment to continue.
                 updated_segments = []
                 for seg in self.days[current_date].segments:
                     if seg.start_time == self.current_segment.start_time:
-                        # This is the current segment - reset end_time for continued tracking
+                        # This is the current segment - reset end_time for
+                        # continued tracking.
                         cur_seg = TimeSegment(
-                            state=seg.state,
-                            start_time=seg.start_time,
-                            end_time=None
+                            state=seg.state, start_time=seg.start_time, end_time=None
                         )
                         self.current_segment = cur_seg
                         updated_segments.append(cur_seg)
@@ -258,8 +298,8 @@ class SessionTracker:
                         # Keep historical segments as-is
                         updated_segments.append(seg)
 
-                # Filter idle segments that are before first active or after last active,
-                # ensuring the live current segment is never discarded from memory.
+                # Filter idle segments that are before first active or after last
+                # active, ensuring the live current segment is never discarded.
                 filtered = self.pm._filter_idle_boundary_segments(updated_segments)
                 if self.current_segment not in filtered:
                     filtered.append(self.current_segment)
@@ -287,8 +327,11 @@ class SessionTracker:
         if segments_for_today:
             if today not in self.days:
                 self.days[today] = Day(date=today)
-            # Append only new segments to avoid duplicates if recover_from_crash already added some
-            existing_segment_start_times = {seg.start_time for seg in self.days[today].segments}
+            # Append only new segments to avoid duplicates if recover_from_crash
+            # already added some.
+            existing_segment_start_times = {
+                seg.start_time for seg in self.days[today].segments
+            }
             for segment in segments_for_today:
                 if segment.start_time not in existing_segment_start_times:
                     self.days[today].segments.append(segment)
@@ -304,22 +347,33 @@ class SessionTracker:
             # (no unknown time is credited). The segment is finalized and not
             # resumed as the current (ongoing) segment.
             open_segments = [
-                s for s in self.days[today].segments
+                s
+                for s in self.days[today].segments
                 if s.end_time is None and s is not live_segment
             ]
             if open_segments:
                 last_write = self.pm.read_last_segment_write()
-                if last_write is not None and not isinstance(last_write, _dt_module.datetime):
-                    logger.warning("Invalid last_segment_write timestamp: %s", last_write)
+                if last_write is not None and not isinstance(
+                    last_write, _dt_module.datetime
+                ):
+                    logger.warning(
+                        "Invalid last_segment_write timestamp: %s", last_write
+                    )
                     last_write = None
                 now = datetime.now().replace(microsecond=0)
                 for seg in open_segments:
-                    seg.end_time = max(seg.start_time, min(last_write, now)) if last_write else seg.start_time
+                    seg.end_time = (
+                        max(seg.start_time, min(last_write, now))
+                        if last_write
+                        else seg.start_time
+                    )
                 # Orphan finalized; do not resume it as the current segment.
                 self.current_segment = None
 
         if live_segment is not None:
-            live_day = self.days.setdefault(live_segment.start_time.date(), Day(date=live_segment.start_time.date()))
+            live_day = self.days.setdefault(
+                live_segment.start_time.date(), Day(date=live_segment.start_time.date())
+            )
             if not any(segment is live_segment for segment in live_day.segments):
                 live_day.segments.append(live_segment)
                 live_day.segments.sort(key=lambda segment: segment.start_time)
@@ -329,6 +383,7 @@ class SessionTracker:
     def set_locked(self, is_locked: bool) -> None:
         self.is_locked = is_locked
         self.on_tick(0, 0)
+
 
 # ------------------------------------------------------------
 # FORMATTING HELPERS

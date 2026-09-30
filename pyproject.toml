@@ -27,6 +27,8 @@ dev = [
     "pytest",
     "pytest-cov",
     "coverage",
+    "ruff",
+    "mypy",
 ]
 
 [tool.briefcase]

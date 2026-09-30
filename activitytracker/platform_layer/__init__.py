@@ -19,6 +19,7 @@ from typing import Optional, Tuple
 # Abstract Base
 # ------------------------------------------------------------
 
+
 class PlatformABC(abc.ABC):
     """Interface that every platform backend must implement."""
 
@@ -60,8 +61,11 @@ class PlatformABC(abc.ABC):
         """Bring the application window to front (for dialog input)."""
 
     def ask_slider_dialog(
-        self, title: str, current: float,
-        min_value: float = 0, max_value: float = 100,
+        self,
+        title: str,
+        current: float,
+        min_value: float = 0,
+        max_value: float = 100,
     ) -> Optional[float]:
         """Modal dialog with a numeric input.  Return None on cancel."""
         return None
@@ -146,6 +150,7 @@ def get_platform() -> PlatformABC:
 
     if detected == "macos":
         from activitytracker.platform_layer.macos import MacOSPlatform
+
         _platform_instance = MacOSPlatform()
     else:
         _platform_instance = FallbackPlatform()
@@ -162,6 +167,7 @@ def set_platform(platform: PlatformABC) -> None:
 # ------------------------------------------------------------
 # Fallback (generic) implementation
 # ------------------------------------------------------------
+
 
 class FallbackPlatform(PlatformABC):
     """Generic implementation that works anywhere but has no native niceties."""
@@ -208,4 +214,6 @@ class FallbackPlatform(PlatformABC):
         return None
 
     def find_dashboard_script(self) -> Path:
-        return Path(__file__).resolve().parent.parent / "scripts" / "generate_dashboard.py"
+        return (
+            Path(__file__).resolve().parent.parent / "scripts" / "generate_dashboard.py"
+        )

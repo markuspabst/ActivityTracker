@@ -28,4 +28,6 @@ def test_macos_platform_is_wired_to_status_menu(monkeypatch):
     menu = activity_tracker_menu.AppMenu(MagicMock())
 
     assert menu.platform is macos_platform
-    icon_factory.assert_called_once_with("ActivityTracker", icon_image, "ActivityTracker", menu_instance)
+    icon_factory.assert_called_once_with(
+        "ActivityTracker", icon_image, "ActivityTracker", menu_instance
+    )

@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from importlib.metadata import PackageNotFoundError, version as package_version
 from typing import Any, Callable, Optional
 
-from pystray import Icon, Menu, MenuItem
+from pystray import Icon, Menu, MenuItem  # type: ignore[import-untyped]
 
 from activitytracker import i18n
 from activitytracker.platform_layer import get_platform
@@ -17,18 +17,23 @@ class AppMenu:
         self.app = app_controller
         self.platform = get_platform()
         self._last_status_icon: Optional[str] = None
-        self._active_today_session = 0
-        self._idle_today_session = 0
+        self._active_today_session: float = 0.0
+        self._idle_today_session: float = 0.0
         self._session_start: Optional[datetime] = None
-        self._total_weekly_active = 0
-        self._total_weekly_idle = 0
+        self._total_weekly_active: float = 0.0
+        self._total_weekly_idle: float = 0.0
 
         # Create icon on main thread - critical for macOS 27
         run_on_main_thread(self._create_icon)
 
     def _create_icon(self) -> None:
         """Create the pystray icon on the main thread."""
-        self.icon = Icon("ActivityTracker", create_icon("🟡"), "ActivityTracker", Menu(self._generate_menu_items))
+        self.icon = Icon(
+            "ActivityTracker",
+            create_icon("🟡"),
+            "ActivityTracker",
+            Menu(self._generate_menu_items),
+        )
 
     def run(self) -> None:
         run_on_main_thread(self.icon.run)
@@ -54,26 +59,45 @@ class AppMenu:
         self._session_start = session_start
 
         self._total_weekly_active = active_week
-        self._total_weekly_idle = weekly_idle_week if weekly_idle_week is not None else 0
+        self._total_weekly_idle = (
+            weekly_idle_week if weekly_idle_week is not None else 0
+        )
 
-        status_emoji = get_status_icon(is_idle, active_today, self.app.target_work_seconds, active_week, weekly_target)
+        status_emoji = get_status_icon(
+            is_idle,
+            active_today,
+            self.app.target_work_seconds,
+            active_week,
+            weekly_target,
+        )
         if status_emoji != self._last_status_icon:
-            run_on_main_thread(lambda: setattr(self.icon, 'icon', create_icon(status_emoji)))
+            run_on_main_thread(
+                lambda: setattr(self.icon, "icon", create_icon(status_emoji))
+            )
             self._last_status_icon = status_emoji
 
         if is_idle:
             status_indicator = "⏸️"
         elif active_today >= self.app.target_work_seconds:
             status_indicator = "✅"
-        elif self.app.weekly_target_seconds > 0 and (self._total_weekly_active / self.app.weekly_target_seconds * 100) >= 50:
+        elif (
+            self.app.weekly_target_seconds > 0
+            and (self._total_weekly_active / self.app.weekly_target_seconds * 100) >= 50
+        ):
             status_indicator = "🟢"
         else:
             status_indicator = "⏱️"
 
-        run_on_main_thread(lambda: setattr(self.icon, 'title', f"{status_indicator} {format_hours(active_today)}"))
+        run_on_main_thread(
+            lambda: setattr(
+                self.icon, "title", f"{status_indicator} {format_hours(active_today)}"
+            )
+        )
         run_on_main_thread(lambda: self.icon.update_menu())
 
-    def _create_progress_bar(self, percentage: float, current_value: str, target_value: str) -> str:
+    def _create_progress_bar(
+        self, percentage: float, current_value: str, target_value: str
+    ) -> str:
         """Create a progress bar: current | bar | target (percentage).
 
         The bar caps at full width once the target is reached; the numeric
@@ -89,36 +113,62 @@ class AppMenu:
 
     def _generate_menu_items(self):
         # Today progress
-        today_progress = (self._active_today_session / self.app.target_work_seconds * 100) if self.app.target_work_seconds > 0 else 0.0
-        weekly_progress = (self._total_weekly_active / self.app.weekly_target_seconds * 100) if self.app.weekly_target_seconds > 0 else 0.0
+        today_progress = (
+            (self._active_today_session / self.app.target_work_seconds * 100)
+            if self.app.target_work_seconds > 0
+            else 0.0
+        )
+        weekly_progress = (
+            (self._total_weekly_active / self.app.weekly_target_seconds * 100)
+            if self.app.weekly_target_seconds > 0
+            else 0.0
+        )
 
         # Generate progress bar for today
-        today_bar = self._create_progress_bar(today_progress,
-                                              format_hours(self._active_today_session),
-                                              format_hours(self.app.target_work_seconds))
+        today_bar = self._create_progress_bar(
+            today_progress,
+            format_hours(self._active_today_session),
+            format_hours(self.app.target_work_seconds),
+        )
         yield MenuItem(today_bar, None, enabled=False)
 
         if self._active_today_session > 0:
-            yield MenuItem(i18n.t("MENU_IDLE", value=format_hours(self._idle_today_session)), None, enabled=False)
-        session_start_str = self._session_start.strftime("%H:%M") if self._session_start else "N/A"
-        yield MenuItem(i18n.t("MENU_SESSION_STARTED", value=session_start_str), None, enabled=False)
+            yield MenuItem(
+                i18n.t("MENU_IDLE", value=format_hours(self._idle_today_session)),
+                None,
+                enabled=False,
+            )
+        session_start_str = (
+            self._session_start.strftime("%H:%M") if self._session_start else "N/A"
+        )
+        yield MenuItem(
+            i18n.t("MENU_SESSION_STARTED", value=session_start_str), None, enabled=False
+        )
         yield Menu.SEPARATOR
 
         # Weekly progress
         yield MenuItem(i18n.t("MENU_WEEKLY"), None, enabled=False)
 
         # Generate progress bar for weekly
-        weekly_bar = self._create_progress_bar(weekly_progress,
-                                               format_hours(self._total_weekly_active),
-                                               format_hours(self.app.weekly_target_seconds))
+        weekly_bar = self._create_progress_bar(
+            weekly_progress,
+            format_hours(self._total_weekly_active),
+            format_hours(self.app.weekly_target_seconds),
+        )
         yield MenuItem(weekly_bar, None, enabled=False)
 
         if self._total_weekly_active > 0 and self._total_weekly_idle > 0:
-            yield MenuItem(i18n.t("WEEK_IDLE", value=format_hours(self._total_weekly_idle)), None, enabled=False)
+            yield MenuItem(
+                i18n.t("WEEK_IDLE", value=format_hours(self._total_weekly_idle)),
+                None,
+                enabled=False,
+            )
         yield Menu.SEPARATOR
 
         # Settings label
-        yield MenuItem(i18n.t("GENERAL_SETTINGS"), self._generate_general_settings_menu())
+        yield MenuItem(
+            i18n.t("GENERAL_SETTINGS"), self._generate_general_settings_menu()
+        )
         yield MenuItem(i18n.t("GLOBAL_SETTINGS"), self._generate_global_settings_menu())
         yield MenuItem(i18n.t("REPORT"), self._generate_report_menu())
         yield Menu.SEPARATOR
@@ -175,11 +225,36 @@ class AppMenu:
             if active_starts:
                 date_label = day.strftime("%a %Y-%m-%d")
                 details = Menu(
-                    MenuItem(i18n.t("REPORT_START", value=min(active_starts).strftime("%H:%M")), None, enabled=False),
-                    MenuItem(i18n.t("REPORT_LAST_ACTIVE", value=max(active_ends).strftime("%H:%M")), None, enabled=False),
-                    MenuItem(i18n.t("REPORT_ACTIVE", value=format_hours(active_seconds)), None, enabled=False),
-                    MenuItem(i18n.t("REPORT_IDLE", value=format_hours(idle_seconds)), None, enabled=False),
-                    MenuItem(i18n.t("REPORT_PRODUCTIVITY", value=f"{productivity:.0f}%"), None, enabled=False),
+                    MenuItem(
+                        i18n.t(
+                            "REPORT_START", value=min(active_starts).strftime("%H:%M")
+                        ),
+                        None,
+                        enabled=False,
+                    ),
+                    MenuItem(
+                        i18n.t(
+                            "REPORT_LAST_ACTIVE",
+                            value=max(active_ends).strftime("%H:%M"),
+                        ),
+                        None,
+                        enabled=False,
+                    ),
+                    MenuItem(
+                        i18n.t("REPORT_ACTIVE", value=format_hours(active_seconds)),
+                        None,
+                        enabled=False,
+                    ),
+                    MenuItem(
+                        i18n.t("REPORT_IDLE", value=format_hours(idle_seconds)),
+                        None,
+                        enabled=False,
+                    ),
+                    MenuItem(
+                        i18n.t("REPORT_PRODUCTIVITY", value=f"{productivity:.0f}%"),
+                        None,
+                        enabled=False,
+                    ),
                 )
                 days.append(MenuItem(date_label, details))
 
@@ -197,9 +272,12 @@ class AppMenu:
             max_v: float,
         ) -> Callable:
             def _callback(_) -> None:
-                value = self.platform.ask_slider_dialog(i18n.t(title_key), current, min_v, max_v)
+                value = self.platform.ask_slider_dialog(
+                    i18n.t(title_key), current, min_v, max_v
+                )
                 if value is not None and value > 0:
                     setter(int(value * factor))
+
             return _callback
 
         daily_target_menu_items = []
@@ -211,16 +289,34 @@ class AppMenu:
             (10, i18n.t("TARGET_10H_HEAVY")),
         ]
         for hours, display_text in daily_presets:
-            daily_target_menu_items.append(MenuItem(display_text,
-                (lambda h_val: lambda *args: self.app.set_target(h_val * 3600))(hours),
-                checked=lambda _item, h_val=hours: self.app.target_work_seconds == h_val * 3600))
-        daily_target_menu_items.extend([
-            Menu.SEPARATOR,
-            MenuItem(i18n.t("SET_CUSTOM_VALUE"),
-                _slider_callback(self.app.set_target, "ASK_DAILY_TARGET_TITLE",
-                               self.app.target_work_seconds / 3600, 3600, 1.0, 24.0),
-                enabled=self.platform.supports_native_dialogs())
-        ])
+            daily_target_menu_items.append(
+                MenuItem(
+                    display_text,
+                    (lambda h_val: lambda *args: self.app.set_target(h_val * 3600))(
+                        hours
+                    ),
+                    checked=lambda _item, h_val=hours: (
+                        self.app.target_work_seconds == h_val * 3600
+                    ),
+                )
+            )
+        daily_target_menu_items.extend(
+            [
+                Menu.SEPARATOR,
+                MenuItem(
+                    i18n.t("SET_CUSTOM_VALUE"),
+                    _slider_callback(
+                        self.app.set_target,
+                        "ASK_DAILY_TARGET_TITLE",
+                        self.app.target_work_seconds / 3600,
+                        3600,
+                        1.0,
+                        24.0,
+                    ),
+                    enabled=self.platform.supports_native_dialogs(),
+                ),
+            ]
+        )
         daily_target_submenu = Menu(*daily_target_menu_items)
 
         weekly_target_menu_items = []
@@ -231,46 +327,106 @@ class AppMenu:
             (84, i18n.t("WEEK_TARGET_84H_MAX")),
         ]
         for hours, display_text in weekly_presets:
-            weekly_target_menu_items.append(MenuItem(display_text,
-                (lambda h_val: lambda *args: self.app.set_weekly_target(h_val * 3600))(hours),
-                checked=lambda _item, h_val=hours: self.app.weekly_target_seconds == h_val * 3600))
-        weekly_target_menu_items.extend([
-            Menu.SEPARATOR,
-            MenuItem(i18n.t("SET_CUSTOM_VALUE"),
-                _slider_callback(self.app.set_weekly_target, "ASK_WEEKLY_TARGET_TITLE",
-                               self.app.weekly_target_seconds / 3600, 3600, 1.0, 168.0),
-                enabled=self.platform.supports_native_dialogs())
-        ])
+            weekly_target_menu_items.append(
+                MenuItem(
+                    display_text,
+                    (
+                        lambda h_val: (
+                            lambda *args: self.app.set_weekly_target(h_val * 3600)
+                        )
+                    )(hours),
+                    checked=lambda _item, h_val=hours: (
+                        self.app.weekly_target_seconds == h_val * 3600
+                    ),
+                )
+            )
+        weekly_target_menu_items.extend(
+            [
+                Menu.SEPARATOR,
+                MenuItem(
+                    i18n.t("SET_CUSTOM_VALUE"),
+                    _slider_callback(
+                        self.app.set_weekly_target,
+                        "ASK_WEEKLY_TARGET_TITLE",
+                        self.app.weekly_target_seconds / 3600,
+                        3600,
+                        1.0,
+                        168.0,
+                    ),
+                    enabled=self.platform.supports_native_dialogs(),
+                ),
+            ]
+        )
         weekly_target_submenu = Menu(*weekly_target_menu_items)
 
         idle_menu_items = []
         idle_presets = [1, 2, 3, 5, 10, 15, 20, 30]
         for m in idle_presets:
-            idle_menu_items.append(MenuItem(f'{m} min',
-                (lambda m_val: lambda *args: self.app.set_idle_threshold(m_val * 60))(m),
-                checked=lambda _item, m_val=m: self.app.idle_threshold == m_val * 60))
-        idle_menu_items.extend([
-            Menu.SEPARATOR,
-            MenuItem(i18n.t("SET_CUSTOM_VALUE"),
-                _slider_callback(self.app.set_idle_threshold, "ASK_IDLE_THRESHOLD_TITLE",
-                               self.app.idle_threshold / 60, 60, 1, 30),
-                enabled=self.platform.supports_native_dialogs())
-        ])
+            idle_menu_items.append(
+                MenuItem(
+                    f"{m} min",
+                    (
+                        lambda m_val: (
+                            lambda *args: self.app.set_idle_threshold(m_val * 60)
+                        )
+                    )(m),
+                    checked=lambda _item, m_val=m: (
+                        self.app.idle_threshold == m_val * 60
+                    ),
+                )
+            )
+        idle_menu_items.extend(
+            [
+                Menu.SEPARATOR,
+                MenuItem(
+                    i18n.t("SET_CUSTOM_VALUE"),
+                    _slider_callback(
+                        self.app.set_idle_threshold,
+                        "ASK_IDLE_THRESHOLD_TITLE",
+                        self.app.idle_threshold / 60,
+                        60,
+                        1,
+                        30,
+                    ),
+                    enabled=self.platform.supports_native_dialogs(),
+                ),
+            ]
+        )
         idle_submenu = Menu(*idle_menu_items)
 
         save_interval_menu_items = []
         save_presets = [1, 5, 15, 30, 60, 120]
         for m in save_presets:
-            save_interval_menu_items.append(MenuItem(f'{m} min',
-                (lambda m_val: lambda *args: self.app.set_save_interval(m_val * 60))(m),
-                checked=lambda _item, m_val=m: self.app.write_interval == m_val * 60))
-        save_interval_menu_items.extend([
-            Menu.SEPARATOR,
-            MenuItem(i18n.t("SET_CUSTOM_VALUE"),
-                _slider_callback(self.app.set_save_interval, "ASK_SAVE_INTERVAL_TITLE",
-                               self.app.write_interval / 60, 60, 1, 120),
-                enabled=self.platform.supports_native_dialogs())
-        ])
+            save_interval_menu_items.append(
+                MenuItem(
+                    f"{m} min",
+                    (
+                        lambda m_val: (
+                            lambda *args: self.app.set_save_interval(m_val * 60)
+                        )
+                    )(m),
+                    checked=lambda _item, m_val=m: (
+                        self.app.write_interval == m_val * 60
+                    ),
+                )
+            )
+        save_interval_menu_items.extend(
+            [
+                Menu.SEPARATOR,
+                MenuItem(
+                    i18n.t("SET_CUSTOM_VALUE"),
+                    _slider_callback(
+                        self.app.set_save_interval,
+                        "ASK_SAVE_INTERVAL_TITLE",
+                        self.app.write_interval / 60,
+                        60,
+                        1,
+                        120,
+                    ),
+                    enabled=self.platform.supports_native_dialogs(),
+                ),
+            ]
+        )
         save_interval_submenu = Menu(*save_interval_menu_items)
 
         return Menu(
@@ -286,26 +442,43 @@ class AppMenu:
 
     def _create_global_settings_submenu(self) -> Menu:
         lang_menu_items = []
-        lang_menu_items.append(MenuItem(i18n.t("LANGUAGE_SYSTEM_DEFAULT"),
-            lambda *args: self.app.set_language(None),
-            checked=lambda _item: i18n._lang is None))
+        lang_menu_items.append(
+            MenuItem(
+                i18n.t("LANGUAGE_SYSTEM_DEFAULT"),
+                lambda *args: self.app.set_language(None),
+                checked=lambda _item: i18n._lang is None,
+            )
+        )
         for code in i18n.available_locales():
-            lang_menu_items.append(MenuItem(code.upper(),
-                (lambda c: lambda *args: self.app.set_language(c))(code),
-                checked=lambda _item, c=code: i18n._lang == c))
+            lang_menu_items.append(
+                MenuItem(
+                    code.upper(),
+                    (lambda c: lambda *args: self.app.set_language(c))(code),
+                    checked=lambda _item, c=code: i18n._lang == c,
+                )
+            )
         language_submenu = Menu(*lang_menu_items)
 
         data_folder_menu = Menu(
             MenuItem(self.app.pm.get_data_dir(), None, enabled=False),
             Menu.SEPARATOR,
-            MenuItem(i18n.t("OPEN_DATA_FOLDER"), lambda: self.platform.open_file_manager(self.app.pm.get_data_dir())),
-            MenuItem(i18n.t("SELECT_DATA_FOLDER"), self.app.select_data_folder,
-                   enabled=self.platform.supports_native_dialogs()),
+            MenuItem(
+                i18n.t("OPEN_DATA_FOLDER"),
+                lambda: self.platform.open_file_manager(self.app.pm.get_data_dir()),
+            ),
+            MenuItem(
+                i18n.t("SELECT_DATA_FOLDER"),
+                self.app.select_data_folder,
+                enabled=self.platform.supports_native_dialogs(),
+            ),
             MenuItem(i18n.t("RESET_DATA_FOLDER"), self.app.reset_data_folder),
         )
 
-        autostart_item = MenuItem(i18n.t("AUTOSTART_ENABLED"), self._toggle_autostart,
-                                 checked=lambda _item: self.platform.autostart_installed())
+        autostart_item = MenuItem(
+            i18n.t("AUTOSTART_ENABLED"),
+            self._toggle_autostart,
+            checked=lambda _item: self.platform.autostart_installed(),
+        )
 
         return Menu(
             MenuItem(i18n.t("LANGUAGE"), language_submenu),

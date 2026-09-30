@@ -1,8 +1,10 @@
 """Tests for tracking.py config helpers and lock handling."""
 
 import os
-from datetime import datetime, date, timedelta
+from datetime import datetime
+from datetime import datetime as _real_datetime
 from unittest.mock import MagicMock
+from unittest.mock import patch as _patch
 
 import pytest
 
@@ -20,7 +22,6 @@ from activitytracker.tracking import (
     SessionTracker,
 )
 from activitytracker.persistence import PersistenceManager
-from activitytracker.models import TimeSegment, Day
 
 
 @pytest.fixture
@@ -112,7 +113,9 @@ def test_state_file_path_stays_in_default_folder(isolate_config, tmp_path, monke
 
 def test_clear_last_segment_write_removes_timestamp(tmp_path):
     state_file = tmp_path / "state.json"
-    state_file.write_text('{"last_segment_write": "2026-07-22T14:05:03", "other": 1}', encoding="utf-8")
+    state_file.write_text(
+        '{"last_segment_write": "2026-07-22T14:05:03", "other": 1}', encoding="utf-8"
+    )
     pm = PersistenceManager(lambda: str(tmp_path), lambda: str(state_file))
 
     pm.clear_last_segment_write()
@@ -124,6 +127,7 @@ def test_clear_last_segment_write_removes_timestamp(tmp_path):
 # ------------------------------------------------------------
 # Session lock handling
 # ------------------------------------------------------------
+
 
 def test_set_locked_true_creates_idle_segment():
     s = SessionTracker(MagicMock())
@@ -174,9 +178,6 @@ def test_save_all_days_resets_current_segment_end_time(tmp_path):
 # Helpers
 # ------------------------------------------------------------
 
-from unittest.mock import patch as _patch
-from datetime import datetime as _real_datetime
-
 
 class _PatchNow:
     def __init__(self, module, value):
@@ -201,4 +202,5 @@ def _patch_now(module, value):
 
 def _patch_now_models(value):
     from activitytracker import models
+
     return _PatchNow(models, value)

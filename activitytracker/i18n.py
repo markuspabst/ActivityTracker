@@ -4,10 +4,12 @@ import os
 import sys
 from pathlib import Path
 
+from typing import Any
+
 from activitytracker.platform_layer import get_platform
 
-_translations = {}
-_lang = None
+_translations: dict[str, Any] = {}
+_lang: str | None = None
 
 
 def _get_locales_dir():

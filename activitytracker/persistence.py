@@ -27,7 +27,7 @@ def _hms_to_seconds(value: str) -> Optional[int]:
     """Parse an 'HH:MM:SS' (or 'HH:MM') time into seconds since midnight."""
     if not value:
         return None
-    fmt = "%H:%M:%S" if value.count(':') == 2 else "%H:%M"
+    fmt = "%H:%M:%S" if value.count(":") == 2 else "%H:%M"
     try:
         dt = datetime.strptime(value, fmt)
     except (ValueError, TypeError, AttributeError):
@@ -37,6 +37,8 @@ def _hms_to_seconds(value: str) -> Optional[int]:
 
 def _non_negative_int(value: Optional[str]) -> Optional[int]:
     """Parse a non-negative integer-like CSV value, or return None."""
+    if value is None:
+        return None
     try:
         numeric = float(value)
         if not math.isfinite(numeric) or numeric < 0:
@@ -56,31 +58,33 @@ def _row_duration_seconds(row: dict) -> int:
     return minutes * 60 if minutes is not None else 0
 
 
-def _parse_activities_row(row: dict, target_date: Optional[date] = None) -> Optional[TimeSegment]:
+def _parse_activities_row(
+    row: dict, target_date: Optional[date] = None
+) -> Optional[TimeSegment]:
     """Parse a single activities CSV row into a ``TimeSegment``.
 
     If *target_date* is provided, rows for other dates are ignored. Malformed
     or unsupported rows are skipped by returning ``None``.
     """
-    date_str = row.get('date')
-    state = row.get('state')
-    if not date_str or state not in ('active', 'idle'):
+    date_str = row.get("date")
+    state = row.get("state")
+    if not date_str or state not in ("active", "idle"):
         return None
     if target_date is not None and date_str != target_date.strftime("%Y-%m-%d"):
         return None
     try:
         day_date = date.fromisoformat(date_str)
-        start_fmt = "%H:%M:%S" if row['start'].count(':') == 2 else "%H:%M"
+        start_fmt = "%H:%M:%S" if row["start"].count(":") == 2 else "%H:%M"
         start_dt = datetime.combine(
             day_date,
-            datetime.strptime(row['start'], start_fmt).time(),
+            datetime.strptime(row["start"], start_fmt).time(),
         )
         end_dt = None
-        if row.get('end'):
-            end_fmt = "%H:%M:%S" if row['end'].count(':') == 2 else "%H:%M"
+        if row.get("end"):
+            end_fmt = "%H:%M:%S" if row["end"].count(":") == 2 else "%H:%M"
             end_dt = datetime.combine(
                 day_date,
-                datetime.strptime(row['end'], end_fmt).time(),
+                datetime.strptime(row["end"], end_fmt).time(),
             )
             if end_dt < start_dt and end_dt.time() == datetime.min.time():
                 end_dt += timedelta(days=1)
@@ -102,7 +106,9 @@ def _segment_to_row(seg: TimeSegment) -> Optional[dict]:
         "start": seg.start_time.strftime("%H:%M:%S"),
         "end": seg.end_time.strftime("%H:%M:%S") if seg.end_time else "",
         "duration_min": seg.duration_minutes,
-        "duration_seconds": int((seg.end_time - seg.start_time).total_seconds()) if seg.end_time else 0,
+        "duration_seconds": int((seg.end_time - seg.start_time).total_seconds())
+        if seg.end_time
+        else 0,
     }
 
 
@@ -116,7 +122,9 @@ def _first_active_starts(segments: List[TimeSegment]) -> Dict[date, datetime]:
     for seg in segments:
         if seg.state == "active" and seg.start_time is not None:
             day = seg.start_time.date()
-            first_active[day] = min(first_active.get(day, seg.start_time), seg.start_time)
+            first_active[day] = min(
+                first_active.get(day, seg.start_time), seg.start_time
+            )
     return first_active
 
 
@@ -133,9 +141,13 @@ def _read_existing_rows(path: str) -> Dict[str, dict]:
     try:
         with open(path, "r", newline="", encoding="utf-8") as f:
             for row in csv.DictReader(f):
-                date_str = row.get('date')
-                start_str = row.get('start')
-                if not date_str or not start_str or row.get('state') not in ('active', 'idle'):
+                date_str = row.get("date")
+                start_str = row.get("start")
+                if (
+                    not date_str
+                    or not start_str
+                    or row.get("state") not in ("active", "idle")
+                ):
                     # A truncated row or a file missing either identifying
                     # column/state cannot be merged safely. Skip it without
                     # discarding other valid rows.
@@ -156,18 +168,18 @@ def _drop_contained_rows(existing: Dict[str, dict], new_rows: List[dict]) -> Non
     (with an end) can contain others; an ongoing segment (end="") must not drop
     already-saved neighbors.
     """
-    for seg in sorted(new_rows, key=lambda s: (s['date'], s['start'])):
-        seg_date = seg['date']
-        seg_start = _hms_to_seconds(seg['start'])
-        seg_end = _hms_to_seconds(seg['end']) if seg['end'] else None
+    for seg in sorted(new_rows, key=lambda s: (s["date"], s["start"])):
+        seg_date = seg["date"]
+        seg_start = _hms_to_seconds(seg["start"])
+        seg_end = _hms_to_seconds(seg["end"]) if seg["end"] else None
         if seg_end is None or seg_start is None:
             continue
         for key in list(existing.keys()):
             erow = existing[key]
-            if erow['date'] != seg_date or key == f"{seg_date} {seg['start']}":
+            if erow["date"] != seg_date or key == f"{seg_date} {seg['start']}":
                 continue
-            e_start = _hms_to_seconds(erow['start'])
-            e_end = _hms_to_seconds(erow['end']) if erow['end'] else None
+            e_start = _hms_to_seconds(erow["start"])
+            e_end = _hms_to_seconds(erow["end"]) if erow["end"] else None
             if e_start is None or e_end is None:
                 continue
             if e_start >= seg_start and e_end <= seg_end:
@@ -175,7 +187,13 @@ def _drop_contained_rows(existing: Dict[str, dict], new_rows: List[dict]) -> Non
 
 
 class PersistenceManager:
-    __slots__ = ('_get_data_dir', '_get_state_file_path', '_path_cache', '_totals_cache', '_file_lock')
+    __slots__ = (
+        "_get_data_dir",
+        "_get_state_file_path",
+        "_path_cache",
+        "_totals_cache",
+        "_file_lock",
+    )
 
     def __init__(
         self,
@@ -225,7 +243,9 @@ class PersistenceManager:
     def get_log_file_path(self, prefix: str, year: int) -> Path:
         key = f"{prefix}-{year}"
         if key not in self._path_cache:
-            self._path_cache[key] = str(Path(self._get_data_dir()) / f"{prefix}-{year}.csv")
+            self._path_cache[key] = str(
+                Path(self._get_data_dir()) / f"{prefix}-{year}.csv"
+            )
         return Path(self._path_cache[key])
 
     def get_weekly_minutes(self, week_start_date: date) -> Tuple[int, int]:
@@ -253,7 +273,7 @@ class PersistenceManager:
             return self._day_totals_for_year_locked(year)
 
     def _day_totals_for_year_locked(self, year: int) -> Dict[str, Tuple[int, int]]:
-        """Read one year's activities log once and return {date: (active_min, idle_min)}.
+        """Read one year's log once and return {date: (active_min, idle_min)}.
 
         Results are cached per year; call ``invalidate_totals_cache(year)``
         after the file is re-written to force a fresh read.
@@ -280,7 +300,7 @@ class PersistenceManager:
                     duration_seconds = _row_duration_seconds(row)
                     date_str = seg.start_time.strftime("%Y-%m-%d")
                     active, idle = totals_seconds.get(date_str, (0, 0))
-                    if seg.state == 'active':
+                    if seg.state == "active":
                         active += duration_seconds
                     else:
                         idle += duration_seconds
@@ -336,18 +356,28 @@ class PersistenceManager:
                     segments.append(seg)
         return segments
 
-    def save_segments(self, segments_by_day: Dict[date, Day], idle_threshold: int = DEFAULT_IDLE_THRESHOLD_SECONDS) -> None:
+    def save_segments(
+        self,
+        segments_by_day: Dict[date, Day],
+        idle_threshold: int = DEFAULT_IDLE_THRESHOLD_SECONDS,
+    ) -> None:
         with self._file_lock:
             self._save_segments_locked(segments_by_day, idle_threshold)
 
-    def _save_segments_locked(self, segments_by_day: Dict[date, Day], idle_threshold: int = DEFAULT_IDLE_THRESHOLD_SECONDS) -> None:
+    def _save_segments_locked(
+        self,
+        segments_by_day: Dict[date, Day],
+        idle_threshold: int = DEFAULT_IDLE_THRESHOLD_SECONDS,
+    ) -> None:
         """Save segment-level data to a CSV file, by year."""
         if not segments_by_day:
             return
         segments_by_year: Dict[int, List[TimeSegment]] = {}
 
         for day, day_data in segments_by_day.items():
-            optimized_segments = self.optimize_segments(day_data.segments, idle_threshold)
+            optimized_segments = self.optimize_segments(
+                day_data.segments, idle_threshold
+            )
             # Ensure the year is scheduled for rewrite even if every segment for
             # this day was filtered out, so legacy-row migration still runs.
             segments_by_year.setdefault(day.year, []).extend(optimized_segments)
@@ -359,7 +389,9 @@ class PersistenceManager:
         """Convert segments to rows and rewrite the year's CSV, superseding rows
         that are fully contained within the new ones.
         """
-        new_rows = [row for seg in segments if (row := _segment_to_row(seg)) is not None]
+        new_rows = [
+            row for seg in segments if (row := _segment_to_row(seg)) is not None
+        ]
 
         path = str(self.get_log_file_path(ACTIVITIES_LOG_PREFIX, year))
         existing_segments = _read_existing_rows(path)
@@ -372,7 +404,17 @@ class PersistenceManager:
         sorted_keys = sorted(existing_segments.keys(), reverse=True)
         try:
             with open(path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=["date", "state", "start", "end", "duration_min", "duration_seconds"])
+                writer = csv.DictWriter(
+                    f,
+                    fieldnames=[
+                        "date",
+                        "state",
+                        "start",
+                        "end",
+                        "duration_min",
+                        "duration_seconds",
+                    ],
+                )
                 writer.writeheader()
                 for key in sorted_keys:
                     writer.writerow(existing_segments[key])
@@ -383,7 +425,9 @@ class PersistenceManager:
             logger.error("Failed to write %s: %s", path, exc)
             raise PersistenceWriteError(f"Could not write {path}: {exc}") from exc
 
-    def optimize_year_file(self, year: int, idle_threshold: int = DEFAULT_IDLE_THRESHOLD_SECONDS) -> Tuple[int, int]:
+    def optimize_year_file(
+        self, year: int, idle_threshold: int = DEFAULT_IDLE_THRESHOLD_SECONDS
+    ) -> Tuple[int, int]:
         """Read, optimize per-day, and rewrite one year's activities log.
 
         Returns ``(original_row_count, optimized_row_count)``.
@@ -403,7 +447,9 @@ class PersistenceManager:
         return len(segments), len(optimized)
 
     def optimize_segments(
-        self, segments: List[TimeSegment], idle_threshold: int = DEFAULT_IDLE_THRESHOLD_SECONDS
+        self,
+        segments: List[TimeSegment],
+        idle_threshold: int = DEFAULT_IDLE_THRESHOLD_SECONDS,
     ) -> List[TimeSegment]:
         """Normalize a day's segments into their final persisted form.
 
@@ -423,7 +469,9 @@ class PersistenceManager:
         return self.merge_segments_to_save(filled, idle_threshold)
 
     @staticmethod
-    def _filter_idle_boundary_segments(segments: List[TimeSegment]) -> List[TimeSegment]:
+    def _filter_idle_boundary_segments(
+        segments: List[TimeSegment],
+    ) -> List[TimeSegment]:
         """Filter out idle segments before first active start and after last active end.
 
         Idle segments between active segments are preserved (e.g., lunch break).
@@ -439,21 +487,27 @@ class PersistenceManager:
             return []
         first_active = min(first_active_per_day.values())
 
-        active_segments = [seg for seg in segments if seg.state == 'active' and seg.start_time is not None]
+        active_segments = [
+            seg
+            for seg in segments
+            if seg.state == "active" and seg.start_time is not None
+        ]
 
         # Check if an active segment is ongoing (end_time is None) or starts later
         has_ongoing_active = any(seg.end_time is None for seg in active_segments)
         latest_active_start = max(seg.start_time for seg in active_segments)
 
         last_active_end = None
-        active_with_end = [seg.end_time for seg in active_segments if seg.end_time is not None]
+        active_with_end = [
+            seg.end_time for seg in active_segments if seg.end_time is not None
+        ]
         if active_with_end:
             last_active_end = max(active_with_end)
 
         # Filter out idle segments outside the active window
         filtered = []
         for seg in segments:
-            if seg.state == 'idle':
+            if seg.state == "idle":
                 seg_start = seg.start_time
                 seg_end = seg.end_time
 
@@ -462,13 +516,17 @@ class PersistenceManager:
                 # (seg_end <= first_active) and corrupt idle that overlaps the
                 # first active start (seg_start < first_active), so no idle
                 # segment ever starts before the first active time.
-                if (seg_end and seg_end <= first_active) or (seg_start and seg_start < first_active):
+                if (seg_end and seg_end <= first_active) or (
+                    seg_start and seg_start < first_active
+                ):
                     continue
 
                 # Skip idle segments that start after the last active segment ended.
                 # If an active segment is ongoing or starts after this idle segment,
                 # this idle segment is NOT after the last active period.
-                if not has_ongoing_active or (seg_start and seg_start > latest_active_start):
+                if not has_ongoing_active or (
+                    seg_start and seg_start > latest_active_start
+                ):
                     if seg_start and last_active_end and seg_start >= last_active_end:
                         continue
 
@@ -524,7 +582,10 @@ class PersistenceManager:
         return result
 
     @staticmethod
-    def merge_segments_to_save(segments: List[TimeSegment], idle_threshold: int = DEFAULT_IDLE_THRESHOLD_SECONDS) -> List[TimeSegment]:
+    def merge_segments_to_save(
+        segments: List[TimeSegment],
+        idle_threshold: int = DEFAULT_IDLE_THRESHOLD_SECONDS,
+    ) -> List[TimeSegment]:
         """Merge consecutive same-state segments whose gap is within idle_threshold.
 
         Returns a new list of ``TimeSegment`` objects; the input list is never
@@ -546,13 +607,19 @@ class PersistenceManager:
                     and seg.start_time is not None
                     and prev.start_time.date() == seg.start_time.date()
                 )
-                if same_day and prev.end_time and seg.start_time and prev.state == seg.state:
+                if (
+                    same_day
+                    and prev.end_time
+                    and seg.start_time
+                    and prev.state == seg.state
+                ):
                     # Guard against overlapping segments (shouldn't happen in normal
                     # operation, but corrupt/legacy/manually-edited CSV could contain
                     # them). Never create a segment with end_time < start_time.
                     if seg.start_time < prev.end_time:
                         if seg.end_time and seg.end_time > prev.end_time:
-                            # Replace prev with a new copy so the original is not mutated
+                            # Replace prev with a new copy so the original is not
+                            # mutated.
                             merged[-1] = TimeSegment(
                                 state=prev.state,
                                 start_time=prev.start_time,
@@ -565,7 +632,8 @@ class PersistenceManager:
                         merged[-1] = TimeSegment(
                             state=prev.state,
                             start_time=prev.start_time,
-                            end_time=seg.end_time or datetime.now().replace(microsecond=0),
+                            end_time=seg.end_time
+                            or datetime.now().replace(microsecond=0),
                         )
                         continue
                 merged.append(seg)
@@ -582,10 +650,15 @@ class PersistenceManager:
                 and absorbed_idle[-1].end_time is not None
                 and seg.start_time is not None
                 and seg.end_time is not None
-                and absorbed_idle[-1].start_time.date() == seg.start_time.date() == seg.end_time.date()
+                and absorbed_idle[-1].start_time.date()
+                == seg.start_time.date()
+                == seg.end_time.date()
             ):
                 idle_duration = (seg.end_time - seg.start_time).total_seconds()
-                if 0 <= idle_duration <= idle_threshold and seg.start_time >= absorbed_idle[-1].end_time:
+                if (
+                    0 <= idle_duration <= idle_threshold
+                    and seg.start_time >= absorbed_idle[-1].end_time
+                ):
                     absorbed_idle[-1] = TimeSegment(
                         state="active",
                         start_time=absorbed_idle[-1].start_time,
@@ -597,7 +670,7 @@ class PersistenceManager:
         return _merge_same_state(absorbed_idle)
 
     def get_data_dir(self) -> str:
-        return self._get_data_dir()
+        return str(self._get_data_dir())
 
     # ------------------------------------------------------------
     # Runtime state (cross-process, lives next to the data files)

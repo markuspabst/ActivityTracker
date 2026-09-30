@@ -11,7 +11,9 @@ def test_bundle_info_plist_is_read(tmp_path, monkeypatch):
     plist_path.write_bytes(plistlib.dumps({"CFBundleShortVersionString": "1.2.3"}))
 
     platform = macos.MacOSPlatform()
-    monkeypatch.setattr(platform, "get_app_bundle_path", lambda: str(plist_path.parents[1]))
+    monkeypatch.setattr(
+        platform, "get_app_bundle_path", lambda: str(plist_path.parents[1])
+    )
 
     assert platform._get_bundle_info_plist() == {"CFBundleShortVersionString": "1.2.3"}
 
@@ -21,7 +23,11 @@ def test_launch_agent_plist_is_written(tmp_path, monkeypatch):
     monkeypatch.setattr(macos, "LAUNCH_AGENT_DIR", str(launch_agent_file.parent))
     monkeypatch.setattr(macos, "LAUNCH_AGENT_FILE", str(launch_agent_file))
     monkeypatch.setattr(macos, "LOG_DIR", str(tmp_path / "Logs"))
-    monkeypatch.setattr(macos.MacOSPlatform, "_get_app_executable_path", lambda self: "/Applications/ActivityTracker")
+    monkeypatch.setattr(
+        macos.MacOSPlatform,
+        "_get_app_executable_path",
+        lambda self: "/Applications/ActivityTracker",
+    )
 
     macos.MacOSPlatform()._write_launch_agent_plist()
 
@@ -32,17 +38,23 @@ def test_launch_agent_plist_is_written(tmp_path, monkeypatch):
 
 def test_get_idle_time_uses_ioreg_when_quartz_fails(monkeypatch):
     platform = macos.MacOSPlatform()
-    monkeypatch.setattr(macos.MacOSPlatform, "_idle_cache", {"time": 0.0, "value": None})
+    monkeypatch.setattr(
+        macos.MacOSPlatform, "_idle_cache", {"time": 0.0, "value": None}
+    )
     monkeypatch.setattr(macos.time, "time", lambda: 10.0)
 
     def fail_quartz(*_args):
         raise RuntimeError("Quartz unavailable")
 
-    monkeypatch.setitem(sys.modules, "Quartz", SimpleNamespace(
-        CGEventSourceSecondsSinceLastEventType=fail_quartz,
-        kCGEventSourceStateHIDSystemState=1,
-        kCGAnyInputEventType=2,
-    ))
+    monkeypatch.setitem(
+        sys.modules,
+        "Quartz",
+        SimpleNamespace(
+            CGEventSourceSecondsSinceLastEventType=fail_quartz,
+            kCGEventSourceStateHIDSystemState=1,
+            kCGAnyInputEventType=2,
+        ),
+    )
     monkeypatch.setattr(
         macos.subprocess,
         "check_output",
@@ -54,17 +66,23 @@ def test_get_idle_time_uses_ioreg_when_quartz_fails(monkeypatch):
 
 def test_get_idle_time_returns_none_when_all_sources_fail(monkeypatch):
     platform = macos.MacOSPlatform()
-    monkeypatch.setattr(macos.MacOSPlatform, "_idle_cache", {"time": 0.0, "value": None})
+    monkeypatch.setattr(
+        macos.MacOSPlatform, "_idle_cache", {"time": 0.0, "value": None}
+    )
     monkeypatch.setattr(macos.time, "time", lambda: 10.0)
 
     def fail_quartz(*_args):
         raise RuntimeError("Quartz unavailable")
 
-    monkeypatch.setitem(sys.modules, "Quartz", SimpleNamespace(
-        CGEventSourceSecondsSinceLastEventType=fail_quartz,
-        kCGEventSourceStateHIDSystemState=1,
-        kCGAnyInputEventType=2,
-    ))
+    monkeypatch.setitem(
+        sys.modules,
+        "Quartz",
+        SimpleNamespace(
+            CGEventSourceSecondsSinceLastEventType=fail_quartz,
+            kCGEventSourceStateHIDSystemState=1,
+            kCGAnyInputEventType=2,
+        ),
+    )
 
     def fail_ioreg(*_args, **_kwargs):
         raise OSError("ioreg unavailable")
