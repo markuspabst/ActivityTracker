@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from activitytracker.persistence import PersistenceManager
+from activitytracker.persistence import PersistenceManager, _read_existing_rows, _drop_contained_rows
 from activitytracker.models import TimeSegment, Day
 
 
@@ -255,6 +255,31 @@ def test_save_segments_writes_newest_rows_first(pm, tmp_path):
         rows = list(csv.DictReader(f))
     # Newest-first, including the filled idle gap between the two active segments.
     assert [row["start"] for row in rows] == ["11:00:00", "10:00:00", "09:00:00"]
+
+
+def test_save_segments_writes_multiple_days_newest_first(pm, tmp_path):
+    """When segments span multiple days, newest date+time appears first."""
+    day1 = Day(date=date(2026, 7, 1))
+    day1.segments.append(TimeSegment(
+        state="active",
+        start_time=datetime(2026, 7, 1, 9, 0, 0),
+        end_time=datetime(2026, 7, 1, 10, 0, 0),
+    ))
+    day2 = Day(date=date(2026, 7, 2))
+    day2.segments.append(TimeSegment(
+        state="active",
+        start_time=datetime(2026, 7, 2, 11, 0, 0),
+        end_time=datetime(2026, 7, 2, 12, 0, 0),
+    ))
+    pm.save_segments({date(2026, 7, 1): day1, date(2026, 7, 2): day2})
+
+    with open(pm.get_log_file_path("activities", 2026), newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+
+    assert [(row["date"], row["start"]) for row in rows] == [
+        ("2026-07-02", "11:00:00"),
+        ("2026-07-01", "09:00:00"),
+    ]
 
 
 def test_day_totals_skip_unknown_states_and_reject_negative_durations(pm, tmp_path):
@@ -997,3 +1022,144 @@ def test_filter_idle_boundary_segments_preserves_multiple_breaks_with_ongoing_ac
     assert len(filtered) == 5
     states = [s.state for s in filtered]
     assert states == ["active", "idle", "active", "idle", "active"]
+
+
+# ------------------------------------------------------------
+# CSV row helpers
+# ------------------------------------------------------------
+
+def test_read_existing_rows_skips_invalid_and_normalizes_duration(tmp_path):
+    from activitytracker.persistence import _read_existing_rows
+
+    path = tmp_path / "activities-2026.csv"
+    path.write_text(
+        "date,state,start,end,duration_min,duration_seconds\n"
+        "2026-07-01,active,09:00:00,10:00:00,60,3600\n"
+        "2026-07-01,active\n"  # truncated
+        "2026-07-01,idle,11:00:00,12:00:00,60,-60\n"  # negative duration
+        ",active,13:00:00,14:00:00,60,3600\n"  # missing date
+        "2026-07-01,bogus,15:00:00,16:00:00,60,3600\n"  # bad state
+    )
+
+    rows = _read_existing_rows(str(path))
+
+    assert set(rows.keys()) == {"2026-07-01 09:00:00", "2026-07-01 11:00:00"}
+    assert rows["2026-07-01 09:00:00"]["duration_seconds"] == "3600"
+    # Negative duration_seconds falls back to duration_min (60 min -> 3600 s).
+    assert rows["2026-07-01 11:00:00"]["duration_seconds"] == "3600"
+
+
+def test_drop_contained_rows_removes_rows_inside_new_segment():
+    from activitytracker.persistence import _drop_contained_rows
+
+    existing = {
+        "2026-07-01 09:00:00": {"date": "2026-07-01", "start": "09:00:00", "end": "09:30:00"},
+        "2026-07-01 09:15:00": {"date": "2026-07-01", "start": "09:15:00", "end": "09:45:00"},
+        "2026-07-01 10:00:00": {"date": "2026-07-01", "start": "10:00:00", "end": "11:00:00"},
+    }
+    new_rows = [
+        {"date": "2026-07-01", "start": "09:00:00", "end": "10:00:00", "state": "active"},
+    ]
+
+    _drop_contained_rows(existing, new_rows)
+
+    assert "2026-07-01 09:00:00" in existing
+    assert "2026-07-01 09:15:00" not in existing
+    assert "2026-07-01 10:00:00" in existing
+
+
+def test_drop_contained_rows_ignores_ongoing_new_segment():
+    from activitytracker.persistence import _drop_contained_rows
+
+    existing = {
+        "2026-07-01 09:00:00": {"date": "2026-07-01", "start": "09:00:00", "end": "09:30:00"},
+    }
+    new_rows = [
+        {"date": "2026-07-01", "start": "09:00:00", "end": "", "state": "active"},
+    ]
+
+    _drop_contained_rows(existing, new_rows)
+
+    assert "2026-07-01 09:00:00" in existing
+
+
+def test_segment_to_row_ongoing_segment():
+    from activitytracker.persistence import _segment_to_row
+
+    seg = TimeSegment(state="active", start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=None)
+    row = _segment_to_row(seg)
+
+    assert row["end"] == ""
+    assert row["duration_seconds"] == 0
+    assert row["duration_min"] == seg.duration_minutes
+
+
+def test_segment_to_row_missing_start_returns_none():
+    from activitytracker.persistence import _segment_to_row
+
+    seg = TimeSegment(state="active", start_time=None, end_time=None)
+    assert _segment_to_row(seg) is None
+
+
+def test_first_active_starts_per_day():
+    from activitytracker.persistence import _first_active_starts
+
+    segments = [
+        TimeSegment("active", datetime(2026, 7, 1, 9, 0, 0), datetime(2026, 7, 1, 10, 0, 0)),
+        TimeSegment("active", datetime(2026, 7, 1, 8, 0, 0), datetime(2026, 7, 1, 9, 0, 0)),
+        TimeSegment("active", datetime(2026, 7, 2, 12, 0, 0), datetime(2026, 7, 2, 13, 0, 0)),
+    ]
+
+    assert _first_active_starts(segments) == {
+        date(2026, 7, 1): datetime(2026, 7, 1, 8, 0, 0),
+        date(2026, 7, 2): datetime(2026, 7, 2, 12, 0, 0),
+    }
+
+
+def test_first_active_starts_returns_empty_without_active():
+    from activitytracker.persistence import _first_active_starts
+
+    segments = [
+        TimeSegment("idle", datetime(2026, 7, 1, 9, 0, 0), datetime(2026, 7, 1, 10, 0, 0)),
+    ]
+    assert _first_active_starts(segments) == {}
+
+
+def test_read_existing_rows_missing_file_returns_empty():
+    from activitytracker.persistence import _read_existing_rows
+
+    assert _read_existing_rows("/nonexistent/path.csv") == {}
+
+
+def test_parse_activities_row_handles_midnight_span():
+    from activitytracker.persistence import _parse_activities_row
+
+    row = {
+        "date": "2026-07-01",
+        "state": "active",
+        "start": "23:59:58",
+        "end": "00:00:00",
+    }
+    seg = _parse_activities_row(row)
+    assert seg is not None
+    assert seg.start_time == datetime(2026, 7, 1, 23, 59, 58)
+    assert seg.end_time == datetime(2026, 7, 2, 0, 0, 0)
+
+
+def test_parse_activities_row_skips_malformed_rows():
+    from activitytracker.persistence import _parse_activities_row
+
+    assert _parse_activities_row({"date": "2026-07-01", "state": "active"}) is None
+    assert _parse_activities_row({"date": "2026-07-01", "state": "active", "start": "not-a-time"}) is None
+    assert _parse_activities_row({"date": "bad-date", "state": "active", "start": "09:00:00"}) is None
+    assert _parse_activities_row({"date": "2026-07-01", "state": "unknown", "start": "09:00:00"}) is None
+
+
+def test_hms_to_seconds_accepts_hhmm_and_hhmmss():
+    from activitytracker.persistence import _hms_to_seconds
+
+    assert _hms_to_seconds("09:00") == 32400
+    assert _hms_to_seconds("09:00:30") == 32430
+    assert _hms_to_seconds("") is None
+    assert _hms_to_seconds("bad") is None
+    assert _hms_to_seconds("09:00:00:00") is None

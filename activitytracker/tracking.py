@@ -13,8 +13,8 @@ import os
 import threading
 from datetime import datetime, date, timedelta
 import datetime as _dt_module
-from typing import Optional, Dict
-from activitytracker.persistence import PersistenceManager
+from typing import Any, Dict, List, Optional
+from activitytracker.persistence import PersistenceManager, DEFAULT_IDLE_THRESHOLD_SECONDS
 from activitytracker.models import TimeSegment, Day
 
 import platformdirs
@@ -31,6 +31,11 @@ APP_NAME = "ActivityTracker"
 # to have slept/suspended; the gap is recorded as Idle (FR-1.5). Normal ticks
 # are ~5s apart, so 60s is a safe threshold for "the system was away".
 SLEEP_GAP_THRESHOLD_SECONDS = 60
+
+# Default user-configurable targets and intervals (in seconds).
+DEFAULT_TARGET_SECONDS = 8 * 3600
+DEFAULT_WEEKLY_TARGET_SECONDS = 40 * 3600
+DEFAULT_SAVE_INTERVAL_SECONDS = 3600
 
 # ------------------------------------------------------------
 # PATHS
@@ -49,7 +54,7 @@ DATA_DIR: Optional[str] = None
 # CONFIG
 # ------------------------------------------------------------
 
-def load_config():
+def load_config() -> Dict[str, Any]:
     if not os.path.exists(CONFIG_FILE):
         return {}
     try:
@@ -58,20 +63,20 @@ def load_config():
     except (IOError, json.JSONDecodeError):
         return {}
 
-def save_config(config):
+def save_config(config: Dict[str, Any]) -> None:
     os.makedirs(CONFIG_DIR, exist_ok=True)
     with open(CONFIG_FILE, 'w') as f:
         json.dump(config, f, indent=2)
 
-def get_config_value(key, default=None):
+def get_config_value(key: str, default: Any = None) -> Any:
     return load_config().get(key, default)
 
-def set_config_value(key, value):
+def set_config_value(key: str, value: Any) -> None:
     config = load_config()
     config[key] = value
     save_config(config)
 
-def get_configured_data_dir():
+def get_configured_data_dir() -> str:
     return get_config_value('data_dir', DEFAULT_BASE_DIR)
 
 
@@ -79,7 +84,7 @@ def get_state_file_path() -> str:
     os.makedirs(DEFAULT_BASE_DIR, exist_ok=True)
     return STATE_FILE
 
-def set_data_dir(path, persist: bool = False):
+def set_data_dir(path: str, persist: bool = False) -> None:
     global DATA_DIR
     DATA_DIR = path
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -111,7 +116,7 @@ class SessionTracker:
         # Timestamp of the previous tick; used to detect sleep/suspend gaps.
         self._last_tick_time: Optional[datetime] = None
 
-    def on_tick(self, idle_time: float, idle_threshold: int):
+    def on_tick(self, idle_time: float, idle_threshold: int) -> None:
         """Process a tick with consistent timestamp handling."""
         with self._lock:
             now = datetime.now().replace(microsecond=0)
@@ -186,7 +191,7 @@ class SessionTracker:
         if last_segment is not None:
             self.current_segment = last_segment
 
-    def finalize_session(self):
+    def finalize_session(self) -> None:
         # save_all_days closes live segments for persistence and restores them
         # open if the write fails, allowing a failed quit to be retried.
         self.save_all_days()
@@ -203,7 +208,7 @@ class SessionTracker:
             if self.days:
                 self.save_all_days()
 
-    def save_all_days(self):
+    def save_all_days(self) -> None:
         with self._lock:
             # Set end_time for all ongoing segments using current time
             # This ensures we save accurate duration data
@@ -215,7 +220,7 @@ class SessionTracker:
                         open_segments.append(seg)
                         seg.end_time = now
 
-            idle_threshold = getattr(self, "idle_threshold", 300)
+            idle_threshold = getattr(self, "idle_threshold", DEFAULT_IDLE_THRESHOLD_SECONDS)
             try:
                 self.pm.save_segments(self.days, idle_threshold=idle_threshold)
             except Exception:
@@ -264,7 +269,7 @@ class SessionTracker:
             else:
                 self.days = {}
 
-    def load_current_day_segments(self, preserve_current_segment: bool = False):
+    def load_current_day_segments(self, preserve_current_segment: bool = False) -> None:
         """
         Loads all segments for the current day from CSV into memory (self.days).
         This is called on startup to ensure historical data for today is present.
@@ -321,7 +326,7 @@ class SessionTracker:
             live_segment.end_time = None
             self.current_segment = live_segment
 
-    def set_locked(self, is_locked: bool):
+    def set_locked(self, is_locked: bool) -> None:
         self.is_locked = is_locked
         self.on_tick(0, 0)
 

@@ -17,6 +17,7 @@ from activitytracker import i18n
 from activitytracker import tracking
 from activitytracker.models import TimeSegment, Day
 from activitytracker.app import ActivityTrackerApp
+from activitytracker.persistence import PersistenceWriteError
 
 
 @pytest.fixture
@@ -443,6 +444,29 @@ def test_optimize_csv_merges_and_reports(app, tmp_path, optimize_ready):
     assert segs[0].end_time == datetime(2026, 7, 15, 10, 0, 0)
 
 
+def test_optimize_csv_writes_newest_first(app, tmp_path, optimize_ready):
+    """The optimized CSV file lists segments newest-start-time first."""
+    from activitytracker.persistence import PersistenceManager
+    import csv
+
+    pm = PersistenceManager(lambda: str(tmp_path))
+    D = optimize_ready
+    day = Day(D.date())
+    day.segments.append(TimeSegment(
+        "active", datetime(2026, 7, 15, 9, 0, 0), datetime(2026, 7, 15, 10, 0, 0)))
+    day.segments.append(TimeSegment(
+        "active", datetime(2026, 7, 15, 11, 0, 0), datetime(2026, 7, 15, 12, 0, 0)))
+    pm.save_segments({D.date(): day})
+
+    app.pm = pm
+    app.optimize_csv(silent=True)
+
+    path = pm.get_log_file_path("activities", D.year)
+    with open(path, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert [row["start"] for row in rows] == ["11:00:00", "10:00:00", "09:00:00"]
+
+
 def test_optimize_csv_preserves_exclusive_midnight_end(app, tmp_path, optimize_ready):
     from activitytracker.persistence import PersistenceManager
 
@@ -588,6 +612,28 @@ def test_force_save_optimizes_csv(app):
     app.force_save()
     app.optimize_csv.assert_called_once_with(silent=True)
 
+
+def test_save_and_optimize_returns_false_on_persistence_error(app):
+    app.session.save_all_days = MagicMock(side_effect=PersistenceWriteError("disk full"))
+    app.optimize_csv = MagicMock()
+    app._alert_save_failure = MagicMock()
+
+    result = app._save_and_optimize()
+
+    assert result is False
+    app.session.save_all_days.assert_called_once()
+    app.optimize_csv.assert_not_called()
+    app._alert_save_failure.assert_called_once_with(force_show=False)
+
+
+def test_save_and_optimize_force_alert_propagates_to_failure(app):
+    app.session.save_all_days = MagicMock(side_effect=PersistenceWriteError("disk full"))
+    app._alert_save_failure = MagicMock()
+
+    result = app._save_and_optimize(force_alert=True)
+
+    assert result is False
+    app._alert_save_failure.assert_called_once_with(force_show=True)
 
 
 # ------------------------------------------------------------
@@ -780,3 +826,25 @@ def test_optimize_csv_preserves_live_segment(app, tmp_path, optimize_ready):
     # The live/ongoing segment must survive: current_segment is still set
     assert app.session.current_segment is not None
     assert app.session.current_segment.state == "active"
+
+
+# ------------------------------------------------------------
+# Internal helpers
+# ------------------------------------------------------------
+
+def test_ongoing_seconds_clamps_to_zero_and_preserves_float(app):
+    assert app._ongoing_seconds(3600.7, 60) == pytest.approx(0.7)
+    assert app._ongoing_seconds(3540.0, 60) == pytest.approx(0.0)
+    assert app._ongoing_seconds(3000.0, 60) == pytest.approx(0.0)
+
+
+def test_set_config_int_stores_value_and_runs_side_effect(app):
+    app.session.idle_threshold = 0
+    app._set_config_int(
+        "idle_threshold",
+        "idle_threshold_seconds",
+        450,
+        side_effect=lambda value: setattr(app.session, "idle_threshold", value),
+    )
+    assert app.idle_threshold == 450
+    assert app.session.idle_threshold == 450

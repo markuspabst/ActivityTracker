@@ -1,6 +1,7 @@
 from __future__ import annotations
 from datetime import datetime, timedelta
 from importlib.metadata import PackageNotFoundError, version as package_version
+from typing import Any, Callable, Optional
 
 from pystray import Icon, Menu, MenuItem
 
@@ -12,30 +13,39 @@ from activitytracker.platform_layer.macos import run_on_main_thread
 
 
 class AppMenu:
-    def __init__(self, app_controller):
+    def __init__(self, app_controller: Any) -> None:
         self.app = app_controller
         self.platform = get_platform()
-        self._last_status_icon = None
+        self._last_status_icon: Optional[str] = None
         self._active_today_session = 0
         self._idle_today_session = 0
-        self._session_start = None
+        self._session_start: Optional[datetime] = None
         self._total_weekly_active = 0
         self._total_weekly_idle = 0
 
         # Create icon on main thread - critical for macOS 27
         run_on_main_thread(self._create_icon)
 
-    def _create_icon(self):
+    def _create_icon(self) -> None:
         """Create the pystray icon on the main thread."""
         self.icon = Icon("ActivityTracker", create_icon("🟡"), "ActivityTracker", Menu(self._generate_menu_items))
 
-    def run(self):
+    def run(self) -> None:
         run_on_main_thread(self.icon.run)
 
-    def stop(self):
+    def stop(self) -> None:
         run_on_main_thread(self.icon.stop)
 
-    def update_ui(self, is_idle, active_today, active_week, weekly_target, weekly_idle_week=None, idle_today=0, session_start=None):
+    def update_ui(
+        self,
+        is_idle: bool,
+        active_today: float,
+        active_week: float,
+        weekly_target: int,
+        weekly_idle_week: Optional[float] = None,
+        idle_today: float = 0,
+        session_start: Optional[datetime] = None,
+    ) -> None:
         # All values are pre-computed by the caller (app.update_ui) under the
         # session lock, so no direct access to self.app.session.days is needed.
 
@@ -79,8 +89,8 @@ class AppMenu:
 
     def _generate_menu_items(self):
         # Today progress
-        today_progress = (self._active_today_session / self.app.target_work_seconds * 100) if self.app.target_work_seconds > 0 else 0
-        weekly_progress = (self._total_weekly_active / self.app.weekly_target_seconds * 100) if self.app.weekly_target_seconds > 0 else 0
+        today_progress = (self._active_today_session / self.app.target_work_seconds * 100) if self.app.target_work_seconds > 0 else 0.0
+        weekly_progress = (self._total_weekly_active / self.app.weekly_target_seconds * 100) if self.app.weekly_target_seconds > 0 else 0.0
 
         # Generate progress bar for today
         today_bar = self._create_progress_bar(today_progress,
@@ -114,7 +124,7 @@ class AppMenu:
         yield Menu.SEPARATOR
         yield MenuItem(i18n.t("QUIT"), self.app.quit_app)
 
-    def _generate_general_settings_menu(self):
+    def _generate_general_settings_menu(self) -> Menu:
         try:
             fallback_version = package_version("ActivityTracker")
         except PackageNotFoundError:
@@ -127,10 +137,10 @@ class AppMenu:
             *self._create_daily_settings_submenu().items,
         )
 
-    def _generate_global_settings_menu(self):
+    def _generate_global_settings_menu(self) -> Menu:
         return self._create_global_settings_submenu()
 
-    def _generate_report_menu(self):
+    def _generate_report_menu(self) -> Menu:
         """Build daily statistics for today and the previous six days."""
         today = datetime.now().date()
         days = []
@@ -177,9 +187,16 @@ class AppMenu:
             days.append(MenuItem(i18n.t("REPORT_NO_DATA"), None, enabled=False))
         return Menu(*days)
 
-    def _create_daily_settings_submenu(self):
-        def _slider_callback(setter, title_key, current, factor, min_v, max_v):
-            def _callback(_):
+    def _create_daily_settings_submenu(self) -> Menu:
+        def _slider_callback(
+            setter: Callable[[int], None],
+            title_key: str,
+            current: float,
+            factor: float,
+            min_v: float,
+            max_v: float,
+        ) -> Callable:
+            def _callback(_) -> None:
                 value = self.platform.ask_slider_dialog(i18n.t(title_key), current, min_v, max_v)
                 if value is not None and value > 0:
                     setter(int(value * factor))
@@ -267,7 +284,7 @@ class AppMenu:
             MenuItem(i18n.t("SAVE_NOW"), self.app.force_save),
         )
 
-    def _create_global_settings_submenu(self):
+    def _create_global_settings_submenu(self) -> Menu:
         lang_menu_items = []
         lang_menu_items.append(MenuItem(i18n.t("LANGUAGE_SYSTEM_DEFAULT"),
             lambda *args: self.app.set_language(None),
@@ -298,8 +315,8 @@ class AppMenu:
             autostart_item,
         )
 
-    def _toggle_autostart(self):
-        def do_toggle():
+    def _toggle_autostart(self) -> None:
+        def do_toggle() -> None:
             try:
                 if self.platform.autostart_installed():
                     self.platform.uninstall_autostart()
@@ -308,5 +325,5 @@ class AppMenu:
                     self.platform.install_autostart()
             except Exception as e:
                 print(f"Autostart error: {e}")
-        
+
         run_on_main_thread(do_toggle)

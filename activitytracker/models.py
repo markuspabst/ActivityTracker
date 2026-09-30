@@ -37,12 +37,15 @@ class Day:
     @property
     def active_minutes(self) -> int:
         """Calculate total active minutes, rounded after summing precise durations."""
-        return _round_minutes(self._state_duration_seconds('active'))
+        return self._state_minutes('active')
 
     @property
     def idle_minutes(self) -> int:
         """Calculate total idle minutes, rounded after summing precise durations."""
-        return _round_minutes(self._state_duration_seconds('idle'))
+        return self._state_minutes('idle')
+
+    def _state_minutes(self, state: str) -> int:
+        return _round_minutes(self._state_duration_seconds(state))
 
     def _state_duration_seconds(self, state: str) -> float:
         total = float(sum(
@@ -60,29 +63,19 @@ class Day:
     def session_end(self) -> Optional[datetime]:
         return self.last_active_end()
 
+    def _active_segments(self) -> List[TimeSegment]:
+        return [seg for seg in self.segments if seg.state == 'active']
+
     def first_active_start(self) -> Optional[datetime]:
         """Return the start time of the first active segment, or None if no active segments."""
-        active_segments = [seg for seg in self.segments if seg.state == 'active']
-        if not active_segments:
-            return None
-        return min(seg.start_time for seg in active_segments)
+        active_segments = self._active_segments()
+        return min(seg.start_time for seg in active_segments) if active_segments else None
 
     def last_active_end(self) -> Optional[datetime]:
         """Return the end time of the last active segment with an end time, or None if no active segments."""
-        active_segments = [seg for seg in self.segments if seg.state == 'active']
-        if not active_segments:
-            return None
-        active_segments_with_end = [seg for seg in active_segments if seg.end_time]
-        if not active_segments_with_end:
-            return None
-        return max(seg.end_time for seg in active_segments_with_end)
+        active_segments_with_end = [seg for seg in self._active_segments() if seg.end_time]
+        return max(seg.end_time for seg in active_segments_with_end) if active_segments_with_end else None
 
     def total_active_seconds(self) -> float:
         """Calculate total active seconds precisely, including ongoing segment."""
-        total = float(sum(seg.duration_seconds for seg in self.segments if seg.state == 'active'))
-
-        # Add precise time elapsed for ongoing active segment
-        if self.segments and self.segments[-1].state == 'active' and self.segments[-1].end_time is None:
-            total += (datetime.now() - self.segments[-1].start_time).total_seconds()
-
-        return total
+        return self._state_duration_seconds('active')

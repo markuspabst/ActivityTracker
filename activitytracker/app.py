@@ -7,6 +7,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 import sys
+from typing import Callable
 
 from activitytracker import i18n
 from activitytracker.platform_layer import get_platform
@@ -20,8 +21,11 @@ from activitytracker.tracking import (
     reset_data_dir_to_default,
     get_configured_data_dir,
     get_state_file_path,
+    DEFAULT_TARGET_SECONDS,
+    DEFAULT_WEEKLY_TARGET_SECONDS,
+    DEFAULT_SAVE_INTERVAL_SECONDS,
 )
-from activitytracker.persistence import PersistenceManager, PersistenceWriteError
+from activitytracker.persistence import PersistenceManager, PersistenceWriteError, DEFAULT_IDLE_THRESHOLD_SECONDS
 from activitytracker.activity_tracker_menu import AppMenu
 from activitytracker.single_instance import SingleInstanceLock
 
@@ -38,10 +42,10 @@ class ActivityTrackerApp:
         self.session = SessionTracker(self.pm)
         self.session.load_current_day_segments()
 
-        self.target_work_seconds = int(get_config_value("target_seconds", 8 * 3600))
-        self.weekly_target_seconds = int(get_config_value("weekly_target_seconds", 40 * 3600))
-        self.idle_threshold = int(get_config_value("idle_threshold_seconds", 300))
-        self.write_interval = int(get_config_value("save_interval_seconds", 3600))
+        self.target_work_seconds = int(get_config_value("target_seconds", DEFAULT_TARGET_SECONDS))
+        self.weekly_target_seconds = int(get_config_value("weekly_target_seconds", DEFAULT_WEEKLY_TARGET_SECONDS))
+        self.idle_threshold = int(get_config_value("idle_threshold_seconds", DEFAULT_IDLE_THRESHOLD_SECONDS))
+        self.write_interval = int(get_config_value("save_interval_seconds", DEFAULT_SAVE_INTERVAL_SECONDS))
         self.session.idle_threshold = self.idle_threshold
 
         self.last_write_time = time.time()
@@ -96,13 +100,7 @@ class ActivityTrackerApp:
             return
 
         if time.time() - self.last_write_time >= self.write_interval:
-            try:
-                self.session.save_all_days()
-                self.optimize_csv(silent=True)
-                self.last_write_time = time.time()
-                self._clear_save_failure()
-            except PersistenceWriteError:
-                self._alert_save_failure()
+            self._save_and_optimize()
 
         self.update_ui()
 
@@ -155,14 +153,18 @@ class ActivityTrackerApp:
 
         # Calculate ongoing time for both active and idle.
         # Clamp to zero so the weekly totals can never go negative.
-        active_ongoing_seconds = max(0, active_today - (today_csv_active * 60))
-        idle_ongoing_seconds = max(0, idle_today - (today_csv_idle * 60))
+        active_ongoing_seconds = self._ongoing_seconds(active_today, today_csv_active)
+        idle_ongoing_seconds = self._ongoing_seconds(idle_today, today_csv_idle)
 
         # Add ongoing seconds to weekly totals
         total_weekly_active = (weekly_active_minutes * 60) + active_ongoing_seconds
         total_weekly_idle = (weekly_idle_minutes * 60) + idle_ongoing_seconds
 
         self.menu.update_ui(is_idle, active_today, total_weekly_active, self.weekly_target_seconds, total_weekly_idle, idle_today, session_start)
+
+    def _ongoing_seconds(self, session_seconds: float, csv_minutes: int) -> float:
+        """Return the live seconds not yet persisted to CSV, clamped to zero."""
+        return max(0.0, session_seconds - csv_minutes * 60)
 
     def quit_app(self):
         try:
@@ -175,6 +177,11 @@ class ActivityTrackerApp:
         self.menu.stop()
 
     def force_save(self):
+        # A user-initiated save should always make the failure visible,
+        # even if an automatic save already alerted during this episode.
+        return self._save_and_optimize(force_alert=True)
+
+    def _save_and_optimize(self, force_alert: bool = False) -> bool:
         try:
             self.session.save_all_days()
             self.optimize_csv(silent=True)
@@ -182,46 +189,59 @@ class ActivityTrackerApp:
             self._clear_save_failure()
             return True
         except PersistenceWriteError:
-            # A user-initiated save should always make the failure visible,
-            # even if an automatic save already alerted during this episode.
-            self._alert_save_failure(force_show=True)
+            self._alert_save_failure(force_show=force_alert)
             return False
 
-    def set_target(self, seconds):
-        self.target_work_seconds = int(seconds)
-        set_config_value("target_seconds", int(seconds))
+    def set_target(self, seconds: int | float) -> None:
+        self._set_config_int("target_work_seconds", "target_seconds", seconds)
 
-    def set_weekly_target(self, seconds):
-        self.weekly_target_seconds = int(seconds)
-        set_config_value("weekly_target_seconds", int(seconds))
+    def set_weekly_target(self, seconds: int | float) -> None:
+        self._set_config_int("weekly_target_seconds", "weekly_target_seconds", seconds)
 
-    def set_idle_threshold(self, seconds):
-        self.idle_threshold = int(seconds)
-        set_config_value("idle_threshold_seconds", int(seconds))
-        self.session.idle_threshold = self.idle_threshold
+    def set_idle_threshold(self, seconds: int | float) -> None:
+        self._set_config_int(
+            "idle_threshold",
+            "idle_threshold_seconds",
+            seconds,
+            side_effect=lambda value: setattr(self.session, "idle_threshold", value),
+        )
 
-    def set_save_interval(self, seconds):
-        self.write_interval = int(seconds)
-        set_config_value("save_interval_seconds", int(seconds))
+    def set_save_interval(self, seconds: int | float) -> None:
+        self._set_config_int("write_interval", "save_interval_seconds", seconds)
 
-    def set_language(self, code):
+    def set_language(self, code: str) -> None:
         set_config_value("locale", code)
         i18n.set_locale(code)
+
+    def _set_config_int(
+        self,
+        attr: str,
+        key: str,
+        value: int | float,
+        side_effect=None,
+    ) -> None:
+        """Store an integer config value, update the matching attribute, and
+        optionally run a side effect with the normalized value."""
+        normalized = int(value)
+        setattr(self, attr, normalized)
+        set_config_value(key, normalized)
+        if side_effect is not None:
+            side_effect(normalized)
 
     def select_data_folder(self):
         folder = self.platform.choose_folder_dialog(prompt=i18n.t("SELECT_DATA_FOLDER"))
         if not folder:
             return
-        if not self.force_save():
-            return
-        set_data_dir(folder, persist=True)
-        self.pm.clear_last_segment_write()
-        self._reload_from_current_data_folder()
+        self._switch_data_folder(lambda: set_data_dir(folder, persist=True))
 
     def reset_data_folder(self):
+        self._switch_data_folder(reset_data_dir_to_default)
+
+    def _switch_data_folder(self, change_data_dir: Callable[[], None]) -> None:
+        """Persist current state, switch the data directory, and reload the session."""
         if not self.force_save():
             return
-        reset_data_dir_to_default()
+        change_data_dir()
         self.pm.clear_last_segment_write()
         self._reload_from_current_data_folder()
 
@@ -280,8 +300,7 @@ class ActivityTrackerApp:
                 )
             return
 
-        # Get idle threshold from config (default 300 sec)
-        idle_threshold = get_config_value("idle_threshold_seconds", 300)
+        idle_threshold = get_config_value("idle_threshold_seconds", DEFAULT_IDLE_THRESHOLD_SECONDS)
 
         try:
             original_count, optimized_count = self.pm.optimize_year_file(

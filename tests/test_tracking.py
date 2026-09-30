@@ -825,6 +825,18 @@ def test_fill_gaps_first_segment_is_always_active(pm, temp_data_dir):
     assert loaded_segments[0].start_time == datetime(2026, 7, 15, 9, 0, 0)
 
 
+def test_filter_idle_boundary_segments_keeps_idle_after_ongoing_active(pm, temp_data_dir):
+    """Idle starting after an ongoing active segment is kept, not treated as trailing."""
+    segments = [
+        TimeSegment(state='active', start_time=datetime(2026, 7, 1, 9, 0, 0), end_time=None),
+        TimeSegment(state='idle', start_time=datetime(2026, 7, 1, 10, 0, 0), end_time=datetime(2026, 7, 1, 10, 30, 0)),
+    ]
+
+    filtered = PersistenceManager._filter_idle_boundary_segments(segments)
+
+    assert [seg.state for seg in filtered] == ['active', 'idle']
+
+
 def test_optimize_segments_composes_full_pipeline(pm, temp_data_dir):
     """optimize_segments applies filter -> fill gaps -> compact in one step."""
     # Leading idle (dropped), a small internal gap (absorbed into active),
