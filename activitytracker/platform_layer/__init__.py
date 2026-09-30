@@ -14,6 +14,8 @@ import time
 from pathlib import Path
 from typing import Optional, Tuple
 
+DEFAULT_SLIDER_MAX_VALUE = 100
+
 
 # ------------------------------------------------------------
 # Abstract Base
@@ -65,7 +67,7 @@ class PlatformABC(abc.ABC):
         title: str,
         current: float,
         min_value: float = 0,
-        max_value: float = 100,
+        max_value: float = DEFAULT_SLIDER_MAX_VALUE,
     ) -> Optional[float]:
         """Modal dialog with a numeric input.  Return None on cancel."""
         return None

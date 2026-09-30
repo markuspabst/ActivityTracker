@@ -54,7 +54,7 @@ def _get_system_locale():
 def load_translations(lang):
     global _translations, _lang
     locales_dir = _get_locales_dir()
-    if not lang:
+    if lang is None:
         lang = _get_system_locale()
 
     lang = lang.split("-")[0]
@@ -69,7 +69,7 @@ def load_translations(lang):
         with open(candidate, "r", encoding="utf-8") as f:
             _translations = json.load(f)
             _lang = candidate.stem
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         _translations = {}
         _lang = "en"
 
@@ -85,7 +85,7 @@ def t(key, **kwargs):
 
     try:
         return val.format(**kwargs)
-    except Exception:
+    except (KeyError, ValueError, IndexError):
         return val
 
 

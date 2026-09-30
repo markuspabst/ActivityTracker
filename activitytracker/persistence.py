@@ -98,7 +98,7 @@ def _segment_to_row(seg: TimeSegment) -> Optional[dict]:
 
     Returns ``None`` for segments without a start time.
     """
-    if not seg.start_time:
+    if seg.start_time is None:
         return None
     return {
         "date": seg.start_time.strftime("%Y-%m-%d"),

@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from typing import Optional, Tuple
 
-from activitytracker.platform_layer import PlatformABC
+from activitytracker.platform_layer import DEFAULT_SLIDER_MAX_VALUE, PlatformABC
 
 
 # ------------------------------------------------------------
@@ -64,7 +64,7 @@ try:
 
     _CAN_RUN_ON_MAIN = True
 
-except Exception:
+except ImportError:
     NSObject = None  # type: ignore
     NSLocale = None  # type: ignore
     NSLocaleIdentifier = None  # type: ignore
@@ -133,7 +133,7 @@ else:
 # ------------------------------------------------------------
 try:
     import Quartz  # type: ignore[import-untyped]
-except Exception:
+except ImportError:
     Quartz = None  # type: ignore
 
 try:
@@ -148,7 +148,7 @@ try:
         NSTextField,
         NSView,
     )
-except Exception:
+except ImportError:
     NSAlert = None  # type: ignore
     NSApplication = None  # type: ignore
     NSFont = None  # type: ignore
@@ -276,7 +276,7 @@ class MacOSPlatform(PlatformABC):
         title: str,
         current: float,
         min_value: float = 0,
-        max_value: float = 100,
+        max_value: float = DEFAULT_SLIDER_MAX_VALUE,
     ) -> Optional[float]:
         """Native dialog with a slider.
 

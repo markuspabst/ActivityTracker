@@ -20,7 +20,7 @@ class SingleInstanceLock:
     """
 
     def __init__(self):
-        if not fcntl:
+        if fcntl is None:
             return
 
         runtime_dir = platformdirs.user_runtime_dir(APP_NAME, ensure_exists=True)
@@ -31,7 +31,7 @@ class SingleInstanceLock:
         """
         Acquires the lock. Returns True if successful, False otherwise.
         """
-        if not fcntl:
+        if fcntl is None:
             return True  # Always succeed if fcntl is not available
 
         try:
@@ -58,14 +58,14 @@ class SingleInstanceLock:
         Safe to call multiple times (e.g. manually and again via the atexit
         handler registered in acquire()).
         """
-        if not fcntl or not self.fp:
+        if fcntl is None or self.fp is None:
             return
 
         try:
             fcntl.flock(self.fp.fileno(), fcntl.LOCK_UN)
             self.fp.close()
             os.remove(self.lockfile_path)
-        except Exception:
+        except OSError:
             pass
         finally:
             # Null out so a later release() (atexit) becomes a no-op.

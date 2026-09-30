@@ -276,7 +276,7 @@ class ActivityTrackerApp:
 
     def select_data_folder(self):
         folder = self.platform.choose_folder_dialog(prompt=i18n.t("SELECT_DATA_FOLDER"))
-        if not folder:
+        if folder is None:
             return
         self._switch_data_folder(lambda: set_data_dir(folder, persist=True))
 
