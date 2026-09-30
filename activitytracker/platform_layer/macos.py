@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from activitytracker.platform_layer import DEFAULT_SLIDER_MAX_VALUE, PlatformABC
+from activitytracker.persistence import atomic_write
 
 logger = logging.getLogger(__name__)
 
@@ -468,7 +469,7 @@ class MacOSPlatform(PlatformABC):
             "StandardErrorPath": LAUNCH_AGENT_ERR,
             "WorkingDirectory": str(Path(app_executable).parent),
         }
-        with open(LAUNCH_AGENT_FILE, "wb") as f:
+        with atomic_write(LAUNCH_AGENT_FILE, "wb") as f:
             plistlib.dump(plist, f)
 
     def autostart_installed(self) -> bool:

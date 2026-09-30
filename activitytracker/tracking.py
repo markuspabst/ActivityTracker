@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional
 from activitytracker.persistence import (
     PersistenceManager,
     DEFAULT_IDLE_THRESHOLD_SECONDS,
+    atomic_write,
 )
 from activitytracker.models import TimeSegment, Day
 
@@ -72,7 +73,7 @@ def load_config() -> Dict[str, Any]:
 
 def save_config(config: Dict[str, Any]) -> None:
     os.makedirs(CONFIG_DIR, exist_ok=True)
-    with open(CONFIG_FILE, "w") as f:
+    with atomic_write(CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=2)
 
 

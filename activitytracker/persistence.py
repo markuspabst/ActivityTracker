@@ -8,10 +8,31 @@ from contextlib import contextmanager
 from datetime import datetime, date, timedelta
 from itertools import groupby
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 from activitytracker.models import TimeSegment, Day
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def atomic_write(path: Union[str, Path], mode: str = "w", **kwargs) -> Iterator[Any]:
+    """Write to a temporary file and atomically replace *path* on success.
+
+    If the write fails, the original file is left untouched and the temporary
+    file is removed.
+    """
+    target = Path(path)
+    tmp_path = target.with_suffix(target.suffix + ".tmp")
+    try:
+        with open(tmp_path, mode, **kwargs) as f:
+            yield f
+        os.replace(tmp_path, target)
+    finally:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+
 
 # Constants
 ACTIVITIES_LOG_PREFIX = "activities"
@@ -403,7 +424,7 @@ class PersistenceManager:
 
         sorted_keys = sorted(existing_segments.keys(), reverse=True)
         try:
-            with open(path, "w", newline="", encoding="utf-8") as f:
+            with atomic_write(path, "w", newline="", encoding="utf-8") as f:
                 writer = csv.DictWriter(
                     f,
                     fieldnames=[
@@ -610,6 +631,7 @@ class PersistenceManager:
                 if (
                     same_day
                     and prev.end_time
+                    and seg.end_time
                     and seg.start_time
                     and prev.state == seg.state
                 ):
@@ -617,7 +639,7 @@ class PersistenceManager:
                     # operation, but corrupt/legacy/manually-edited CSV could contain
                     # them). Never create a segment with end_time < start_time.
                     if seg.start_time < prev.end_time:
-                        if seg.end_time and seg.end_time > prev.end_time:
+                        if seg.end_time > prev.end_time:
                             # Replace prev with a new copy so the original is not
                             # mutated.
                             merged[-1] = TimeSegment(
@@ -632,8 +654,7 @@ class PersistenceManager:
                         merged[-1] = TimeSegment(
                             state=prev.state,
                             start_time=prev.start_time,
-                            end_time=seg.end_time
-                            or datetime.now().replace(microsecond=0),
+                            end_time=seg.end_time,
                         )
                         continue
                 merged.append(seg)
@@ -681,7 +702,7 @@ class PersistenceManager:
         path = self._state_file_path()
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
+            with atomic_write(path, "w", encoding="utf-8") as f:
                 json.dump({"last_segment_write": when.isoformat()}, f)
         except OSError as exc:
             logger.warning("Could not persist runtime state: %s", exc)
@@ -707,7 +728,7 @@ class PersistenceManager:
             if "last_segment_write" in data:
                 del data["last_segment_write"]
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
+            with atomic_write(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
         except (OSError, json.JSONDecodeError) as exc:
             logger.warning("Could not clear runtime state: %s", exc)
