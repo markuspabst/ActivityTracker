@@ -1,5 +1,4 @@
 import plistlib
-import sys
 from types import SimpleNamespace
 
 from activitytracker.platform_layer import macos
@@ -46,8 +45,8 @@ def test_get_idle_time_uses_ioreg_when_quartz_fails(monkeypatch):
     def fail_quartz(*_args):
         raise RuntimeError("Quartz unavailable")
 
-    monkeypatch.setitem(
-        sys.modules,
+    monkeypatch.setattr(
+        macos,
         "Quartz",
         SimpleNamespace(
             CGEventSourceSecondsSinceLastEventType=fail_quartz,
@@ -74,8 +73,8 @@ def test_get_idle_time_returns_none_when_all_sources_fail(monkeypatch):
     def fail_quartz(*_args):
         raise RuntimeError("Quartz unavailable")
 
-    monkeypatch.setitem(
-        sys.modules,
+    monkeypatch.setattr(
+        macos,
         "Quartz",
         SimpleNamespace(
             CGEventSourceSecondsSinceLastEventType=fail_quartz,

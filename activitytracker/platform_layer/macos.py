@@ -21,7 +21,12 @@ from activitytracker.platform_layer import PlatformABC
 # Helper for running code on the main thread
 # ------------------------------------------------------------
 try:
-    from Foundation import NSObject  # type: ignore[import-untyped]
+    from Foundation import (  # type: ignore[import-untyped]
+        NSObject,
+        NSLocale,
+        NSLocaleIdentifier,
+        NSUserDefaults,
+    )
     import objc  # type: ignore[import-untyped]
 
     class _MainThreadRunner(NSObject):
@@ -60,6 +65,11 @@ try:
     _CAN_RUN_ON_MAIN = True
 
 except Exception:
+    NSObject = None  # type: ignore
+    NSLocale = None  # type: ignore
+    NSLocaleIdentifier = None  # type: ignore
+    NSUserDefaults = None  # type: ignore
+    objc = None  # type: ignore
     _MainThreadRunner = None  # type: ignore  # noqa
 
     def _run_on_main(func):
@@ -96,8 +106,7 @@ LAUNCH_AGENT_ERR = os.path.join(LOG_DIR, "activitytracker.err.log")
 # ------------------------------------------------------------
 # Helper ObjC class for the slider dialog
 # ------------------------------------------------------------
-try:
-    from Foundation import NSObject
+if objc is not None and NSObject is not None:
 
     class _SliderHandler(NSObject):
         """Receives NSSlider action messages and updates the value label."""
@@ -114,9 +123,45 @@ try:
             self._label.setStringValue_(f"{sender.doubleValue():.1f}")
 
     _HAS_SLIDER_HANDLER = True
-except Exception:
+else:
     _SliderHandler = None  # type: ignore  # noqa
     _HAS_SLIDER_HANDLER = False
+
+
+# ------------------------------------------------------------
+# Optional AppKit / Quartz imports (may be unavailable in non-GUI sessions)
+# ------------------------------------------------------------
+try:
+    import Quartz  # type: ignore[import-untyped]
+except Exception:
+    Quartz = None  # type: ignore
+
+try:
+    from AppKit import (  # type: ignore[import-untyped]
+        NSAlert,
+        NSApplication,
+        NSFont,
+        NSMakeRect,
+        NSOpenPanel,
+        NSSlider,
+        NSTextAlignmentCenter,
+        NSTextField,
+        NSView,
+    )
+except Exception:
+    NSAlert = None  # type: ignore
+    NSApplication = None  # type: ignore
+    NSFont = None  # type: ignore
+    NSMakeRect = None  # type: ignore
+    NSOpenPanel = None  # type: ignore
+    NSSlider = None  # type: ignore
+    NSTextAlignmentCenter = None  # type: ignore
+    NSTextField = None  # type: ignore
+    NSView = None  # type: ignore
+
+
+_NS_ALERT_FIRST_BUTTON_RETURN = 1000
+_NS_MODAL_RESPONSE_OK = 1
 
 
 class MacOSPlatform(PlatformABC):
@@ -129,9 +174,9 @@ class MacOSPlatform(PlatformABC):
 
     def is_screen_locked(self) -> bool:
         """Check if the screen is locked."""
+        if Quartz is None:
+            return False
         try:
-            import Quartz  # type: ignore[import-untyped]
-
             session_info = Quartz.CGSessionCopyCurrentDictionary()
             if session_info:
                 return session_info.get("CGSSessionScreenIsLocked", False)
@@ -146,18 +191,17 @@ class MacOSPlatform(PlatformABC):
             return self._idle_cache["value"]
 
         value = None
-        try:
-            import Quartz  # type: ignore[import-untyped]
-
-            candidate = Quartz.CGEventSourceSecondsSinceLastEventType(
-                Quartz.kCGEventSourceStateHIDSystemState,
-                Quartz.kCGAnyInputEventType,
-            )
-            candidate = float(candidate)
-            if math.isfinite(candidate) and candidate >= 0:
-                value = candidate
-        except Exception:
-            pass
+        if Quartz is not None:
+            try:
+                candidate = Quartz.CGEventSourceSecondsSinceLastEventType(
+                    Quartz.kCGEventSourceStateHIDSystemState,
+                    Quartz.kCGAnyInputEventType,
+                )
+                candidate = float(candidate)
+                if math.isfinite(candidate) and candidate >= 0:
+                    value = candidate
+            except Exception:
+                pass
 
         if value is None:
             try:
@@ -220,9 +264,9 @@ class MacOSPlatform(PlatformABC):
         return True
 
     def bring_app_to_front(self) -> None:
+        if NSApplication is None:
+            return
         try:
-            from AppKit import NSApplication  # type: ignore[import-untyped]
-
             NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
         except Exception:
             pass
@@ -247,20 +291,9 @@ class MacOSPlatform(PlatformABC):
     @_run_on_main
     def _ask_slider_native(self, title, current, min_value, max_value):
         """AppKit-based slider dialog (main thread only)."""
-        if not _HAS_SLIDER_HANDLER:
+        if not _HAS_SLIDER_HANDLER or NSAlert is None:
             return None
         try:
-            from AppKit import (  # type: ignore[import-untyped]
-                NSAlert,
-                NSApplication,
-                NSSlider,
-                NSTextField,
-                NSView,
-                NSMakeRect,
-                NSFont,
-                NSTextAlignmentCenter,
-            )
-
             alert = NSAlert.alloc().init()
             alert.setMessageText_(title)
             alert.addButtonWithTitle_("OK")
@@ -301,7 +334,7 @@ class MacOSPlatform(PlatformABC):
             )
 
             response = alert.runModal()
-            if response == 1000:  # NSAlertFirstButtonReturn
+            if response == _NS_ALERT_FIRST_BUTTON_RETURN:
                 return max(min(slider.doubleValue(), max_value), min_value)
             return None
         except Exception:
@@ -342,9 +375,9 @@ class MacOSPlatform(PlatformABC):
     @_run_on_main
     def _choose_folder_native(self, prompt: str = "") -> Optional[str]:
         """AppKit-based folder chooser (main thread only)."""
+        if NSOpenPanel is None or NSApplication is None:
+            return None
         try:
-            from AppKit import NSOpenPanel, NSApplication  # type: ignore[import-untyped]
-
             # Activate to bring the panel to the front
             NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
 
@@ -356,7 +389,7 @@ class MacOSPlatform(PlatformABC):
             if prompt:
                 panel.setMessage_(prompt)
 
-            if panel.runModal() == 1:
+            if panel.runModal() == _NS_MODAL_RESPONSE_OK:
                 return str(panel.URLs()[0].path()) if panel.URLs() else None
             return None
         except Exception:
@@ -544,9 +577,9 @@ class MacOSPlatform(PlatformABC):
     # ── Locale helpers ──────────────────────────────────────
 
     def get_system_locale(self) -> Optional[str]:
+        if NSUserDefaults is None:
+            return None
         try:
-            from Foundation import NSUserDefaults
-
             langs = NSUserDefaults.standardUserDefaults().objectForKey_(
                 "AppleLanguages"
             )
@@ -559,9 +592,9 @@ class MacOSPlatform(PlatformABC):
         return None
 
     def locale_display_name(self, code: str) -> Optional[str]:
+        if NSLocale is None or NSLocaleIdentifier is None:
+            return None
         try:
-            from Foundation import NSLocale, NSLocaleIdentifier
-
             loc = NSLocale.alloc().initWithLocaleIdentifier_(code)
             name = loc.displayNameForKey_value_(NSLocaleIdentifier, code)
             if name:

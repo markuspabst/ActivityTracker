@@ -1,6 +1,7 @@
 from __future__ import annotations
 from datetime import datetime, timedelta
 from importlib.metadata import PackageNotFoundError, version as package_version
+import logging
 from typing import Any, Callable, Optional
 
 from pystray import Icon, Menu, MenuItem  # type: ignore[import-untyped]
@@ -10,6 +11,17 @@ from activitytracker.platform_layer import get_platform
 from activitytracker.tray_icon import create_icon, get_status_icon
 from activitytracker.tracking import format_hours
 from activitytracker.platform_layer.macos import run_on_main_thread
+
+logger = logging.getLogger(__name__)
+
+_PERCENT = 100
+_SECONDS_PER_MINUTE = 60
+_SECONDS_PER_HOUR = 3600
+_MAX_DAILY_TARGET_HOURS = 24
+_MAX_WEEKLY_TARGET_HOURS = 168
+_MAX_IDLE_THRESHOLD_MINUTES = 30
+_MAX_SAVE_INTERVAL_MINUTES = 120
+_WEEKLY_PROGRESS_GREEN_THRESHOLD = 50
 
 
 class AppMenu:
@@ -82,7 +94,8 @@ class AppMenu:
             status_indicator = "✅"
         elif (
             self.app.weekly_target_seconds > 0
-            and (self._total_weekly_active / self.app.weekly_target_seconds * 100) >= 50
+            and (self._total_weekly_active / self.app.weekly_target_seconds * _PERCENT)
+            >= _WEEKLY_PROGRESS_GREEN_THRESHOLD
         ):
             status_indicator = "🟢"
         else:
@@ -104,9 +117,9 @@ class AppMenu:
         percentage still reports the true value (e.g. 112%) so exceeding the
         target stays visible.
         """
-        pct = max(0, min(100, percentage))
+        pct = max(0, min(_PERCENT, percentage))
         bar_width = 17
-        filled = int(bar_width * pct / 100)
+        filled = int(bar_width * pct / _PERCENT)
         empty = bar_width - filled
         bar = "█" * filled + "░" * empty
         return f"{current_value} │{bar}│ {target_value} ({percentage:.0f}%)"
@@ -292,11 +305,13 @@ class AppMenu:
             daily_target_menu_items.append(
                 MenuItem(
                     display_text,
-                    (lambda h_val: lambda *args: self.app.set_target(h_val * 3600))(
-                        hours
-                    ),
+                    (
+                        lambda h_val: (
+                            lambda *args: self.app.set_target(h_val * _SECONDS_PER_HOUR)
+                        )
+                    )(hours),
                     checked=lambda _item, h_val=hours: (
-                        self.app.target_work_seconds == h_val * 3600
+                        self.app.target_work_seconds == h_val * _SECONDS_PER_HOUR
                     ),
                 )
             )
@@ -308,10 +323,10 @@ class AppMenu:
                     _slider_callback(
                         self.app.set_target,
                         "ASK_DAILY_TARGET_TITLE",
-                        self.app.target_work_seconds / 3600,
-                        3600,
+                        self.app.target_work_seconds / _SECONDS_PER_HOUR,
+                        _SECONDS_PER_HOUR,
                         1.0,
-                        24.0,
+                        _MAX_DAILY_TARGET_HOURS,
                     ),
                     enabled=self.platform.supports_native_dialogs(),
                 ),
@@ -332,11 +347,13 @@ class AppMenu:
                     display_text,
                     (
                         lambda h_val: (
-                            lambda *args: self.app.set_weekly_target(h_val * 3600)
+                            lambda *args: self.app.set_weekly_target(
+                                h_val * _SECONDS_PER_HOUR
+                            )
                         )
                     )(hours),
                     checked=lambda _item, h_val=hours: (
-                        self.app.weekly_target_seconds == h_val * 3600
+                        self.app.weekly_target_seconds == h_val * _SECONDS_PER_HOUR
                     ),
                 )
             )
@@ -348,10 +365,10 @@ class AppMenu:
                     _slider_callback(
                         self.app.set_weekly_target,
                         "ASK_WEEKLY_TARGET_TITLE",
-                        self.app.weekly_target_seconds / 3600,
-                        3600,
+                        self.app.weekly_target_seconds / _SECONDS_PER_HOUR,
+                        _SECONDS_PER_HOUR,
                         1.0,
-                        168.0,
+                        _MAX_WEEKLY_TARGET_HOURS,
                     ),
                     enabled=self.platform.supports_native_dialogs(),
                 ),
@@ -367,11 +384,13 @@ class AppMenu:
                     f"{m} min",
                     (
                         lambda m_val: (
-                            lambda *args: self.app.set_idle_threshold(m_val * 60)
+                            lambda *args: self.app.set_idle_threshold(
+                                m_val * _SECONDS_PER_MINUTE
+                            )
                         )
                     )(m),
                     checked=lambda _item, m_val=m: (
-                        self.app.idle_threshold == m_val * 60
+                        self.app.idle_threshold == m_val * _SECONDS_PER_MINUTE
                     ),
                 )
             )
@@ -383,10 +402,10 @@ class AppMenu:
                     _slider_callback(
                         self.app.set_idle_threshold,
                         "ASK_IDLE_THRESHOLD_TITLE",
-                        self.app.idle_threshold / 60,
-                        60,
+                        self.app.idle_threshold / _SECONDS_PER_MINUTE,
+                        _SECONDS_PER_MINUTE,
                         1,
-                        30,
+                        _MAX_IDLE_THRESHOLD_MINUTES,
                     ),
                     enabled=self.platform.supports_native_dialogs(),
                 ),
@@ -402,11 +421,13 @@ class AppMenu:
                     f"{m} min",
                     (
                         lambda m_val: (
-                            lambda *args: self.app.set_save_interval(m_val * 60)
+                            lambda *args: self.app.set_save_interval(
+                                m_val * _SECONDS_PER_MINUTE
+                            )
                         )
                     )(m),
                     checked=lambda _item, m_val=m: (
-                        self.app.write_interval == m_val * 60
+                        self.app.write_interval == m_val * _SECONDS_PER_MINUTE
                     ),
                 )
             )
@@ -418,10 +439,10 @@ class AppMenu:
                     _slider_callback(
                         self.app.set_save_interval,
                         "ASK_SAVE_INTERVAL_TITLE",
-                        self.app.write_interval / 60,
-                        60,
+                        self.app.write_interval / _SECONDS_PER_MINUTE,
+                        _SECONDS_PER_MINUTE,
                         1,
-                        120,
+                        _MAX_SAVE_INTERVAL_MINUTES,
                     ),
                     enabled=self.platform.supports_native_dialogs(),
                 ),
@@ -496,7 +517,7 @@ class AppMenu:
                 else:
                     self.app.force_save()
                     self.platform.install_autostart()
-            except Exception as e:
-                print(f"Autostart error: {e}")
+            except Exception as exc:
+                logger.error("Autostart error: %s", exc)
 
         run_on_main_thread(do_toggle)
